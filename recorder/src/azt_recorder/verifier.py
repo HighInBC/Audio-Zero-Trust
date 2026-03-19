@@ -8,9 +8,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 import urllib.request
 import secrets
+import hashlib
 
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, ed25519
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from .config import TrustConfig
 from .models import DiscoveryAd
@@ -26,9 +27,29 @@ class TrustVerifier:
     def __init__(self, trust: TrustConfig) -> None:
         self._pubkeys: dict[str, bytes] = {}
         for item in trust.trusted_admin_keys:
-            fp = item["fingerprint_hex"]
-            pem = Path(item["public_key_pem_path"]).read_bytes()
-            self._pubkeys[fp] = pem
+            fp = str(item.get("fingerprint_hex", "")).strip().lower()
+            if not fp:
+                continue
+            pub_raw: bytes | None = None
+            pub_b64 = str(item.get("public_key_b64", "")).strip()
+            if pub_b64:
+                pub_raw = base64.b64decode(pub_b64)
+            else:
+                # Legacy PEM fallback (SPKI ed25519 public key)
+                pem_path = str(item.get("public_key_pem_path", "")).strip()
+                if pem_path:
+                    pem = Path(pem_path).read_bytes()
+                    pub = serialization.load_pem_public_key(pem)
+                    pub_raw = pub.public_bytes(
+                        serialization.Encoding.Raw,
+                        serialization.PublicFormat.Raw,
+                    )
+            if pub_raw is None or len(pub_raw) != 32:
+                continue
+            calc_fp = hashlib.sha256(pub_raw).hexdigest()
+            if calc_fp != fp:
+                continue
+            self._pubkeys[fp] = pub_raw
         self._cache: dict[tuple[str, str, str], VerifyResult] = {}
 
     async def verify_admin_certificate(self, ad: DiscoveryAd) -> VerifyResult:
@@ -64,7 +85,7 @@ class TrustVerifier:
 
     @staticmethod
     def _fetch_cert_envelope(base_url: str) -> dict:
-        raw = urllib.request.urlopen(base_url + "/api/v1/device/certificate", timeout=8).read().decode()
+        raw = urllib.request.urlopen(base_url + "/api/v0/device/certificate", timeout=8).read().decode()
         doc = json.loads(raw)
         if not doc.get("ok"):
             raise ValueError("cert_get_not_ok")
@@ -75,7 +96,7 @@ class TrustVerifier:
 
     @staticmethod
     def _parse_envelope(env: dict) -> tuple[bytes, bytes]:
-        if env.get("signature_algorithm") != "rsa-pkcs1v15-sha256":
+        if env.get("signature_algorithm") != "ed25519":
             raise ValueError("sig_alg_mismatch")
         payload_b64 = env.get("certificate_payload_b64")
         sig_b64 = env.get("signature_b64")
@@ -84,8 +105,8 @@ class TrustVerifier:
         return base64.b64decode(payload_b64), base64.b64decode(sig_b64)
 
     def _verify_signature(self, admin_fp: str, payload_raw: bytes, sig_raw: bytes) -> None:
-        pub = serialization.load_pem_public_key(self._pubkeys[admin_fp])
-        pub.verify(sig_raw, payload_raw, padding.PKCS1v15(), hashes.SHA256())
+        pub_raw = self._pubkeys[admin_fp]
+        ed25519.Ed25519PublicKey.from_public_bytes(pub_raw).verify(sig_raw, payload_raw)
 
     @staticmethod
     def _verify_payload_matches_ad(pobj: dict, ad: DiscoveryAd) -> None:
@@ -108,7 +129,7 @@ class TrustVerifier:
 
     @staticmethod
     def _fetch_attestation(base_url: str, nonce: str) -> dict:
-        raw = urllib.request.urlopen(base_url + f"/api/v1/device/attestation?nonce={nonce}", timeout=8).read().decode()
+        raw = urllib.request.urlopen(base_url + f"/api/v0/device/attestation?nonce={nonce}", timeout=8).read().decode()
         doc = json.loads(raw)
         if not doc.get("ok"):
             raise ValueError("attestation_not_ok")

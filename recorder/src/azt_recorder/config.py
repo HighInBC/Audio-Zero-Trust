@@ -22,7 +22,8 @@ class RecordingConfig:
 @dataclass
 class TrustedAdminKey:
     fingerprint_hex: str
-    public_key_pem_path: str
+    public_key_b64: str = ""
+    public_key_pem_path: str = ""  # legacy fallback
 
 
 @dataclass
@@ -68,9 +69,14 @@ def load_config(path: str | Path) -> AppConfig:
         if not isinstance(item, dict):
             continue
         fp = str(item.get("fingerprint_hex", "")).strip().lower()
+        pub_b64 = str(item.get("public_key_b64", "")).strip()
         pem_path = str(item.get("public_key_pem_path", "")).strip()
-        if fp and pem_path:
-            norm_keys.append({"fingerprint_hex": fp, "public_key_pem_path": pem_path})
+        if fp and (pub_b64 or pem_path):
+            norm_keys.append({
+                "fingerprint_hex": fp,
+                "public_key_b64": pub_b64,
+                "public_key_pem_path": pem_path,
+            })
     cfg.trust.trusted_admin_keys = norm_keys
 
     return cfg
