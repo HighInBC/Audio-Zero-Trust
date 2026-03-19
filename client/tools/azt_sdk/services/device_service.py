@@ -9,8 +9,36 @@ from tools.azt_client.http import get_json, http_json
 from tools.provision_unit import detect_device_ip_from_serial
 
 
-def state_get(*, host: str, port: int, timeout: int) -> dict:
+def _state_get_v0(*, host: str, port: int, timeout: int) -> dict:
     return get_json(f"http://{host}:{port}/api/v0/config/state", timeout=timeout)
+
+
+def _state_get_v1_legacy(*, host: str, port: int, timeout: int) -> dict:
+    return get_json(f"http://{host}:{port}/api/v1/config/state", timeout=timeout)
+
+
+def state_get(*, host: str, port: int, timeout: int) -> dict:
+    # Preferred current API major.
+    st = _state_get_v0(host=host, port=port, timeout=timeout)
+    if st.get("ok"):
+        return st
+
+    # If the device still serves legacy v1 endpoints, surface a clear major-mismatch error
+    # instead of a raw HTTP_404 to guide upgrade path.
+    st_v1 = _state_get_v1_legacy(host=host, port=port, timeout=timeout)
+    if st_v1.get("ok"):
+        return {
+            "ok": False,
+            "error": "ERR_API_MAJOR_MISMATCH",
+            "detail": "firmware API major=1, client API major=0; update firmware/client to matching majors",
+            "payload": {
+                "client_api_major": 0,
+                "firmware_api_major": 1,
+                "legacy_state": st_v1,
+            },
+        }
+
+    return st
 
 
 def attestation_get(*, host: str, port: int, timeout: int, nonce: str) -> dict:
