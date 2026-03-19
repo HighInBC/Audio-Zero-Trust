@@ -16,6 +16,8 @@ class DeviceWorkerState:
     name: str
     started_at: datetime
     task: asyncio.Task
+    admin_fp: str
+    cert_serial: str
 
 
 class Supervisor:
@@ -28,9 +30,20 @@ class Supervisor:
 
     async def ensure_worker(self, ad: DiscoveryAd) -> None:
         fp = ad.device_key_fingerprint_hex
+        admin_fp = ad.admin_key_fingerprint_hex.lower().strip()
+        cert_serial = ad.certificate_serial.strip()
+
         if fp in self._workers:
-            self._workers[fp].source_ip = ad.source_ip
-            return
+            st = self._workers[fp]
+            st.source_ip = ad.source_ip
+
+            # If worker is still active, keep it.
+            if not st.task.done():
+                return
+
+            # If worker stopped, only allow restart on re-authorization material change.
+            if st.admin_fp == admin_fp and st.cert_serial == cert_serial:
+                return
 
         session = RecordingSession(ad=ad, cfg=self._recording_cfg)
         task = asyncio.create_task(session.run_forever(), name=f"rec-{fp[:12]}")
@@ -40,6 +53,8 @@ class Supervisor:
             name=ad.device_name,
             started_at=datetime.now(UTC),
             task=task,
+            admin_fp=admin_fp,
+            cert_serial=cert_serial,
         )
         print(f"[worker] START device={ad.device_name} fp={fp[:12]}.. ip={ad.source_ip}")
 

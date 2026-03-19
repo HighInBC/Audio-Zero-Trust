@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +14,8 @@ import subprocess
 import tarfile
 import time
 import urllib.request
+
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from .config import RecordingConfig
 from .models import DiscoveryAd
@@ -26,6 +31,76 @@ def make_azt_filename(common_name: str, ts: datetime) -> str:
     # <commonname>-<zulu time>.azt
     # Example: Livingroom-2026-03-13T13:56:02Z.azt
     return f"{_sanitize_common_name(common_name)}-{ts.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}.azt"
+
+
+class AuthorizationError(RuntimeError):
+    pass
+
+
+def _readline_limited(resp, max_len: int = 1 << 20) -> bytes:
+    line = resp.readline(max_len + 1)
+    if not line or not line.endswith(b"\n") or len(line) > max_len:
+        raise AuthorizationError("stream_header_line_invalid")
+    return line
+
+
+def _preflight_stream_header(resp, expected_device_fp_hex: str) -> bytes:
+    prefix = bytearray()
+
+    magic = _readline_limited(resp, max_len=16)
+    prefix.extend(magic)
+    if magic != b"AZT1\n":
+        raise AuthorizationError("stream_magic_invalid")
+
+    header_line = _readline_limited(resp)
+    sig_line = _readline_limited(resp)
+    prefix.extend(header_line)
+    prefix.extend(sig_line)
+
+    header_raw = header_line[:-1]  # remove trailing LF
+    try:
+        plain = json.loads(header_raw.decode("utf-8"))
+    except Exception as e:
+        raise AuthorizationError("stream_header_json_invalid") from e
+
+    pub_b64 = str(plain.get("this_header_signing_key_b64") or "")
+    fp_hex = str(plain.get("this_header_signing_key_fingerprint_hex") or "").lower().strip()
+    if not pub_b64 or len(fp_hex) != 64:
+        raise AuthorizationError("stream_header_signing_key_missing")
+
+    try:
+        pub_raw = base64.b64decode(pub_b64)
+    except Exception as e:
+        raise AuthorizationError("stream_header_signing_key_b64_invalid") from e
+    calc_fp = hashlib.sha256(pub_raw).hexdigest()
+    if calc_fp != fp_hex:
+        raise AuthorizationError("stream_header_signing_key_fp_mismatch")
+
+    expected = expected_device_fp_hex.lower().strip()
+    if fp_hex != expected:
+        raise AuthorizationError("stream_header_signing_key_not_authorized")
+
+    try:
+        sig_raw = base64.b64decode(sig_line.strip())
+        ed25519.Ed25519PublicKey.from_public_bytes(pub_raw).verify(sig_raw, header_raw)
+    except Exception as e:
+        raise AuthorizationError("stream_header_signature_invalid") from e
+
+    len_bytes = resp.read(2)
+    if len(len_bytes) != 2:
+        raise AuthorizationError("stream_next_header_len_missing")
+    prefix.extend(len_bytes)
+    n = int.from_bytes(len_bytes, "big")
+    if n == 0xFFFF:
+        dec_line = _readline_limited(resp)
+        prefix.extend(dec_line)
+    else:
+        enc = resp.read(n)
+        if len(enc) != n:
+            raise AuthorizationError("stream_next_header_bytes_missing")
+        prefix.extend(enc)
+
+    return bytes(prefix)
 
 
 def _run_checked(cmd: list[str], *, err_code: str) -> None:
@@ -163,6 +238,9 @@ class RecordingSession:
                     await self._run_single_rollover(out_dir)
                     # normal rollover => immediate next file
                     break
+                except AuthorizationError as e:
+                    print(f"[record] AUTH_FAIL device={self.ad.device_name} ip={self.ad.source_ip} err={e}; worker halted pending re-authorization")
+                    return
                 except Exception as e:
                     print(f"[record] error device={self.ad.device_name} ip={self.ad.source_ip} err={e} backoff={backoff}s")
                     await asyncio.sleep(backoff)
@@ -213,6 +291,11 @@ class RecordingSession:
 
     def _stream_to_file(self, req: urllib.request.Request, out_path: Path, deadline_monotonic: float) -> None:
         with urllib.request.urlopen(req, timeout=30) as resp, open(out_path, "wb") as f:
+            # Enforce authorization at stream start by verifying outer-header signature
+            # and binding to the already authorized device signing fingerprint.
+            prefix = _preflight_stream_header(resp, self.ad.device_key_fingerprint_hex)
+            f.write(prefix)
+
             while True:
                 if time.monotonic() >= deadline_monotonic:
                     return
