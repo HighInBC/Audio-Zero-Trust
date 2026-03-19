@@ -84,7 +84,7 @@ Required keys used by current validators/generator:
 When `device_certificate` is present, it should contain at minimum:
 
 - `certificate_payload_b64`
-- `signature_algorithm` = `"rsa-pss-sha256"`
+- `signature_algorithm` = `"ed25519"`
 - `signature_b64`
 
 and the decoded payload should bind the signing key identity in the stream (device sign pubkey/fingerprint/chip id), enabling offline provenance verification against trusted admin public keys.
