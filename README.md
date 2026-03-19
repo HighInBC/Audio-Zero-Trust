@@ -9,6 +9,8 @@ ESP32 firmware and host tooling for asymmetrically encrypted, integrity-chained 
 - `firmware/audio_zero_trust/`
   - main entrypoint: `src/main.cpp`
 
+Current hardware target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
+
 ## Repository scope (publishable)
 
 This repo is kept focused on code, tooling, and specs needed to build, flash, provision, stream, and validate.
