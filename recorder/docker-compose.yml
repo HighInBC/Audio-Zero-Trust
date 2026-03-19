@@ -1,0 +1,12 @@
+services:
+  azt-recorder:
+    build: .
+    image: azt-recorder:dev
+    container_name: azt-recorder-dev
+    restart: unless-stopped
+    user: "1000:1000"
+    network_mode: host
+    command: ["--config", "/config/recorder.yaml"]
+    volumes:
+      - ./config:/config:ro
+      - ./data/recordings:/data/recordings

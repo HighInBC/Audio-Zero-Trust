@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+import urllib.request
+import secrets
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, ed25519
+
+from .config import TrustConfig
+from .models import DiscoveryAd
+
+
+@dataclass
+class VerifyResult:
+    ok: bool
+    reason: str
+
+
+class TrustVerifier:
+    def __init__(self, trust: TrustConfig) -> None:
+        self._pubkeys: dict[str, bytes] = {}
+        for item in trust.trusted_admin_keys:
+            fp = item["fingerprint_hex"]
+            pem = Path(item["public_key_pem_path"]).read_bytes()
+            self._pubkeys[fp] = pem
+        self._cache: dict[tuple[str, str, str], VerifyResult] = {}
+
+    async def verify_admin_certificate(self, ad: DiscoveryAd) -> VerifyResult:
+        admin_fp = ad.admin_key_fingerprint_hex.strip().lower()
+        cert_sn = ad.certificate_serial.strip()
+        device_fp = ad.device_key_fingerprint_hex.strip().lower()
+
+        if not admin_fp:
+            return VerifyResult(False, "no_admin_fp")
+        if not cert_sn:
+            return VerifyResult(False, "no_certificate_serial")
+        if admin_fp not in self._pubkeys:
+            return VerifyResult(False, "admin_pubkey_unknown")
+
+        ck = (device_fp, admin_fp, cert_sn)
+        if ck in self._cache:
+            return self._cache[ck]
+
+        try:
+            env = await asyncio.to_thread(self._fetch_cert_envelope, ad.base_url)
+            payload_raw, sig_raw = self._parse_envelope(env)
+            self._verify_signature(admin_fp, payload_raw, sig_raw)
+            pobj = json.loads(payload_raw.decode("utf-8"))
+            self._verify_payload_matches_ad(pobj, ad)
+            self._verify_payload_time(pobj)
+            self._verify_device_attestation(ad, pobj)
+            vr = VerifyResult(True, "certificate_and_attestation_verified")
+        except Exception as e:
+            vr = VerifyResult(False, f"certificate_verify_failed:{type(e).__name__}")
+
+        self._cache[ck] = vr
+        return vr
+
+    @staticmethod
+    def _fetch_cert_envelope(base_url: str) -> dict:
+        raw = urllib.request.urlopen(base_url + "/api/v1/device/certificate", timeout=8).read().decode()
+        doc = json.loads(raw)
+        if not doc.get("ok"):
+            raise ValueError("cert_get_not_ok")
+        env = doc.get("certificate")
+        if not isinstance(env, dict):
+            raise ValueError("cert_env_missing")
+        return env
+
+    @staticmethod
+    def _parse_envelope(env: dict) -> tuple[bytes, bytes]:
+        if env.get("signature_algorithm") != "rsa-pkcs1v15-sha256":
+            raise ValueError("sig_alg_mismatch")
+        payload_b64 = env.get("certificate_payload_b64")
+        sig_b64 = env.get("signature_b64")
+        if not isinstance(payload_b64, str) or not isinstance(sig_b64, str):
+            raise ValueError("envelope_fields_missing")
+        return base64.b64decode(payload_b64), base64.b64decode(sig_b64)
+
+    def _verify_signature(self, admin_fp: str, payload_raw: bytes, sig_raw: bytes) -> None:
+        pub = serialization.load_pem_public_key(self._pubkeys[admin_fp])
+        pub.verify(sig_raw, payload_raw, padding.PKCS1v15(), hashes.SHA256())
+
+    @staticmethod
+    def _verify_payload_matches_ad(pobj: dict, ad: DiscoveryAd) -> None:
+        if pobj.get("device_sign_fingerprint_hex", "").lower() != ad.device_key_fingerprint_hex.lower():
+            raise ValueError("device_fp_mismatch")
+        if pobj.get("admin_signer_fingerprint_hex", "").lower() != ad.admin_key_fingerprint_hex.lower():
+            raise ValueError("admin_fp_mismatch")
+        if str(pobj.get("certificate_serial", "")) != ad.certificate_serial:
+            raise ValueError("cert_serial_mismatch")
+
+    @staticmethod
+    def _verify_payload_time(pobj: dict) -> None:
+        vfrom = str(pobj.get("valid_from_utc", ""))
+        vuntil = str(pobj.get("valid_until_utc", ""))
+        t_from = datetime.strptime(vfrom, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        t_until = datetime.strptime(vuntil, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        now = datetime.now(UTC)
+        if now < t_from or now > t_until:
+            raise ValueError("cert_not_current")
+
+    @staticmethod
+    def _fetch_attestation(base_url: str, nonce: str) -> dict:
+        raw = urllib.request.urlopen(base_url + f"/api/v1/device/attestation?nonce={nonce}", timeout=8).read().decode()
+        doc = json.loads(raw)
+        if not doc.get("ok"):
+            raise ValueError("attestation_not_ok")
+        return doc
+
+    @staticmethod
+    def _verify_device_attestation(ad: DiscoveryAd, cert_payload: dict) -> None:
+        nonce = "rec-" + secrets.token_hex(12)
+        att = TrustVerifier._fetch_attestation(ad.base_url, nonce)
+
+        payload = att.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("attestation_payload_missing")
+        if payload.get("nonce") != nonce:
+            raise ValueError("attestation_nonce_mismatch")
+        if payload.get("device_sign_fingerprint_hex", "").lower() != ad.device_key_fingerprint_hex.lower():
+            raise ValueError("attestation_device_fp_mismatch")
+        if payload.get("device_sign_public_key_b64", "") != cert_payload.get("device_sign_public_key_b64", ""):
+            raise ValueError("attestation_device_pubkey_mismatch")
+        if att.get("signature_algorithm") != "ed25519":
+            raise ValueError("attestation_sig_alg")
+
+        sig = base64.b64decode(att.get("signature_b64", ""))
+        pub_raw = base64.b64decode(payload.get("device_sign_public_key_b64", ""))
+        msg = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ed25519.Ed25519PublicKey.from_public_bytes(pub_raw).verify(sig, msg)

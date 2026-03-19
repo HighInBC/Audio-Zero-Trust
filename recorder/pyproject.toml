@@ -1,0 +1,16 @@
+[project]
+name = "azt-recorder"
+version = "0.1.0"
+description = "Audio Zero Trust discovery + recording supervisor"
+requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0",
+  "cryptography>=42.0.0",
+]
+
+[project.scripts]
+azt-recorder = "azt_recorder.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

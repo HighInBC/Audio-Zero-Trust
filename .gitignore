@@ -38,3 +38,8 @@ client/tools/vlc_live_sample*.wav
 # Local cloned helper repos
 client/tools/improv-sdk-cpp/
 client/tools/improv-wifi-serial-client/
+
+# Recorder local runtime/config data (never commit local keys/recordings)
+recorder/config/
+recorder/data/
+recorder/*.log
