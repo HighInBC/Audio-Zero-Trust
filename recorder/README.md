@@ -2,6 +2,8 @@
 
 Discovery + trust-decision daemon for Audio Zero Trust microphones.
 
+This is NOT yet ready for consumption!
+
 ## What this iteration does
 
 - Loads YAML config
