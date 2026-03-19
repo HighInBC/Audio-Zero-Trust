@@ -34,9 +34,8 @@ namespace azt {
 #define AZT_STR2(x) #x
 #define AZT_STR(x) AZT_STR2(x)
 
-// Default embedded OTA signer key (ed25519 public_key_b64). Empty means
-// OTA must be configured with an explicit signer override during provisioning.
-static const char* kOtaSignerPublicKeyPem = "";
+// Default embedded OTA signer key (ed25519 public_key_b64).
+static const char* kOtaSignerPublicKeyPem = "6n6Ge+vZPN6HC+09FrDdBTlaEzQ0di799FuFCg+XR78=";
 
 static String json_quote(const String& in) {
   String out = "\"";
