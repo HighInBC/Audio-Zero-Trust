@@ -1,0 +1,1791 @@
+#include "azt_http_api.h"
+
+#include <ArduinoJson.h>
+#include <algorithm>
+#include <vector>
+#include <mbedtls/base64.h>
+#include <IPAddress.h>
+#include <Preferences.h>
+#include <sodium.h>
+#include <LittleFS.h>
+#include <Update.h>
+#include <mbedtls/sha256.h>
+#include <esp_system.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+#include <esp_task_wdt.h>
+#include <time.h>
+
+#include "azt_config.h"
+#include "azt_crypto.h"
+#include "azt_discovery.h"
+#include "azt_stream.h"
+
+namespace azt {
+
+#ifndef AZT_BUILD_NUMBER
+#define AZT_BUILD_NUMBER 0
+#endif
+
+#ifndef AZT_BUILD_ID
+#define AZT_BUILD_ID dev
+#endif
+
+#define AZT_STR2(x) #x
+#define AZT_STR(x) AZT_STR2(x)
+
+static const char* kOtaSignerPublicKeyPem =
+    "-----BEGIN PUBLIC KEY-----\n"
+    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAufIaBCW1Pah3t/GAhWgf\n"
+    "gdfYEVlmxnlCGCORWwL/kjh5wp5RQIFM9gS3/+rL+wpZvHIPdYz1JoRaWzEMY1uE\n"
+    "MAuCuiMvuEDthNNdy9iggBa03dy86nFQTnlYj5BZ7ok/Rgk5k/ZiumHXgmT6cR8s\n"
+    "TrjKtgrvgjbEwjjNYDV56jlnxq2JDH/hMEude8rUH27EjsU2orypK3yBiGocp1Fk\n"
+    "jApLYjmGNGE7Fvdq7RVPnU990MTkprGXMb8hVcVAccmkafxdvlM1N2AOHuKDv6Aw\n"
+    "kraFJjGT+oap/skY0Blbrlgs7502CoD/bQg0PCzJFX+qhNWipe5qZo0p3agMUs+k\n"
+    "0wIDAQAB\n"
+    "-----END PUBLIC KEY-----\n";
+
+static String json_quote(const String& in) {
+  String out = "\"";
+  for (size_t i = 0; i < in.length(); ++i) {
+    char c = in[i];
+    if (c == '\\' || c == '"') {
+      out += '\\';
+      out += c;
+    } else if (c == '\n') {
+      out += "\\n";
+    } else if (c == '\r') {
+      out += "\\r";
+    } else if (c == '\t') {
+      out += "\\t";
+    } else {
+      out += c;
+    }
+  }
+  out += "\"";
+  return out;
+}
+
+static String wrap_pem(const char* begin_label, const char* end_label, const uint8_t* der, size_t der_len) {
+  String b64der = b64(der, der_len);
+  String out;
+  out.reserve(strlen(begin_label) + strlen(end_label) + b64der.length() + 32);
+  out += begin_label;
+  out += "\n";
+  for (size_t i = 0; i < b64der.length(); i += 64) {
+    out += b64der.substring(i, std::min<size_t>(i + 64, b64der.length()));
+    out += "\n";
+  }
+  out += end_label;
+  out += "\n";
+  return out;
+}
+
+static bool ed25519_pub_raw_to_spki_pem(const String& raw_b64, String& out_pem) {
+  out_pem = "";
+  std::vector<uint8_t> raw;
+  if (!b64_decode_vec(raw_b64, raw)) return false;
+  if (raw.size() != 32) return false;
+
+  // DER SubjectPublicKeyInfo for Ed25519 (OID 1.3.101.112):
+  // 30 2A 30 05 06 03 2B 65 70 03 21 00 <32-byte key>
+  uint8_t der[44] = {
+      0x30, 0x2A,
+      0x30, 0x05,
+      0x06, 0x03, 0x2B, 0x65, 0x70,
+      0x03, 0x21, 0x00,
+  };
+  memcpy(der + 12, raw.data(), 32);
+
+  out_pem = wrap_pem("-----BEGIN PUBLIC KEY-----", "-----END PUBLIC KEY-----", der, sizeof(der));
+  return true;
+}
+
+static String parse_query_param(const String& path, const char* key) {
+  int q = path.indexOf('?');
+  if (q < 0) return "";
+  String query = path.substring(q + 1);
+  String token = String(key) + "=";
+  int k = query.indexOf(token);
+  if (k < 0) return "";
+  int start = k + token.length();
+  int end = query.indexOf('&', start);
+  String v = (end < 0) ? query.substring(start) : query.substring(start, end);
+  v.trim();
+  return v;
+}
+
+static String ui_content_type_for_path(const String& path) {
+  if (path.endsWith(".html")) return "text/html; charset=utf-8";
+  if (path.endsWith(".css")) return "text/css; charset=utf-8";
+  if (path.endsWith(".js")) return "application/javascript; charset=utf-8";
+  if (path.endsWith(".json")) return "application/json";
+  if (path.endsWith(".txt")) return "text/plain; charset=utf-8";
+  return "application/octet-stream";
+}
+
+static bool read_littlefs_text_file(const String& path, String& out_body) {
+  out_body = "";
+  if (!LittleFS.begin(false)) return false;
+  File f = LittleFS.open(path, "r");
+  if (!f) return false;
+
+  out_body.reserve(static_cast<size_t>(f.size()));
+  while (f.available()) {
+    out_body += static_cast<char>(f.read());
+  }
+  f.close();
+  return true;
+}
+
+static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETKEYBYTES]) {
+  Preferences p;
+  if (!p.begin("aztcfg", true)) return false;
+  String sk_b64 = p.getString("dev_sign_priv", "");
+  p.end();
+  if (sk_b64.length() == 0) return false;
+
+  size_t olen = 0;
+  int rc = mbedtls_base64_decode(out_sk,
+                                 crypto_sign_ed25519_SECRETKEYBYTES,
+                                 &olen,
+                                 reinterpret_cast<const unsigned char*>(sk_b64.c_str()),
+                                 sk_b64.length());
+  if (rc != 0) return false;
+  return olen == crypto_sign_ed25519_SECRETKEYBYTES;
+}
+
+static bool parse_wifi_values_variant(JsonVariant w, String& ssid, String& pass) {
+  if (w.isNull() || !w.is<JsonObject>()) return false;
+  const char* s = w["ssid"] | "";
+  const char* p = w["password"] | "";
+  if (strlen(s) == 0 || strlen(p) == 0) return false;
+  ssid = String(s);
+  pass = String(p);
+  return true;
+}
+
+bool parse_wifi_values(JsonDocument& doc, String& ssid, String& pass) {
+  return parse_wifi_values_variant(doc["wifi"], ssid, pass);
+}
+
+static bool is_valid_ipv4_str(const String& s) {
+  IPAddress ip;
+  return ip.fromString(s);
+}
+
+static bool parse_authorized_listener_ips_variant(JsonVariant v, String& out_csv) {
+  out_csv = "";
+  if (v.isNull()) return true;  // optional
+  if (!v.is<JsonArray>()) return false;
+
+  JsonArray arr = v.as<JsonArray>();
+  bool first = true;
+  for (JsonVariant item : arr) {
+    if (!item.is<const char*>()) return false;
+    String ip = String(item.as<const char*>());
+    ip.trim();
+    if (!is_valid_ipv4_str(ip)) return false;
+    if (!first) out_csv += ",";
+    out_csv += ip;
+    first = false;
+  }
+  return true;
+}
+
+static bool parse_authorized_listener_ips(JsonDocument& doc, String& out_csv) {
+  return parse_authorized_listener_ips_variant(doc["authorized_listener_ips"], out_csv);
+}
+
+static bool parse_time_servers_variant(JsonVariant t, String& out_csv) {
+  out_csv = "";
+  if (t.isNull() || !t.is<JsonObject>()) return false;
+
+  JsonVariant s = t["server"];
+  if (s.is<const char*>()) {
+    String server = String(s.as<const char*>());
+    server.trim();
+    if (server.length() == 0) return false;
+    out_csv = server;
+    return true;
+  }
+
+  JsonVariant a = t["servers"];
+  if (a.isNull()) return false;
+  if (!a.is<JsonArray>()) return false;
+  bool first = true;
+  for (JsonVariant item : a.as<JsonArray>()) {
+    if (!item.is<const char*>()) return false;
+    String server = String(item.as<const char*>());
+    server.trim();
+    if (server.length() == 0) return false;
+    if (!first) out_csv += ",";
+    out_csv += server;
+    first = false;
+  }
+  return out_csv.length() > 0;
+}
+
+static bool parse_time_servers(JsonDocument& doc, String& out_csv) {
+  return parse_time_servers_variant(doc["time"], out_csv);
+}
+
+static bool build_mic_cert_signed_payload(const JsonDocument& doc, String& out_payload) {
+  const int cert_version = doc["certificate_version"] | 0;
+  const char* cert_type = doc["certificate_type"] | "";
+  const char* dev_pub = doc["device_sign_public_key_b64"] | "";
+  const char* dev_fp = doc["device_sign_fingerprint_hex"] | "";
+  const char* chip_id = doc["device_chip_id_hex"] | "";
+  const char* admin_fp = doc["admin_signer_fingerprint_hex"] | "";
+  const char* valid_from = doc["valid_from_utc"] | "";
+  const char* valid_until = doc["valid_until_utc"] | "";
+  const char* serial = doc["certificate_serial"] | "";
+  const char* sig_alg = doc["signature_algorithm"] | "";
+
+  if (cert_version != 1 || strlen(cert_type) == 0 || strlen(dev_pub) == 0 || strlen(dev_fp) != 64 || strlen(chip_id) != 16 ||
+      strlen(admin_fp) != 64 || strlen(valid_from) == 0 ||
+      strlen(valid_until) == 0 || strlen(serial) == 0 || String(sig_alg) != "rsa-pss-sha256") {
+    return false;
+  }
+
+  out_payload = "{";
+  out_payload += "\"certificate_version\":1,";
+  out_payload += "\"certificate_type\":\"" + String(cert_type) + "\",";
+  out_payload += "\"device_sign_public_key_b64\":\"" + String(dev_pub) + "\",";
+  out_payload += "\"device_sign_fingerprint_hex\":\"" + String(dev_fp) + "\",";
+  out_payload += "\"device_chip_id_hex\":\"" + String(chip_id) + "\",";
+  out_payload += "\"admin_signer_fingerprint_hex\":\"" + String(admin_fp) + "\",";
+  out_payload += "\"valid_from_utc\":\"" + String(valid_from) + "\",";
+  out_payload += "\"valid_until_utc\":\"" + String(valid_until) + "\",";
+  out_payload += "\"certificate_serial\":\"" + String(serial) + "\",";
+  out_payload += "\"signature_algorithm\":\"rsa-pss-sha256\"";
+  out_payload += "}";
+  return true;
+}
+
+static bool is_remote_ip_authorized(const AppState& state, const String& remote_ip) {
+  if (state.authorized_listener_ips_csv.length() == 0) return true;
+
+  int start = 0;
+  while (start <= state.authorized_listener_ips_csv.length()) {
+    int comma = state.authorized_listener_ips_csv.indexOf(',', start);
+    String token = (comma < 0)
+                       ? state.authorized_listener_ips_csv.substring(start)
+                       : state.authorized_listener_ips_csv.substring(start, comma);
+    token.trim();
+    if (token == remote_ip) return true;
+    if (comma < 0) break;
+    start = comma + 1;
+  }
+  return false;
+}
+
+static bool parse_rsa_key_object(JsonDocument& doc,
+                                 const char* field_name,
+                                 String& out_pem,
+                                 String& out_fp) {
+  JsonVariant k = doc[field_name];
+  if (k.isNull() || !k.is<JsonObject>()) return false;
+  const char* alg = k["alg"] | "";
+  const char* pem = k["public_key_pem"] | "";
+  const char* fp_alg = k["fingerprint_alg"] | "";
+  const char* fp_hex = k["fingerprint_hex"] | "";
+  if (String(alg) != "rsa-oaep-sha256") return false;
+  if (String(fp_alg) != "sha256-spki-der") return false;
+  if (strlen(pem) < 32 || strlen(fp_hex) != 64) return false;
+  String computed;
+  if (!compute_pubkey_spki_sha256_hex(String(pem), computed)) return false;
+  if (computed != String(fp_hex)) return false;
+  out_pem = String(pem);
+  out_fp = String(fp_hex);
+  return true;
+}
+
+bool parse_header_key_values(JsonDocument& doc, String& admin_pem, String& admin_fp) {
+  return parse_rsa_key_object(doc, "admin_key", admin_pem, admin_fp);
+}
+
+static bool verify_config_signature_envelope(JsonDocument& doc,
+                                             const String& expected_signer_fp,
+                                             const String& signer_pub_pem,
+                                             String& out_err_detail) {
+  out_err_detail = "";
+
+  String sig_alg = String((const char*)(doc["signature"]["alg"] | "none"));
+  const char* signer_fp = doc["signature"]["signer_fingerprint_hex"] | "";
+  const char* signed_payload_b64 = doc["signature"]["signed_payload_b64"] | "";
+  const char* sig_b64 = doc["signature"]["sig_b64"] | "";
+
+  if (sig_alg == "none") {
+    out_err_detail = "signature alg none is not allowed";
+    return false;
+  }
+  if (strlen(signer_fp) != 64 || strlen(signed_payload_b64) == 0 || strlen(sig_b64) == 0) {
+    out_err_detail = "missing signature fields";
+    return false;
+  }
+  if (String(signer_fp) != expected_signer_fp) {
+    out_err_detail = "signer fingerprint does not match expected admin";
+    return false;
+  }
+
+  std::vector<uint8_t> signed_payload_raw;
+  if (!b64_decode_vec(String(signed_payload_b64), signed_payload_raw) || signed_payload_raw.empty()) {
+    out_err_detail = "signed_payload_b64 invalid";
+    return false;
+  }
+
+  if (!verify_rsa_pss_sha256_signature(signer_pub_pem, signed_payload_raw, String(sig_b64))) {
+    out_err_detail = "signature verification failed";
+    return false;
+  }
+
+  JsonDocument unsigned_doc;
+  unsigned_doc.set(doc);
+  unsigned_doc.remove("signature");
+  String canonical;
+  serializeJson(unsigned_doc, canonical);
+
+  String signed_payload_text;
+  signed_payload_text.reserve(signed_payload_raw.size());
+  for (uint8_t b : signed_payload_raw) signed_payload_text += static_cast<char>(b);
+
+  if (signed_payload_text != canonical) {
+    out_err_detail = "signed payload mismatch";
+    return false;
+  }
+
+  return true;
+}
+
+static HttpDispatchResult handle_config_post_json(AppState& state,
+                                                  const String& body,
+                                                  bool allow_ota_signer_override) {
+  HttpDispatchResult r{};
+  r.content_type = "application/json";
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid json\",\"json_error\":" + json_quote(String(err.c_str())) + ",\"body_len\":" + String(body.length()) + "}";
+    return r;
+  }
+
+  int v = doc["config_version"] | 0;
+  if (v != 1) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"config_version must be 1\"}";
+    return r;
+  }
+
+  String new_admin_pem, new_admin_fp;
+  if (!parse_header_key_values(doc, new_admin_pem, new_admin_fp)) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid admin_key object\"}";
+    return r;
+  }
+
+  String new_recording_pem = new_admin_pem;
+  String new_recording_fp = new_admin_fp;
+  JsonVariant rk = doc["recording_key"];
+  if (!rk.isNull()) {
+    if (!parse_rsa_key_object(doc, "recording_key", new_recording_pem, new_recording_fp)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid recording_key object\"}";
+      return r;
+    }
+  }
+
+  String new_device_label = String((const char*)(doc["device_label"] | ""));
+  new_device_label.trim();
+  if (new_device_label.length() == 0) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"device_label required\"}";
+    return r;
+  }
+
+  String new_wifi_ssid, new_wifi_pass;
+  if (!parse_wifi_values(doc, new_wifi_ssid, new_wifi_pass)) {
+     r.code = 400;
+     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid wifi object (ssid/password required)\"}";
+     return r;
+   }
+
+  String auth_ips_csv;
+  if (!parse_authorized_listener_ips(doc, auth_ips_csv)) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid authorized_listener_ips (must be IPv4 string array)\"}";
+    return r;
+  }
+
+  String time_servers_csv;
+  if (!parse_time_servers(doc, time_servers_csv)) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid time config (time.server or time.servers required)\"}";
+    return r;
+  }
+
+  bool new_mdns_enabled = state.mdns_enabled;
+  String new_mdns_hostname = state.mdns_hostname;
+  JsonVariant mdns = doc["mdns"];
+  if (!mdns.isNull()) {
+    if (!mdns.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mdns object\"}";
+      return r;
+    }
+    new_mdns_enabled = mdns["enabled"] | false;
+    new_mdns_hostname = String((const char*)(mdns["hostname"] | ""));
+    new_mdns_hostname.trim();
+  }
+
+  String ota_signer_pem = String((const char*)(doc["ota_signer_public_key_pem"] | ""));
+  ota_signer_pem.trim();
+  bool ota_signer_clear = doc["ota_signer_clear"] | false;
+
+  bool ota_version_set = !doc["ota_version_code"].isNull();
+  uint64_t ota_version_value = 0;
+  bool ota_floor_set = !doc["ota_min_allowed_version_code"].isNull();
+  bool ota_floor_clear = doc["ota_min_allowed_version_code_clear"] | false;
+  uint64_t ota_floor_value = 0;
+  if (ota_version_set) {
+    JsonVariantConst vv = doc["ota_version_code"];
+    if (vv.is<uint64_t>()) {
+      ota_version_value = vv.as<uint64_t>();
+    } else if (vv.is<unsigned long>()) {
+      ota_version_value = static_cast<uint64_t>(vv.as<unsigned long>());
+    } else if (vv.is<const char*>()) {
+      const char* s = vv.as<const char*>();
+      char* end = nullptr;
+      unsigned long long parsed = strtoull(s ? s : "", &end, 10);
+      if (!end || *end != '\0') {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_version_code\"}";
+        return r;
+      }
+      ota_version_value = static_cast<uint64_t>(parsed);
+    } else {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_version_code\"}";
+      return r;
+    }
+  }
+
+  if (ota_floor_set) {
+    JsonVariantConst vf = doc["ota_min_allowed_version_code"];
+    if (vf.is<uint64_t>()) {
+      ota_floor_value = vf.as<uint64_t>();
+    } else if (vf.is<unsigned long>()) {
+      ota_floor_value = static_cast<uint64_t>(vf.as<unsigned long>());
+    } else if (vf.is<const char*>()) {
+      const char* s = vf.as<const char*>();
+      char* end = nullptr;
+      unsigned long long parsed = strtoull(s ? s : "", &end, 10);
+      if (!end || *end != '\0') {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_min_allowed_version_code\"}";
+        return r;
+      }
+      ota_floor_value = static_cast<uint64_t>(parsed);
+    } else {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_min_allowed_version_code\"}";
+      return r;
+    }
+  }
+
+  if ((ota_signer_pem.length() > 0 || ota_signer_clear || ota_version_set || ota_floor_set || ota_floor_clear) && !allow_ota_signer_override) {
+    r.code = 403;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SERIAL_ONLY\",\"detail\":\"ota signer/floor controls are serial-configurable only\"}";
+    return r;
+  }
+
+  if (ota_floor_set && !ota_version_set) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"ota_version_code required when ota_min_allowed_version_code is set\"}";
+    return r;
+  }
+
+  String sig_err;
+  if (!state.managed) {
+    if (!verify_config_signature_envelope(doc, new_admin_fp, new_admin_pem, sig_err)) {
+      r.code = 401;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SIGNATURE\",\"detail\":" + json_quote(sig_err) + "}";
+      return r;
+    }
+
+    if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_ssid, new_wifi_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+      r.code = 500;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
+      return r;
+    }
+    state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+    Preferences p;
+    if (p.begin("aztcfg", false)) {
+      p.putString("disc_json", state.discovery_announcement_json);
+      p.end();
+    }
+
+    if (allow_ota_signer_override && (ota_signer_pem.length() > 0 || ota_signer_clear || ota_version_set || ota_floor_set || ota_floor_clear)) {
+      Preferences op;
+      if (op.begin("aztcfg", false)) {
+        if (ota_signer_clear) {
+          op.remove("ota_signer_pem");
+          op.remove("ota_signer_fp");
+          state.ota_signer_override_public_key_pem = "";
+          state.ota_signer_override_fingerprint_hex = "";
+        } else if (ota_signer_pem.length() > 0) {
+          String ota_fp;
+          if (!compute_pubkey_spki_sha256_hex(ota_signer_pem, ota_fp)) {
+            op.end();
+            r.code = 400;
+            r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer pem\"}";
+            return r;
+          }
+          op.putString("ota_signer_pem", ota_signer_pem);
+          op.putString("ota_signer_fp", ota_fp);
+          state.ota_signer_override_public_key_pem = ota_signer_pem;
+          state.ota_signer_override_fingerprint_hex = ota_fp;
+        }
+
+        if (ota_version_set) {
+          op.putULong64("ota_last_vc", ota_version_value);
+          state.last_ota_version_code = ota_version_value;
+          state.last_ota_version = String((unsigned long long)ota_version_value);
+          op.putString("ota_last_ver", state.last_ota_version);
+        }
+
+        if (ota_floor_clear) {
+          op.remove("ota_min_vc");
+          op.remove("ota_min_ver_code");
+          state.ota_min_allowed_version_code = 0;
+        } else if (ota_floor_set) {
+          op.putULong64("ota_min_vc", ota_floor_value);
+          state.ota_min_allowed_version_code = ota_floor_value;
+        }
+
+        op.end();
+      }
+    }
+
+    r.code = 200;
+    r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
+    return r;
+  }
+
+  if (!verify_config_signature_envelope(doc, state.admin_fingerprint_hex, state.admin_pubkey_pem, sig_err)) {
+    r.code = 401;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SIGNATURE\",\"detail\":" + json_quote(sig_err) + "}";
+    return r;
+  }
+
+  if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_ssid, new_wifi_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+    r.code = 500;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
+    return r;
+  }
+
+  state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+  Preferences p;
+  if (p.begin("aztcfg", false)) {
+    p.putString("disc_json", state.discovery_announcement_json);
+    p.end();
+  }
+
+  if (allow_ota_signer_override && (ota_signer_pem.length() > 0 || ota_signer_clear || ota_version_set || ota_floor_set || ota_floor_clear)) {
+    Preferences op;
+    if (op.begin("aztcfg", false)) {
+      if (ota_signer_clear) {
+        op.remove("ota_signer_pem");
+        op.remove("ota_signer_fp");
+        state.ota_signer_override_public_key_pem = "";
+        state.ota_signer_override_fingerprint_hex = "";
+      } else if (ota_signer_pem.length() > 0) {
+        String ota_fp;
+        if (!compute_pubkey_spki_sha256_hex(ota_signer_pem, ota_fp)) {
+          op.end();
+          r.code = 400;
+          r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer pem\"}";
+          return r;
+        }
+        op.putString("ota_signer_pem", ota_signer_pem);
+        op.putString("ota_signer_fp", ota_fp);
+        state.ota_signer_override_public_key_pem = ota_signer_pem;
+        state.ota_signer_override_fingerprint_hex = ota_fp;
+      }
+
+      if (ota_floor_clear) {
+        op.remove("ota_min_vc");
+        op.remove("ota_min_ver_code");
+        state.ota_min_allowed_version_code = 0;
+      } else if (ota_floor_set) {
+        op.putULong64("ota_min_vc", ota_floor_value);
+        state.ota_min_allowed_version_code = ota_floor_value;
+      }
+
+      op.end();
+    }
+  }
+
+  r.code = 200;
+  r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
+  return r;
+}
+
+static HttpDispatchResult handle_config_patch_json(AppState& state, const String& body) {
+  HttpDispatchResult r{};
+  r.content_type = "application/json";
+
+  if (!state.managed) {
+    r.code = 409;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_PATCH_UNSET_ADMIN\",\"detail\":\"device is not managed\"}";
+    return r;
+  }
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid json\"}";
+    return r;
+  }
+
+  int v = doc["config_version"] | 0;
+  if (v != 1) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"config_version must be 1\"}";
+    return r;
+  }
+
+  int if_version = doc["if_version"] | -1;
+  if (if_version < 0 || static_cast<uint32_t>(if_version) != state.config_revision) {
+    r.code = 409;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_VERSION_CONFLICT\",\"expected\":" + String(state.config_revision) + ",\"provided\":" + String(if_version) + "}";
+    return r;
+  }
+
+  if (!doc["admin_key"].isNull() || !doc["ota_signer_public_key_pem"].isNull() || (doc["ota_signer_clear"] | false)) {
+    r.code = 403;
+    r.body = "{\"ok\":false,\"error\":\"ERR_PATCH_PATH_FORBIDDEN\",\"detail\":\"admin_key/ota_signer cannot be patched over HTTP\"}";
+    return r;
+  }
+
+  String sig_err;
+  if (!verify_config_signature_envelope(doc, state.admin_fingerprint_hex, state.admin_pubkey_pem, sig_err)) {
+    r.code = 401;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SIGNATURE\",\"detail\":" + json_quote(sig_err) + "}";
+    return r;
+  }
+
+  JsonVariant patch = doc["patch"];
+  if (patch.isNull() || !patch.is<JsonObject>()) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"patch object required\"}";
+    return r;
+  }
+
+  String new_recording_pem = state.recording_pubkey_pem;
+  String new_recording_fp = state.recording_fingerprint_hex;
+  String new_device_label = state.device_label;
+  String new_wifi_ssid = state.wifi_ssid;
+  String new_wifi_pass = state.wifi_pass;
+  String auth_ips_csv = state.authorized_listener_ips_csv;
+  String time_servers_csv = state.time_servers_csv;
+  bool new_mdns_enabled = state.mdns_enabled;
+  String new_mdns_hostname = state.mdns_hostname;
+
+  if (!patch["recording_key"].isNull()) {
+    JsonDocument tmp;
+    tmp["recording_key"] = patch["recording_key"];
+    if (!parse_rsa_key_object(tmp, "recording_key", new_recording_pem, new_recording_fp)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid recording_key object\"}";
+      return r;
+    }
+  }
+
+  if (!patch["device_label"].isNull()) {
+    new_device_label = String((const char*)(patch["device_label"] | ""));
+    new_device_label.trim();
+    if (new_device_label.length() == 0) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"device_label cannot be empty\"}";
+      return r;
+    }
+  }
+
+  if (!patch["wifi"].isNull()) {
+    if (!parse_wifi_values_variant(patch["wifi"], new_wifi_ssid, new_wifi_pass)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid wifi object (ssid/password required)\"}";
+      return r;
+    }
+  }
+
+  if (!patch["authorized_listener_ips"].isNull()) {
+    if (!parse_authorized_listener_ips_variant(patch["authorized_listener_ips"], auth_ips_csv)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid authorized_listener_ips\"}";
+      return r;
+    }
+  }
+
+  if (!patch["audio"].isNull()) {
+    r.code = 403;
+    r.body = "{\"ok\":false,\"error\":\"ERR_PATCH_PATH_FORBIDDEN\",\"detail\":\"audio is static and not patchable\"}";
+    return r;
+  }
+
+  if (!patch["time"].isNull()) {
+    if (!parse_time_servers_variant(patch["time"], time_servers_csv)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid time object\"}";
+      return r;
+    }
+  }
+
+  if (!patch["mdns"].isNull()) {
+    JsonVariant pm = patch["mdns"];
+    if (!pm.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mdns object\"}";
+      return r;
+    }
+    new_mdns_enabled = pm["enabled"] | false;
+    new_mdns_hostname = String((const char*)(pm["hostname"] | ""));
+    new_mdns_hostname.trim();
+  }
+
+  if (!save_config_state(state,
+                         state.admin_pubkey_pem,
+                         state.admin_fingerprint_hex,
+                         new_recording_pem,
+                         new_recording_fp,
+                         new_device_label,
+                         new_wifi_ssid,
+                         new_wifi_pass,
+                         true,
+                         auth_ips_csv,
+                         time_servers_csv,
+                         new_mdns_enabled,
+                         new_mdns_hostname)) {
+    r.code = 500;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
+    return r;
+  }
+
+  state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+  Preferences p;
+  if (p.begin("aztcfg", false)) {
+    p.putString("disc_json", state.discovery_announcement_json);
+    p.end();
+  }
+
+  r.code = 200;
+  r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
+  return r;
+}
+
+bool parse_request_line(const String& req, String& method, String& path) {
+  method = "";
+  path = "";
+
+  String s = req;
+  s.trim();
+  if (s.length() == 0) return false;
+
+  auto is_ws = [&](char c) { return c == ' ' || c == '\t'; };
+
+  int i = 0;
+  while (i < static_cast<int>(s.length()) && is_ws(s[i])) i++;
+  int m_start = i;
+  while (i < static_cast<int>(s.length()) && !is_ws(s[i])) i++;
+  int m_end = i;
+
+  while (i < static_cast<int>(s.length()) && is_ws(s[i])) i++;
+  int p_start = i;
+  while (i < static_cast<int>(s.length()) && !is_ws(s[i])) i++;
+  int p_end = i;
+
+  while (i < static_cast<int>(s.length()) && is_ws(s[i])) i++;
+  int v_start = i;
+  while (i < static_cast<int>(s.length()) && !is_ws(s[i])) i++;
+  int v_end = i;
+
+  while (i < static_cast<int>(s.length()) && is_ws(s[i])) i++;
+
+  if (m_end <= m_start || p_end <= p_start || v_end <= v_start) return false;
+  if (i != static_cast<int>(s.length())) return false;
+
+  method = s.substring(m_start, m_end);
+  path = s.substring(p_start, p_end);
+  if (path.length() == 0 || path[0] != '/') return false;
+
+  return true;
+}
+
+HttpDispatchResult dispatch_request(const String& method,
+                                   const String& path,
+                                   const String& body,
+                                   AppState& state) {
+  HttpDispatchResult r{};
+
+  if (method == "GET" && (path == "/ui" || path == "/ui/" || path.startsWith("/ui/"))) {
+    String file_path = "/ui/index.html";
+    if (path.startsWith("/ui/") && path.length() > 4) {
+      file_path = path;
+    }
+
+    String body;
+    if (!read_littlefs_text_file(file_path, body)) {
+      r.code = 404;
+      r.body = "ui file not found\n";
+      r.content_type = "text/plain";
+      return r;
+    }
+
+    r.code = 200;
+    r.body = body;
+    r.content_type = ui_content_type_for_path(file_path);
+    return r;
+  }
+
+  if (method == "GET" && path.startsWith("/stream")) {
+    r.wants_stream = true;
+    r.stream_seconds = parse_seconds_from_path(path);
+    r.stream_signbench_each_chunk = parse_signbench_from_path(path);
+    r.stream_enable_telemetry = path.indexOf("telemetry=1") >= 0 || path.indexOf("telemetry=true") >= 0 || path.indexOf("telemetry=yes") >= 0 || path.indexOf("telemetry=on") >= 0;
+    r.stream_drop_test_frames = parse_drop_test_frames_from_path(path);
+    return r;
+  }
+
+  if (method == "POST" && path == "/api/v1/config") {
+    return handle_config_post_json(state, body, false);
+  }
+
+  if (method == "POST" && path == "/api/v1/config/patch") {
+    return handle_config_patch_json(state, body);
+  }
+
+  if ((method == "POST" || method == "GET") && path == "/api/v1/device/reboot") {
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"rebooting\":true}";
+    r.reboot_after_response = true;
+    return r;
+  }
+
+  if (method == "GET" && path == "/api/v1/device/upgrade") {
+    r.code = 200;
+    r.content_type = "text/html; charset=utf-8";
+    r.body =
+        "<!doctype html><html><head><meta charset='utf-8'><title>AZT OTA Upload</title></head><body>"
+        "<h1>AZT OTA Upgrade</h1>"
+        "<p>Select a .otabundle file (JSON header first line + firmware bytes).</p>"
+        "<input id='f' type='file'/> <button id='u'>Upload</button>"
+        "<pre id='o'></pre>"
+        "<script>"
+        "const o=document.getElementById('o');"
+        "document.getElementById('u').onclick=async()=>{"
+        "const f=document.getElementById('f').files[0]; if(!f){o.textContent='pick file'; return;}"
+        "o.textContent='Uploading '+f.name+' ...';"
+        "try{const b=await f.arrayBuffer();"
+        "const r=await fetch('/api/v1/device/upgrade',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:b});"
+        "const t=await r.text(); o.textContent='HTTP '+r.status+'\\n'+t;}catch(e){o.textContent=String(e);}"
+        "};"
+        "</script></body></html>";
+    return r;
+  }
+
+  if (method == "GET" && path.startsWith("/api/v1/device/attestation")) {
+    String nonce = parse_query_param(path, "nonce");
+    if (nonce.length() < 8 || nonce.length() > 256) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_ATTEST_NONCE\",\"detail\":\"nonce required (8..256 chars)\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    unsigned char sign_sk[crypto_sign_ed25519_SECRETKEYBYTES] = {0};
+    if (sodium_init() < 0 || !load_device_sign_sk(sign_sk)) {
+      r.code = 500;
+      r.body = "{\"ok\":false,\"error\":\"ERR_ATTEST_SIGN_KEY\",\"detail\":\"device signing key unavailable\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    String payload = "{";
+    payload += "\"attestation_version\":1,";
+    payload += "\"attestation_type\":\"device_key_ownership\",";
+    payload += "\"nonce\":\"" + nonce + "\",";
+    payload += "\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 + "\",";
+    payload += "\"device_sign_fingerprint_hex\":\"" + state.device_sign_fingerprint_hex + "\",";
+    payload += "\"device_chip_id_hex\":\"" + state.device_chip_id_hex + "\"";
+    payload += "}";
+
+    unsigned char sig[crypto_sign_ed25519_BYTES] = {0};
+    unsigned long long sig_len = 0;
+    if (crypto_sign_ed25519_detached(sig,
+                                     &sig_len,
+                                     reinterpret_cast<const unsigned char*>(payload.c_str()),
+                                     payload.length(),
+                                     sign_sk) != 0 ||
+        sig_len != crypto_sign_ed25519_BYTES) {
+      r.code = 500;
+      r.body = "{\"ok\":false,\"error\":\"ERR_ATTEST_SIGN\",\"detail\":\"failed to sign attestation\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    r.code = 200;
+    r.body = "{\"ok\":true,\"payload\":" + payload +
+             ",\"signature_algorithm\":\"ed25519\",\"signature_b64\":\"" +
+             b64(sig, crypto_sign_ed25519_BYTES) + "\"}";
+    r.content_type = "application/json";
+    return r;
+  }
+
+  if (method == "GET" && path == "/api/v1/device/certificate") {
+    Preferences p;
+    if (!p.begin("aztcfg", true)) {
+      r.code = 500;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_STORE\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+    String cert_json = p.getString("device_cert", "");
+    p.end();
+    if (cert_json.length() == 0) {
+      r.code = 404;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_NOT_FOUND\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+    r.code = 200;
+    r.body = "{\"ok\":true,\"certificate\":" + cert_json + "}";
+    r.content_type = "application/json";
+    return r;
+  }
+
+  if (method == "POST" && path == "/api/v1/device/certificate") {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, body);
+    if (err) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_SCHEMA\",\"detail\":\"invalid json\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    String payload_b64 = String((const char*)(doc["certificate_payload_b64"] | ""));
+    String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
+    String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
+    if (payload_b64.length() == 0 || sig_b64.length() == 0 || sig_alg != "rsa-pss-sha256") {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_SCHEMA\",\"detail\":\"missing certificate_payload_b64/signature fields\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    std::vector<uint8_t> payload_raw;
+    if (!b64_decode_vec(payload_b64, payload_raw) || payload_raw.empty()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_PAYLOAD_B64\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    JsonDocument payload_doc;
+    DeserializationError perr = deserializeJson(payload_doc, payload_raw.data(), payload_raw.size());
+    if (perr) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_PAYLOAD_JSON\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    String dev_pub = String((const char*)(payload_doc["device_sign_public_key_b64"] | ""));
+    String dev_fp = String((const char*)(payload_doc["device_sign_fingerprint_hex"] | ""));
+    String chip_id = String((const char*)(payload_doc["device_chip_id_hex"] | ""));
+    String admin_fp = String((const char*)(payload_doc["admin_signer_fingerprint_hex"] | ""));
+    String cert_serial = String((const char*)(payload_doc["certificate_serial"] | ""));
+
+    if (dev_pub != state.device_sign_public_key_b64 || dev_fp != state.device_sign_fingerprint_hex || chip_id != state.device_chip_id_hex) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_DEVICE_MISMATCH\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+    if (admin_fp != state.admin_fingerprint_hex) {
+      r.code = 401;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_ADMIN_MISMATCH\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+    if (state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      r.code = 500;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_ADMIN_NOT_CONFIGURED\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    String admin_fp_calc;
+    if (!compute_pubkey_spki_sha256_hex(state.admin_pubkey_pem, admin_fp_calc) || admin_fp_calc != admin_fp) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_ADMIN_FP\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    if (!verify_rsa_pss_sha256_signature(state.admin_pubkey_pem, payload_raw, sig_b64)) {
+      r.code = 401;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_SIG_VERIFY\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    String cert_json;
+    serializeJson(doc, cert_json);
+
+    state.device_certificate_serial = cert_serial;
+    state.device_certificate_json = cert_json;
+    state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+
+    Preferences p;
+    if (!p.begin("aztcfg", false) ||
+        p.putString("device_cert", cert_json) == 0 ||
+        p.putString("dev_cert_sn", cert_serial) == 0 ||
+        p.putString("disc_json", state.discovery_announcement_json) == 0) {
+      p.end();
+      r.code = 500;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_STORE\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+    p.end();
+
+    r.code = 200;
+    r.body = "{\"ok\":true,\"stored\":true,\"certificate_serial\":\"" + cert_serial + "\"}";
+    r.content_type = "application/json";
+    return r;
+  }
+
+  if (method == "GET" && path == "/api/v1/config/state") {
+    String status = !state.managed ? "UNSET_ADMIN" : (state.signed_config_ready ? "MANAGED" : "PENDING_SIGNED_CONFIG");
+    bool wifi_cfg = state.wifi_ssid.length() > 0 && state.wifi_pass.length() > 0;
+    bool recording_key_cfg = state.recording_pubkey_pem.length() > 0 && state.recording_fingerprint_hex.length() == 64;
+    String ota_active_pem = state.ota_signer_override_public_key_pem.length() > 0 ? state.ota_signer_override_public_key_pem : String(kOtaSignerPublicKeyPem);
+    String ota_active_fp;
+    if (!compute_pubkey_spki_sha256_hex(ota_active_pem, ota_active_fp)) ota_active_fp = "";
+    String ota_source = state.ota_signer_override_public_key_pem.length() > 0 ? "serial_override" : "default_embedded";
+
+    time_t now_epoch = time(nullptr);
+    if (now_epoch < 0) now_epoch = 0;
+    String now_utc = "";
+    if (now_epoch > 0) {
+      struct tm tm_utc;
+      gmtime_r(&now_epoch, &tm_utc);
+      char buf[32] = {0};
+      strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+      now_utc = String(buf);
+    }
+    long time_staleness_s = -1;
+    if (state.time_last_sync_epoch > 0 && now_epoch >= static_cast<time_t>(state.time_last_sync_epoch)) {
+      time_staleness_s = static_cast<long>(now_epoch - static_cast<time_t>(state.time_last_sync_epoch));
+    }
+    r.code = 200;
+    r.body = "{\"ok\":true,\"state\":\"" + status +
+             "\",\"signed_config_ready\":" +
+             String(state.signed_config_ready ? "true" : "false") +
+             ",\"device_label\":\"" + state.device_label +
+             "\",\"wifi_configured\":" + String(wifi_cfg ? "true" : "false") +
+             ",\"wifi_ssid\":\"" + state.wifi_ssid +
+             "\",\"wifi_last_connect_source\":\"" + state.wifi_last_connect_source +
+             "\",\"wifi_last_status\":" + String(state.wifi_last_status) +
+             ",\"authorized_listener_ips_csv\":\"" + state.authorized_listener_ips_csv +
+             "\",\"time_servers_csv\":\"" + state.time_servers_csv +
+             "\",\"device_certificate_serial\":\"" + state.device_certificate_serial +
+             "\",\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex +
+             "\",\"recording_key_configured\":" + String(recording_key_cfg ? "true" : "false") +
+             ",\"recording_fingerprint_hex\":\"" + state.recording_fingerprint_hex +
+             "\",\"recording_key_alg\":\"rsa-oaep-sha256\"" +
+             ",\"device_sign_alg\":\"ed25519\"" +
+             ",\"firmware_build_number\":\"" + String(AZT_STR(AZT_BUILD_NUMBER)) +
+             "\",\"firmware_build_id\":\"" + String(AZT_STR(AZT_BUILD_ID)) +
+             "\",\"ota_signer_source\":\"" + ota_source +
+             "\",\"ota_signer_fingerprint_hex\":\"" + ota_active_fp +
+             "\",\"last_ota_version\":\"" + state.last_ota_version +
+             "\",\"last_ota_version_code\":" + String(static_cast<unsigned long long>(state.last_ota_version_code)) +
+             ",\"ota_min_allowed_version_code\":" + String(static_cast<unsigned long long>(state.ota_min_allowed_version_code)) +
+             ",\"device_time_epoch\":" + String(static_cast<unsigned long>(now_epoch)) +
+             ",\"device_time_utc\":\"" + now_utc +
+             "\",\"time_synced\":" + String(state.time_synced ? "true" : "false") +
+             ",\"time_last_sync_epoch\":" + String(state.time_last_sync_epoch) +
+             ",\"time_server_staleness_s\":" + String(time_staleness_s) +
+             ",\"mdns_enabled\":" + String(state.mdns_enabled ? "true" : "false") +
+             ",\"mdns_hostname\":\"" + state.mdns_hostname +
+             "\",\"mdns_fqdn\":\"" + (state.mdns_hostname.length() > 0 ? state.mdns_hostname + ".local" : String("")) +
+             "\",\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 +
+             "\",\"device_sign_fingerprint_hex\":\"" + state.device_sign_fingerprint_hex +
+             "\",\"device_chip_id_hex\":\"" + state.device_chip_id_hex +
+             "\",\"last_reset_reason\":\"" + state.last_reset_reason +
+             "\",\"last_reset_reason_code\":" + String(state.last_reset_reason_code) +
+             ",\"last_reset_unexpected\":" + String(state.last_reset_unexpected ? "true" : "false") +
+             ",\"unexpected_reset_count\":" + String(state.unexpected_reset_count) +
+             ",\"config_revision\":" + String(state.config_revision) + "}";
+    r.content_type = "application/json";
+    return r;
+  }
+
+  if (method == "GET" && (path == "/api/v1/device/signing-public-key.pem" || path == "/api/v1/device/signing-public-key")) {
+    String pem;
+    if (!ed25519_pub_raw_to_spki_pem(state.device_sign_public_key_b64, pem)) {
+      r.code = 500;
+      r.body = "failed to build signing public key PEM\n";
+      r.content_type = "text/plain";
+      return r;
+    }
+    r.code = 200;
+    r.body = pem;
+    r.content_type = "application/x-pem-file";
+    return r;
+  }
+
+  r.code = 404;
+  r.body = "not found\n";
+  r.content_type = "text/plain";
+  return r;
+}
+
+HttpDispatchResult apply_config_json_from_serial(AppState& state, const String& body) {
+  return handle_config_post_json(state, body, true);
+}
+
+bool validate_ota_bundle_header_line(const String& header_line,
+                                     String& out_signer_fp,
+                                     String& out_meta_b64,
+                                     String& out_meta_sig_b64,
+                                     String& out_err) {
+  out_signer_fp = "";
+  out_meta_b64 = "";
+  out_meta_sig_b64 = "";
+  out_err = "";
+
+  if (header_line.length() < 20 || header_line.length() > 4096) {
+    out_err = "invalid bundle header line";
+    return false;
+  }
+
+  JsonDocument hdr;
+  if (deserializeJson(hdr, header_line)) {
+    out_err = "header json parse failed";
+    return false;
+  }
+  if (String((const char*)(hdr["kind"] | "")) != "azt-ota-bundle") {
+    out_err = "invalid bundle kind";
+    return false;
+  }
+
+  out_signer_fp = String((const char*)(hdr["signer_fingerprint_hex"] | ""));
+  out_meta_b64 = String((const char*)(hdr["meta_b64"] | ""));
+  out_meta_sig_b64 = String((const char*)(hdr["meta_signature_b64"] | ""));
+  if (out_signer_fp.length() != 64 || out_meta_b64.length() == 0 || out_meta_sig_b64.length() == 0) {
+    out_err = "missing signed header fields";
+    return false;
+  }
+
+  return true;
+}
+
+bool parse_u64_meta_field(const JsonDocument& meta,
+                          const char* key,
+                          uint64_t& out_value,
+                          String& out_err) {
+  out_value = 0;
+  out_err = "";
+  if (meta[key].isNull()) {
+    out_err = String("missing ") + key;
+    return false;
+  }
+  JsonVariantConst v = meta[key];
+  if (v.is<uint64_t>()) {
+    out_value = v.as<uint64_t>();
+    return true;
+  }
+  if (v.is<unsigned long>()) {
+    out_value = static_cast<uint64_t>(v.as<unsigned long>());
+    return true;
+  }
+  if (v.is<const char*>()) {
+    const char* s = v.as<const char*>();
+    if (!s || strlen(s) == 0) {
+      out_err = String("invalid ") + key;
+      return false;
+    }
+    char* end = nullptr;
+    unsigned long long parsed = strtoull(s, &end, 10);
+    if (!end || *end != '\0') {
+      out_err = String("invalid ") + key;
+      return false;
+    }
+    out_value = static_cast<uint64_t>(parsed);
+    return true;
+  }
+  out_err = String("invalid ") + key;
+  return false;
+}
+
+bool validate_ota_firmware_meta(const JsonDocument& meta,
+                                int& out_fw_size,
+                                String& out_fw_sha,
+                                String& out_err) {
+  out_fw_size = meta["firmware_size"] | 0;
+  out_fw_sha = String((const char*)(meta["firmware_sha256"] | ""));
+  out_err = "";
+
+  if (out_fw_size <= 0 || out_fw_sha.length() != 64) {
+    out_err = "invalid firmware metadata";
+    return false;
+  }
+  return true;
+}
+
+bool validate_ota_bundle_payload_lengths(int content_len,
+                                         int header_line_len,
+                                         int fw_size,
+                                         int& out_bytes_left,
+                                         String& out_err) {
+  out_err = "";
+  out_bytes_left = 0;
+
+  if (content_len <= 0) {
+    out_err = "missing content length";
+    return false;
+  }
+  if (header_line_len < 0 || fw_size <= 0) {
+    out_err = "invalid length inputs";
+    return false;
+  }
+
+  const int consumed = header_line_len + 1;  // newline after header JSON
+  out_bytes_left = content_len - consumed;
+  if (out_bytes_left < fw_size) {
+    out_err = "bundle payload shorter than firmware_size";
+    return false;
+  }
+  if (out_bytes_left > fw_size) {
+    out_err = "bundle payload longer than firmware_size";
+    return false;
+  }
+  return true;
+}
+
+bool should_drain_trailing_bundle_bytes(int bytes_left) {
+  return bytes_left > 0;
+}
+
+int ota_next_drain_chunk_size(int bytes_left, int buf_size) {
+  if (bytes_left <= 0 || buf_size <= 0) return 0;
+  return bytes_left > buf_size ? buf_size : bytes_left;
+}
+
+void ota_kick_wdt() {
+  // Feed task watchdog when available and yield so IDLE task can run.
+  // (esp_task_wdt_reset is safe to call even if current task is not subscribed.)
+  esp_task_wdt_reset();
+  vTaskDelay(1);
+}
+
+bool ota_stream_read_failed(int n_read) {
+  return n_read <= 0;
+}
+
+bool ota_update_write_mismatch(size_t wrote, int expected) {
+  return static_cast<int>(wrote) != expected;
+}
+
+bool ota_begin_failed(bool begin_ok) {
+  return !begin_ok;
+}
+
+bool ota_read_firmware_chunk(WiFiClient& client,
+                             uint8_t* buf,
+                             int to_read,
+                             int& out_n_read,
+                             String& out_err,
+                             uint32_t chunk_timeout_ms = 5000) {
+  out_n_read = 0;
+  out_err = "";
+
+  if (to_read <= 0) {
+    out_err = "invalid read size";
+    return false;
+  }
+
+  uint32_t last_progress_ms = millis();
+  while (client.connected() && out_n_read < to_read) {
+    int avail = client.available();
+    if (avail > 0) {
+      int want = to_read - out_n_read;
+      if (avail < want) want = avail;
+      int n = client.read(buf + out_n_read, static_cast<size_t>(want));
+      if (n > 0) {
+        out_n_read += n;
+        last_progress_ms = millis();
+        ota_kick_wdt();  // keep scheduler/watchdog serviced during sustained RX
+        continue;
+      }
+    }
+
+    if ((millis() - last_progress_ms) > chunk_timeout_ms) {
+      out_err = "stream read timeout during firmware body";
+      return false;
+    }
+
+    ota_kick_wdt();  // cooperative yield while waiting for next bytes
+  }
+
+  if (out_n_read <= 0) {
+    out_err = "stream read failed during firmware body";
+    return false;
+  }
+  return true;
+}
+
+bool ota_sha_mismatch(const String& got_sha, const String& expected_sha) {
+  return got_sha != expected_sha;
+}
+
+bool ota_end_failed(bool end_ok) {
+  return !end_ok;
+}
+
+bool ota_should_abort_on_error(bool has_error) {
+  return has_error;
+}
+
+bool poison_ota_slot_header(const esp_partition_t* part) {
+  // SECURITY FAIL-CLOSED: poison the target OTA header *before* writing
+  // attacker-controlled bytes. If power is cut mid-update, the slot remains
+  // non-bootable instead of potentially booting unverified code.
+  if (!part) return false;
+  constexpr size_t kHeaderSectorSize = 4096;
+  uint8_t zeros[kHeaderSectorSize] = {0};
+  if (esp_partition_erase_range(part, 0, kHeaderSectorSize) != ESP_OK) return false;
+  return esp_partition_write(part, 0, zeros, kHeaderSectorSize) == ESP_OK;
+}
+
+void drain_request_body_best_effort(WiFiClient& client, int max_bytes, uint32_t max_ms = 60000) {
+  if (max_bytes <= 0) return;
+  const uint32_t start = millis();
+  uint32_t last_rx_ms = millis();
+  constexpr uint32_t kQuietMs = 800;
+
+  uint8_t buf[512];
+  int left = max_bytes;
+
+  while ((millis() - start) < max_ms) {
+    int avail = client.available();
+    if (avail > 0) {
+      int want = left > (int)sizeof(buf) ? (int)sizeof(buf) : left;
+      if (want <= 0) want = (int)sizeof(buf);
+      if (avail < want) want = avail;
+
+      int n = client.read(buf, static_cast<size_t>(want));
+      if (n > 0) {
+        left -= n;
+        last_rx_ms = millis();
+        if (left <= 0) break;
+        continue;
+      }
+    }
+
+    // If sender has gone quiet and no bytes are pending, stop draining.
+    if (client.available() == 0 && (millis() - last_rx_ms) > kQuietMs) {
+      break;
+    }
+
+    if (!client.connected() && client.available() == 0) {
+      break;
+    }
+
+    vTaskDelay(1);
+  }
+}
+
+static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, AppState& state, String& out_err) {
+  out_err = "";
+
+  String header_line = client.readStringUntil('\n');
+  header_line.trim();
+
+  String signer_fp;
+  String meta_b64;
+  String meta_sig_b64;
+  if (!validate_ota_bundle_header_line(header_line, signer_fp, meta_b64, meta_sig_b64, out_err)) {
+    return false;
+  }
+
+  String trusted_pem = state.ota_signer_override_public_key_pem.length() > 0
+                         ? state.ota_signer_override_public_key_pem
+                         : String(kOtaSignerPublicKeyPem);
+  String trusted_fp;
+  if (!compute_pubkey_spki_sha256_hex(trusted_pem, trusted_fp) || trusted_fp != signer_fp) {
+    out_err = "signer fingerprint not trusted";
+    return false;
+  }
+
+  std::vector<uint8_t> meta_raw;
+  if (!b64_decode_vec(meta_b64, meta_raw) || meta_raw.empty()) {
+    out_err = "meta_b64 invalid";
+    return false;
+  }
+  if (!verify_rsa_pss_sha256_signature(trusted_pem, meta_raw, meta_sig_b64)) {
+    out_err = "meta signature verify failed";
+    return false;
+  }
+
+  JsonDocument meta;
+  if (deserializeJson(meta, meta_raw.data(), meta_raw.size())) {
+    out_err = "meta json parse failed";
+    return false;
+  }
+
+  String ota_version = String((const char*)(meta["version"] | ""));
+  uint64_t ota_version_code = 0;
+  String vc_err;
+  if (!parse_u64_meta_field(meta, "version_code", ota_version_code, vc_err) || ota_version_code == 0) {
+    out_err = vc_err.length() ? vc_err : "invalid version_code";
+    return false;
+  }
+  bool has_rollback_floor_code = false;
+  uint64_t ota_rollback_floor_code = 0;
+  String rf_err;
+  if (!meta["rollback_floor_code"].isNull()) {
+    has_rollback_floor_code = true;
+    if (!parse_u64_meta_field(meta, "rollback_floor_code", ota_rollback_floor_code, rf_err)) {
+      out_err = rf_err;
+      return false;
+    }
+  }
+
+  if (ota_version_code < state.ota_min_allowed_version_code) {
+    out_err = "version_code below rollback floor";
+    return false;
+  }
+
+  uint64_t current_version_code = state.last_ota_version_code;
+  if (current_version_code == 0 && state.last_ota_version.length() > 0) {
+    char* end = nullptr;
+    unsigned long long parsed = strtoull(state.last_ota_version.c_str(), &end, 10);
+    if (end && *end == '\0') {
+      current_version_code = static_cast<uint64_t>(parsed);
+    }
+  }
+  if (current_version_code > 0 && ota_version_code == current_version_code) {
+    out_err = "version_code equals current version";
+    return false;
+  }
+
+  int fw_size = 0;
+  String fw_sha;
+  if (!validate_ota_firmware_meta(meta, fw_size, fw_sha, out_err)) {
+    return false;
+  }
+
+  const esp_partition_t* target_part = esp_ota_get_next_update_partition(nullptr);
+  if (!target_part) {
+    out_err = "no OTA partition available";
+    return false;
+  }
+  if (static_cast<size_t>(fw_size) > target_part->size) {
+    out_err = "firmware too large for OTA slot";
+    return false;
+  }
+
+  int bytes_left = 0;
+  if (!validate_ota_bundle_payload_lengths(content_len,
+                                           static_cast<int>(header_line.length()),
+                                           fw_size,
+                                           bytes_left,
+                                           out_err)) {
+    return false;
+  }
+
+  constexpr size_t kFlashSector = 4096;
+  constexpr size_t kEraseChunkSectors = 8;  // 32KB chunks to avoid long WDT-starving erases.
+  constexpr size_t kEraseChunkBytes = kFlashSector * kEraseChunkSectors;
+  const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
+  for (size_t off = 0; off < erase_len; off += kEraseChunkBytes) {
+    const size_t remain = erase_len - off;
+    const size_t chunk = (remain > kEraseChunkBytes) ? kEraseChunkBytes : remain;
+    if (esp_partition_erase_range(target_part, off, chunk) != ESP_OK) {
+      out_err = "failed to erase OTA slot";
+      return false;
+    }
+    ota_kick_wdt();
+  }
+  if (!poison_ota_slot_header(target_part)) {
+    out_err = "failed to poison OTA slot header";
+    return false;
+  }
+
+  esp_ota_handle_t ota_handle = 0;
+  ota_kick_wdt();
+  esp_err_t begin_err = esp_ota_begin(target_part, OTA_SIZE_UNKNOWN, &ota_handle);
+  ota_kick_wdt();
+  if (begin_err != ESP_OK) {
+    out_err = String("ota begin failed: ") + String(static_cast<int>(begin_err));
+    return false;
+  }
+
+  const size_t first_block_len = std::min<size_t>(static_cast<size_t>(fw_size), kFlashSector);
+  std::vector<uint8_t> first_block(first_block_len);
+
+  mbedtls_sha256_context sha;
+  mbedtls_sha256_init(&sha);
+  mbedtls_sha256_starts_ret(&sha, 0);
+
+  uint8_t buf[1024];
+  int remain_fw = fw_size;
+  size_t fw_offset = 0;
+  while (remain_fw > 0) {
+    int to_read = remain_fw > (int)sizeof(buf) ? (int)sizeof(buf) : remain_fw;
+    int n = 0;
+    String read_err;
+    if (!ota_read_firmware_chunk(client, buf, to_read, n, read_err, 5000) || ota_stream_read_failed(n)) {
+      mbedtls_sha256_free(&sha);
+      esp_ota_abort(ota_handle);
+      out_err = read_err.length() ? read_err : "stream read failed during firmware body";
+      return false;
+    }
+
+    mbedtls_sha256_update_ret(&sha, buf, static_cast<size_t>(n));
+
+    size_t consumed = 0;
+    if (fw_offset < first_block_len) {
+      size_t copy_len = std::min<size_t>(static_cast<size_t>(n), first_block_len - fw_offset);
+      memcpy(first_block.data() + fw_offset, buf, copy_len);
+      consumed += copy_len;
+      fw_offset += copy_len;
+    }
+
+    if (consumed < static_cast<size_t>(n)) {
+      const uint8_t* wr_ptr = buf + consumed;
+      size_t wr_len = static_cast<size_t>(n) - consumed;
+      ota_kick_wdt();
+      esp_err_t wr_err = esp_ota_write_with_offset(ota_handle, wr_ptr, wr_len, fw_offset);
+      ota_kick_wdt();
+      if (wr_err != ESP_OK) {
+        mbedtls_sha256_free(&sha);
+        esp_ota_abort(ota_handle);
+        out_err = String("ota write failed: ") + String(static_cast<int>(wr_err));
+        return false;
+      }
+      fw_offset += wr_len;
+    }
+
+    remain_fw -= n;
+    bytes_left -= n;
+    ota_kick_wdt();
+  }
+
+  uint8_t digest[32] = {0};
+  mbedtls_sha256_finish_ret(&sha, digest);
+  mbedtls_sha256_free(&sha);
+  String got_sha = hex_lower(digest, sizeof(digest));
+  if (ota_sha_mismatch(got_sha, fw_sha)) {
+    esp_ota_abort(ota_handle);
+    out_err = "firmware sha256 mismatch";
+    return false;
+  }
+
+  if (!first_block.empty()) {
+    ota_kick_wdt();
+    esp_err_t hdr_wr_err = esp_ota_write_with_offset(ota_handle, first_block.data(), first_block.size(), 0);
+    ota_kick_wdt();
+    if (hdr_wr_err != ESP_OK) {
+      esp_ota_abort(ota_handle);
+      out_err = String("failed to restore OTA header block: ") + String(static_cast<int>(hdr_wr_err));
+      return false;
+    }
+  }
+
+  ota_kick_wdt();
+  esp_err_t end_err = esp_ota_end(ota_handle);
+  ota_kick_wdt();
+  if (end_err != ESP_OK) {
+    out_err = String("ota end failed: ") + String(static_cast<int>(end_err));
+    return false;
+  }
+
+  ota_kick_wdt();
+  esp_err_t set_err = esp_ota_set_boot_partition(target_part);
+  ota_kick_wdt();
+  if (set_err != ESP_OK) {
+    out_err = String("failed to set boot partition: ") + String(static_cast<int>(set_err));
+    return false;
+  }
+
+  // Drain any trailing bytes in the bundle body (if present).
+  while (should_drain_trailing_bundle_bytes(bytes_left) && client.connected()) {
+    int want = ota_next_drain_chunk_size(bytes_left, static_cast<int>(sizeof(buf)));
+    int n = client.readBytes(reinterpret_cast<char*>(buf), want);
+    if (n <= 0) break;
+    bytes_left -= n;
+    ota_kick_wdt();
+  }
+
+  // Commit OTA version metadata only after full validation + successful Update.end().
+  state.last_ota_version = ota_version;
+  state.last_ota_version_code = ota_version_code;
+  uint64_t next_floor = state.ota_min_allowed_version_code;
+  if (has_rollback_floor_code && ota_rollback_floor_code > next_floor) next_floor = ota_rollback_floor_code;
+  state.ota_min_allowed_version_code = next_floor;
+
+  Preferences p;
+  if (p.begin("aztcfg", false)) {
+    p.putString("ota_last_ver", state.last_ota_version);
+    p.putULong64("ota_last_vc", state.last_ota_version_code);
+    p.putULong64("ota_min_vc", state.ota_min_allowed_version_code);
+    p.end();
+  }
+
+  return true;
+}
+
+static bool parse_request_and_headers(WiFiClient& client,
+                                      String& method,
+                                      String& path,
+                                      int& content_len) {
+  method = "";
+  path = "";
+  content_len = 0;
+
+  client.setTimeout(4000);
+  String req = client.readStringUntil('\n');
+  req.trim();
+
+  if (!parse_request_line(req, method, path)) {
+    client.print("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    return false;
+  }
+
+  while (client.available() || client.connected()) {
+    String h = client.readStringUntil('\n');
+    if (h == "\r" || h.length() == 0) break;
+    String hs = h;
+    hs.trim();
+    if (hs.startsWith("Content-Length:")) {
+      String v = hs.substring(String("Content-Length:").length());
+      v.trim();
+      content_len = v.toInt();
+    }
+  }
+
+  return true;
+}
+
+void handle_client_stream_only(WiFiClient& client, const AppState& state) {
+  String method, path;
+  int content_len = 0;
+  if (!parse_request_and_headers(client, method, path, content_len)) return;
+
+  String remote_ip = client.remoteIP().toString();
+  if (!is_remote_ip_authorized(state, remote_ip)) {
+    send_json(client, 403,
+              "{\"ok\":false,\"error\":\"ERR_AUTH_LISTENER_IP\",\"detail\":\"listener IP not authorized\"}");
+    return;
+  }
+
+  if (!(method == "GET" && path.startsWith("/stream"))) {
+    send_json(client, 404,
+              "{\"ok\":false,\"error\":\"ERR_STREAM_PORT_ROUTE\",\"detail\":\"this port serves /stream only\"}");
+    return;
+  }
+
+  handle_stream(client,
+                parse_seconds_from_path(path),
+                state,
+                parse_signbench_from_path(path),
+                path.indexOf("telemetry=1") >= 0 || path.indexOf("telemetry=true") >= 0 || path.indexOf("telemetry=yes") >= 0 || path.indexOf("telemetry=on") >= 0,
+                parse_drop_test_frames_from_path(path));
+}
+
+void handle_client_api_only(WiFiClient& client, AppState& state) {
+  String method, path;
+  int content_len = 0;
+  if (!parse_request_and_headers(client, method, path, content_len)) return;
+
+  String remote_ip = client.remoteIP().toString();
+  if (!is_remote_ip_authorized(state, remote_ip)) {
+    send_json(client, 403,
+              "{\"ok\":false,\"error\":\"ERR_AUTH_LISTENER_IP\",\"detail\":\"listener IP not authorized\"}");
+    return;
+  }
+
+  if (method == "POST" && path == "/api/v1/device/upgrade") {
+    Serial.printf("AZT_OTA_POST begin content_len=%d from=%s\n", content_len, remote_ip.c_str());
+    String err;
+    if (handle_ota_upgrade_bundle_post(client, content_len, state, err)) {
+      Serial.printf("AZT_OTA_POST ok\n");
+      send_json(client, 200, "{\"ok\":true,\"upgrade_written\":true,\"reboot_required\":true,\"detail\":\"firmware accepted; reboot to run new image\"}");
+    } else {
+      Serial.printf("AZT_OTA_POST err=%s\n", err.c_str());
+      // Best-effort drain reduces TCP RSTs when rejecting while client is still uploading.
+      drain_request_body_best_effort(client, content_len, 60000);
+      send_json(client, 400, "{\"ok\":false,\"error\":\"ERR_OTA_UPGRADE\",\"detail\":" + json_quote(err) + "}");
+    }
+    return;
+  }
+
+  String body = "";
+  if (method == "POST") {
+    body.reserve(content_len > 0 ? content_len : 256);
+    while ((int)body.length() < content_len && client.connected()) {
+      int c = client.read();
+      if (c < 0) {
+        delay(1);
+        continue;
+      }
+      body += static_cast<char>(c);
+    }
+  }
+
+  HttpDispatchResult r = dispatch_request(method, path, body, state);
+  if (r.wants_stream) {
+    String location = String("http://") + client.localIP().toString() + ":8081" + path;
+    client.print("HTTP/1.1 307 Temporary Redirect\r\n");
+    client.print("Location: ");
+    client.print(location);
+    client.print("\r\n");
+    client.print("Cache-Control: no-store\r\n");
+    client.print("Connection: close\r\n");
+    client.print("Content-Length: 0\r\n\r\n");
+    return;
+  }
+
+  if (r.content_type == "application/json") {
+    send_json(client, r.code, r.body);
+  } else {
+    client.print("HTTP/1.1 ");
+    client.print(r.code);
+    client.print(r.code == 200 ? " OK\r\n" : " Error\r\n");
+    client.print("Content-Type: ");
+    client.print(r.content_type);
+    client.print("\r\nConnection: close\r\n\r\n");
+    client.print(r.body);
+  }
+
+  if (r.reboot_after_response) {
+    delay(150);
+    esp_restart();
+  }
+}
+
+void handle_client(WiFiClient& client, AppState& state) {
+  handle_client_api_only(client, state);
+}
+
+}  // namespace azt

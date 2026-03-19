@@ -1,0 +1,100 @@
+#include <Arduino.h>
+#include <WiFiServer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
+#include "azt_app_state.h"
+#include "azt_config.h"
+#include "azt_device_io.h"
+#include "azt_discovery.h"
+#include "azt_http_api.h"
+#include "azt_serial_control.h"
+
+namespace {
+
+static constexpr uint16_t kStreamPort = 8081;
+
+azt::AppState g_state;
+WiFiServer g_api_server(azt::kHttpPort);
+WiFiServer g_stream_server(kStreamPort);
+SemaphoreHandle_t g_state_mu = nullptr;
+TaskHandle_t g_stream_task = nullptr;
+
+azt::SerialControlState g_serial_state;
+
+void stream_server_task(void*) {
+  for (;;) {
+    WiFiClient client = g_stream_server.available();
+    if (!client) {
+      delay(2);
+      continue;
+    }
+
+    azt::AppState snapshot;
+    if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(200)) != pdTRUE) {
+      client.stop();
+      continue;
+    }
+    snapshot = g_state;
+    xSemaphoreGive(g_state_mu);
+
+    azt::handle_client_stream_only(client, snapshot);
+    client.stop();
+  }
+}
+
+}  // namespace
+
+void setup() {
+  Serial.begin(115200);
+  delay(200);
+
+  g_state_mu = xSemaphoreCreateMutex();
+
+  xSemaphoreTake(g_state_mu, portMAX_DELAY);
+  azt::load_config_state(g_state);
+  g_state.discovery_announcement_json = azt::build_discovery_announcement_json(g_state, azt::kHttpPort);
+  azt::setup_wifi(g_state);
+  azt::setup_time_sync(g_state);
+  xSemaphoreGive(g_state_mu);
+
+  azt::setup_i2s_pdm_mic();
+
+  g_api_server.begin();
+  g_stream_server.begin();
+
+  xTaskCreatePinnedToCore(stream_server_task,
+                          "azt_stream_server",
+                          8192,
+                          nullptr,
+                          1,
+                          &g_stream_task,
+                          0);
+
+  Serial.printf("AZT_HTTP api_port=%u stream_port=%u\n", azt::kHttpPort, kStreamPort);
+}
+
+void loop() {
+  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(200)) == pdTRUE) {
+    azt::maybe_maintain_wifi(g_state);
+    azt::maybe_refresh_time_sync(g_state);
+    azt::maybe_broadcast_discovery_announcement(g_state);
+    xSemaphoreGive(g_state_mu);
+  }
+
+  azt::handle_serial_control(g_state, g_state_mu, g_serial_state);
+
+  WiFiClient client = g_api_server.available();
+  if (!client) {
+    delay(2);
+    return;
+  }
+
+  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(4000)) != pdTRUE) {
+    client.stop();
+    return;
+  }
+  azt::handle_client_api_only(client, g_state);
+  xSemaphoreGive(g_state_mu);
+  client.stop();
+}

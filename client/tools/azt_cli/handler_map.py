@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+import argparse
+
+from tools.azt_cli import commands as cli_commands
+from tools.azt_cli import (
+    cmd_attestation_get,
+    cmd_attestation_verify,
+    cmd_certificate_get,
+    cmd_certificate_issue,
+    cmd_certificate_post,
+    cmd_configure_device,
+    cmd_create_credentials,
+    cmd_erase_device,
+    cmd_flash_device,
+    cmd_ip_detect,
+    cmd_key_match_check,
+    cmd_mdns_fqdn_get,
+    cmd_reboot_device,
+    cmd_sign_config,
+    cmd_signing_key_check,
+    cmd_state_get,
+    cmd_stream_probe,
+    cmd_stream_redirect_check,
+    cmd_stream_validate,
+)
+
+
+def build_handler_namespace(
+    *,
+    cmd_apply_config,
+    cmd_config_patch,
+    cmd_ota_bundle_create,
+    cmd_ota_bundle_post,
+    cmd_certify_issue,
+    cmd_verify_certification,
+    cmd_separate_headers,
+    cmd_decode_next_header,
+    cmd_combine_headers,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        cmd_sign_config=cmd_sign_config.run,
+        cmd_apply_config=cmd_apply_config,
+        cmd_config_patch=cmd_config_patch,
+        cmd_stream_validate=cmd_stream_validate.run,
+        cmd_ota_bundle_create=cmd_ota_bundle_create,
+        cmd_ota_bundle_post=cmd_ota_bundle_post,
+        cmd_certify_issue=cmd_certify_issue,
+        cmd_verify_certification=cmd_verify_certification,
+        cmd_separate_headers=cmd_separate_headers,
+        cmd_decode_next_header=cmd_decode_next_header,
+        cmd_combine_headers=cmd_combine_headers,
+        cmd_erase_device=cmd_erase_device.run,
+        cmd_flash_device=cmd_flash_device.run,
+        cmd_create_credentials=cmd_create_credentials.run,
+        cmd_configure_device=cmd_configure_device.run,
+        cmd_state_get=cmd_state_get.run,
+        cmd_attestation_get=cmd_attestation_get.run,
+        cmd_attestation_verify=cmd_attestation_verify.run,
+        cmd_certificate_get=cmd_certificate_get.run,
+        cmd_certificate_issue=cmd_certificate_issue.run,
+        cmd_certificate_post=cmd_certificate_post.run,
+        cmd_ip_detect=cmd_ip_detect.run,
+        cmd_key_match_check=cmd_key_match_check.run,
+        cmd_mdns_fqdn_get=cmd_mdns_fqdn_get.run,
+        cmd_reboot_device=cmd_reboot_device.run,
+        cmd_signing_key_check=cmd_signing_key_check.run,
+        cmd_stream_redirect_check=cmd_stream_redirect_check.run,
+        cmd_stream_probe=cmd_stream_probe.run,
+        cmd_provision_unit=cli_commands.cmd_provision_unit,
+    )

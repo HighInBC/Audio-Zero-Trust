@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AZT Device Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="/ui/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/ui/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/ui/favicon-16.png" />
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <div>
+          <h1>AZT Device Dashboard</h1>
+          <p class="sub">Static UI + live API responses</p>
+        </div>
+        <div class="actions">
+          <button id="refreshBtn">Refresh</button>
+          <button id="rebootBtn">Reboot Device</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Device</h2>
+          <dl>
+            <dt>Label</dt><dd id="deviceLabel">-</dd>
+            <dt>State</dt><dd id="deviceState">-</dd>
+            <dt>Signed config</dt><dd id="signedReady">-</dd>
+          </dl>
+        </article>
+
+        <article class="card">
+          <h2>Network</h2>
+          <dl>
+            <dt>Wi-Fi configured</dt><dd id="wifiConfigured">-</dd>
+            <dt>Wi-Fi SSID</dt><dd id="wifiSsid">-</dd>
+            <dt>Last source</dt><dd id="wifiSource">-</dd>
+            <dt>Last status</dt><dd id="wifiStatus">-</dd>
+          </dl>
+        </article>
+
+        <article class="card">
+          <h2>Trust</h2>
+          <dl>
+            <dt>Admin fingerprint</dt><dd id="adminFp" class="mono">-</dd>
+            <dt>Device signing FP</dt><dd id="devSignFp" class="mono">-</dd>
+            <dt>Certificate serial</dt><dd id="certSerial">-</dd>
+          </dl>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>Signed Config Workflow</h2>
+        <p class="sub">Build unsigned config → sign with CLI tool → upload signed config.</p>
+
+        <div class="grid two-up">
+          <div>
+            <label>Device Label</label>
+            <input id="cfgDeviceLabel" type="text" placeholder="e.g. Livingroom" />
+
+            <label>Wi-Fi SSID</label>
+            <input id="cfgWifiSsid" type="text" placeholder="Wi-Fi SSID" />
+
+            <label>Wi-Fi Password</label>
+            <input id="cfgWifiPass" type="text" placeholder="Wi-Fi password" />
+
+            <label>Admin Fingerprint (sha256-spki-der)</label>
+            <input id="cfgAdminFp" class="mono" type="text" placeholder="64 hex chars" />
+          </div>
+
+          <div>
+            <label>Admin Public Key PEM</label>
+            <textarea id="cfgAdminPem" class="mono" rows="10" placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="buildUnsignedBtn">Build Unsigned JSON</button>
+          <button id="downloadUnsignedBtn">Download unsigned_config.json</button>
+        </div>
+
+        <label>Unsigned Config JSON</label>
+        <textarea id="unsignedJson" class="mono" rows="14"></textarea>
+
+        <h3>CLI: Sign & Apply</h3>
+        <pre id="cliHint" class="mono small"></pre>
+
+        <label>Upload signed_config.json</label>
+        <input id="signedUpload" type="file" accept="application/json,.json" />
+        <div class="actions">
+          <button id="applySignedBtn">Apply Signed Config to Device</button>
+        </div>
+        <pre id="applyResult" class="mono small">(no apply yet)</pre>
+      </section>
+
+      <section class="card">
+        <h2>Issue Certification (CLI Guided)</h2>
+        <p class="sub">Fill fields, then run the generated <span class="mono">azt-tool certify-issue</span> command in your shell. It mandates live host ownership verification and nonce attestation signature verification before signing.</p>
+
+        <div class="grid two-up">
+          <div>
+            <label>Device Serial</label>
+            <input id="certSerialInput" type="text" placeholder="e.g. audio-zero-trust-device-001" />
+
+            <label>Issue ID</label>
+            <input id="certIssueId" type="text" placeholder="e.g. AZT-123" />
+
+            <label>Issue Title</label>
+            <input id="certTitle" type="text" placeholder="Short issue title" />
+
+            <label>Expected Behavior</label>
+            <textarea id="certExpected" rows="3" placeholder="What should happen"></textarea>
+
+            <label>Actual Behavior</label>
+            <textarea id="certActual" rows="3" placeholder="What happened"></textarea>
+          </div>
+
+          <div>
+            <label>Repro Steps (one per line)</label>
+            <textarea id="certRepro" class="mono" rows="6" placeholder="1. ...\n2. ..."></textarea>
+
+            <label>Evidence Paths/Notes (one per line)</label>
+            <textarea id="certEvidence" class="mono" rows="6" placeholder="client/test/hil/e2e_quick_finite.bin\n/tmp/serial.log"></textarea>
+
+            <label>Metadata key=value (one per line)</label>
+            <textarea id="certMeta" class="mono" rows="5" placeholder="firmware_commit=main\nrunner=webui"></textarea>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="buildCertCmdBtn">Build Certification Command</button>
+          <button id="copyCertCmdBtn">Copy Command</button>
+        </div>
+
+        <pre id="certCmdOut" class="mono small">(build command)</pre>
+      </section>
+
+      <section class="card">
+        <h2>Quick links</h2>
+        <ul class="links">
+          <li><a href="/api/v1/config/state" target="_blank">/api/v1/config/state</a></li>
+          <li><a href="/api/v1/device/certificate" target="_blank">/api/v1/device/certificate</a></li>
+          <li><a href="/api/v1/device/signing-public-key.pem" target="_blank">/api/v1/device/signing-public-key.pem</a></li>
+          <li><a href="/stream?seconds=5" target="_blank">/stream?seconds=5</a></li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Raw response</h2>
+        <pre id="rawOut">Loading…</pre>
+      </section>
+    </main>
+    <script src="/ui/app.js"></script>
+  </body>
+</html>
