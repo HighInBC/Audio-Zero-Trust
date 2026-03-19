@@ -18,9 +18,6 @@ This repo is kept focused on code, tooling, and specs needed to build, flash, pr
 - `recorder/` — recorder implementation, tests, and recorder-specific docs
 - - `spec/` — format/spec documents used by implementations
 
-Operational notes/docs were moved out of the repo to:
-`/home/openclaw/.openclaw/workspace/notes/atom-echo-zero-trust/docs/`
-
 ## Quick setup (fresh Linux host)
 
 This flow matches the discrete CLI steps used by E2E.
@@ -147,7 +144,3 @@ python3 client/tools/azt_tool.py stream-validate --in client/test/hil/sample.bin
 - Control/API endpoints are served on `:8080`.
 - Streaming is served on `:8081` (`GET /stream?...`).
 - Backward compatibility: `GET /stream` on `:8080` returns `307 Temporary Redirect` to `:8081`.
-
-## Notes vs repo separation
-
-Internal planning/backlog notes are intentionally stored outside this repo in a sibling workspace path to keep the publishable tree clean.
