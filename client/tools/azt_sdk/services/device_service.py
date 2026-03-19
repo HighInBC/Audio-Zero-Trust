@@ -10,33 +10,33 @@ from tools.provision_unit import detect_device_ip_from_serial
 
 
 def state_get(*, host: str, port: int, timeout: int) -> dict:
-    return get_json(f"http://{host}:{port}/api/v1/config/state", timeout=timeout)
+    return get_json(f"http://{host}:{port}/api/v0/config/state", timeout=timeout)
 
 
 def attestation_get(*, host: str, port: int, timeout: int, nonce: str) -> dict:
     return get_json(
-        f"http://{host}:{port}/api/v1/device/attestation?nonce={quote(nonce, safe='')}",
+        f"http://{host}:{port}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
         timeout=timeout,
     )
 
 
 def certificate_get(*, host: str, port: int, timeout: int) -> dict:
-    return get_json(f"http://{host}:{port}/api/v1/device/certificate", timeout=timeout)
+    return get_json(f"http://{host}:{port}/api/v0/device/certificate", timeout=timeout)
 
 
 def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> dict:
-    return http_json("POST", f"http://{host}:{port}/api/v1/device/certificate", payload, timeout=timeout)
+    return http_json("POST", f"http://{host}:{port}/api/v0/device/certificate", payload, timeout=timeout)
 
 
 def reboot_device(*, host: str, port: int, timeout: int) -> dict:
-    return http_json("POST", f"http://{host}:{port}/api/v1/device/reboot", {}, timeout=timeout)
+    return http_json("POST", f"http://{host}:{port}/api/v0/device/reboot", {}, timeout=timeout)
 
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:
-    with urlopen(f"http://{host}:{port}/api/v1/device/signing-public-key.pem", timeout=timeout) as r:
+    with urlopen(f"http://{host}:{port}/api/v0/device/signing-public-key.pem", timeout=timeout) as r:
         pem_body = r.read().decode("utf-8", errors="replace")
         pem_ct = r.headers.get("Content-Type", "")
-    with urlopen(f"http://{host}:{port}/api/v1/device/signing-public-key", timeout=timeout) as r:
+    with urlopen(f"http://{host}:{port}/api/v0/device/signing-public-key", timeout=timeout) as r:
         pem_alias = r.read().decode("utf-8", errors="replace")
 
     has_pem = "BEGIN PUBLIC KEY" in pem_body

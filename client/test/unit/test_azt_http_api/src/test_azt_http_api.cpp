@@ -26,16 +26,16 @@ bool compute_test_admin_ed25519_fp(String& out_fp) {
 
 bool test_parse_request_line(Context&) {
   String m, p;
-  if (!azt::parse_request_line("GET /api/v1/config/state HTTP/1.1", m, p)) return false;
-  if (m != "GET" || p != "/api/v1/config/state") return false;
+  if (!azt::parse_request_line("GET /api/v0/config/state HTTP/1.1", m, p)) return false;
+  if (m != "GET" || p != "/api/v0/config/state") return false;
   if (azt::parse_request_line("BROKEN", m, p)) return false;
   return true;
 }
 
 bool test_parse_request_line_multiple_spaces(Context&) {
   String m, p;
-  return azt::parse_request_line("POST   /api/v1/config   HTTP/1.1", m, p) &&
-         m == "POST" && p == "/api/v1/config";
+  return azt::parse_request_line("POST   /api/v0/config   HTTP/1.1", m, p) &&
+         m == "POST" && p == "/api/v0/config";
 }
 
 bool test_parse_request_line_missing_path(Context&) {
@@ -45,23 +45,23 @@ bool test_parse_request_line_missing_path(Context&) {
 
 bool test_parse_request_line_empty_method(Context&) {
   String m, p;
-  return !azt::parse_request_line(" /api/v1/config HTTP/1.1", m, p);
+  return !azt::parse_request_line(" /api/v0/config HTTP/1.1", m, p);
 }
 
 bool test_parse_request_line_path_only(Context&) {
   String m, p;
-  return !azt::parse_request_line("/api/v1/config", m, p);
+  return !azt::parse_request_line("/api/v0/config", m, p);
 }
 
 bool test_parse_request_line_requires_http_version(Context&) {
   String m, p;
-  return !azt::parse_request_line("GET /api/v1/config", m, p);
+  return !azt::parse_request_line("GET /api/v0/config", m, p);
 }
 
 bool test_parse_request_line_accepts_tabs_and_trim(Context&) {
   String m, p;
-  return azt::parse_request_line("\tGET\t/api/v1/config/state\tHTTP/1.1\t", m, p) &&
-         m == "GET" && p == "/api/v1/config/state";
+  return azt::parse_request_line("\tGET\t/api/v0/config/state\tHTTP/1.1\t", m, p) &&
+         m == "GET" && p == "/api/v0/config/state";
 }
 
 bool test_parse_request_line_rejects_non_slash_path(Context&) {
@@ -71,15 +71,15 @@ bool test_parse_request_line_rejects_non_slash_path(Context&) {
 
 bool test_parse_request_line_rejects_extra_token(Context&) {
   String m, p;
-  return !azt::parse_request_line("GET /api/v1/config HTTP/1.1 EXTRA", m, p);
+  return !azt::parse_request_line("GET /api/v0/config HTTP/1.1 EXTRA", m, p);
 }
 
 bool test_upgrade_get_route_returns_upload_ui(Context&) {
   azt::AppState st{};
-  auto r = azt::dispatch_request("GET", "/api/v1/device/upgrade", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/upgrade", "", st);
   return r.code == 200 && r.content_type.indexOf("text/html") >= 0 &&
          r.body.indexOf("AZT OTA Upgrade") >= 0 &&
-         r.body.indexOf("/api/v1/device/upgrade") >= 0;
+         r.body.indexOf("/api/v0/device/upgrade") >= 0;
 }
 
 bool test_ota_bundle_header_validation_invalid_kind(Context&) {
@@ -190,7 +190,7 @@ bool test_dispatch_request_basic_routes(Context&) {
   auto r1c = azt::dispatch_request("GET", "/stream?seconds=9&telemetry=1&drop_test_frames=5", "", st);
   if (!r1c.wants_stream || !r1c.stream_enable_telemetry || r1c.stream_drop_test_frames != 5) return false;
 
-  auto r2 = azt::dispatch_request("GET", "/api/v1/config/state", "", st);
+  auto r2 = azt::dispatch_request("GET", "/api/v0/config/state", "", st);
   if (r2.wants_stream || r2.code != 200) return false;
   if (r2.body.indexOf("UNSET_ADMIN") < 0) return false;
   if (r2.body.indexOf("device_sign_alg") < 0) return false;
@@ -326,7 +326,7 @@ bool test_config_post_requires_signature_unmanaged(Context& ctx) {
   String body;
   serializeJson(doc, body);
 
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0;
 }
 
@@ -356,7 +356,7 @@ bool test_config_post_rejects_ota_signer_override_via_api(Context& ctx) {
   String body;
   serializeJson(doc, body);
 
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return (r.code == 403 && r.body.indexOf("ERR_CONFIG_OTA_SERIAL_ONLY") >= 0) || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -364,20 +364,20 @@ bool test_signing_public_key_endpoint_pem(Context&) {
   azt::AppState st{};
   st.device_sign_public_key_b64 = "X8mNhhWS6qi5fYzNfMP6GSGUj9Yqkh6KI5/kj9rtYWE=";
 
-  auto r = azt::dispatch_request("GET", "/api/v1/device/signing-public-key.pem", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/signing-public-key.pem", "", st);
   return r.code == 200 && r.content_type == "application/x-pem-file" &&
          r.body.indexOf("BEGIN PUBLIC KEY") >= 0;
 }
 
 bool test_attestation_nonce_too_short(Context&) {
   azt::AppState st{};
-  auto r = azt::dispatch_request("GET", "/api/v1/device/attestation?nonce=abc", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/attestation?nonce=abc", "", st);
   return r.code == 400 && r.body.indexOf("ERR_ATTEST_NONCE") >= 0;
 }
 
 bool test_attestation_nonce_missing(Context&) {
   azt::AppState st{};
-  auto r = azt::dispatch_request("GET", "/api/v1/device/attestation", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/attestation", "", st);
   return r.code == 400 && r.body.indexOf("ERR_ATTEST_NONCE") >= 0;
 }
 
@@ -403,14 +403,14 @@ bool test_stream_query_drop_test_frames_invalid_defaults_zero(Context&) {
 
 bool test_reboot_endpoint_sets_flag(Context&) {
   azt::AppState st{};
-  auto r = azt::dispatch_request("POST", "/api/v1/device/reboot", "", st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/reboot", "", st);
   return r.code == 200 && r.content_type == "application/json" && r.reboot_after_response;
 }
 
 bool test_signing_public_key_endpoint_alias(Context&) {
   azt::AppState st{};
   st.device_sign_public_key_b64 = "X8mNhhWS6qi5fYzNfMP6GSGUj9Yqkh6KI5/kj9rtYWE=";
-  auto r = azt::dispatch_request("GET", "/api/v1/device/signing-public-key", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/signing-public-key", "", st);
   return r.code == 200 && r.body.indexOf("BEGIN PUBLIC KEY") >= 0;
 }
 
@@ -441,7 +441,7 @@ bool test_config_post_rejects_invalid_recording_key(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -468,7 +468,7 @@ bool test_config_post_rejects_invalid_time(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -496,7 +496,7 @@ bool test_config_post_rejects_invalid_authorized_listener_ips_type(Context& ctx)
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -525,14 +525,14 @@ bool test_config_post_rejects_invalid_authorized_listener_ip_value(Context& ctx)
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
 bool test_signing_public_key_endpoint_invalid_device_key(Context&) {
   azt::AppState st{};
   st.device_sign_public_key_b64 = "bad";
-  auto r = azt::dispatch_request("GET", "/api/v1/device/signing-public-key.pem", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/signing-public-key.pem", "", st);
   return r.code == 500;
 }
 
@@ -541,41 +541,41 @@ bool test_attestation_nonce_too_long(Context&) {
   String long_nonce;
   long_nonce.reserve(300);
   for (int i = 0; i < 280; ++i) long_nonce += 'a';
-  auto r = azt::dispatch_request("GET", "/api/v1/device/attestation?nonce=" + long_nonce, "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/attestation?nonce=" + long_nonce, "", st);
   return r.code == 400 && r.body.indexOf("ERR_ATTEST_NONCE") >= 0;
 }
 
 bool test_config_post_invalid_json(Context&) {
   azt::AppState st{};
   st.managed = false;
-  auto r = azt::dispatch_request("POST", "/api/v1/config", "{not-json", st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", "{not-json", st);
   return r.code == 400 && r.body.indexOf("ERR_CONFIG_SCHEMA") >= 0 && r.body.indexOf("invalid json") >= 0;
 }
 
 bool test_signing_public_key_endpoint_missing_device_key(Context&) {
   azt::AppState st{};
   st.device_sign_public_key_b64 = "";
-  auto r = azt::dispatch_request("GET", "/api/v1/device/signing-public-key.pem", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/signing-public-key.pem", "", st);
   return r.code == 500;
 }
 
 bool test_signing_public_key_alias_invalid_device_key(Context&) {
   azt::AppState st{};
   st.device_sign_public_key_b64 = "bad";
-  auto r = azt::dispatch_request("GET", "/api/v1/device/signing-public-key", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/signing-public-key", "", st);
   return r.code == 500;
 }
 
 bool test_signing_public_key_alias_missing_device_key(Context&) {
   azt::AppState st{};
   st.device_sign_public_key_b64 = "";
-  auto r = azt::dispatch_request("GET", "/api/v1/device/signing-public-key", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/signing-public-key", "", st);
   return r.code == 500;
 }
 
 bool test_attestation_valid_nonce_reaches_non_schema_path(Context&) {
   azt::AppState st{};
-  auto r = azt::dispatch_request("GET", "/api/v1/device/attestation?nonce=12345678", "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/attestation?nonce=12345678", "", st);
   return !(r.code == 400 && r.body.indexOf("ERR_ATTEST_NONCE") >= 0);
 }
 
@@ -584,7 +584,7 @@ bool test_attestation_max_nonce_len_schema_accepts(Context&) {
   String n;
   n.reserve(256);
   for (int i = 0; i < 256; ++i) n += 'a';
-  auto r = azt::dispatch_request("GET", "/api/v1/device/attestation?nonce=" + n, "", st);
+  auto r = azt::dispatch_request("GET", "/api/v0/device/attestation?nonce=" + n, "", st);
   return !(r.code == 400 && r.body.indexOf("ERR_ATTEST_NONCE") >= 0);
 }
 
@@ -608,7 +608,7 @@ bool test_config_post_rejects_wrong_version(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -631,7 +631,7 @@ bool test_config_post_rejects_missing_device_label(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -655,7 +655,7 @@ bool test_config_post_rejects_invalid_wifi_object(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -679,7 +679,7 @@ bool test_config_post_rejects_invalid_admin_key(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 && r.body.indexOf("invalid admin_key object") >= 0;
 }
 
@@ -706,7 +706,7 @@ bool test_config_post_requires_signature_managed(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0;
 }
 
@@ -730,7 +730,7 @@ bool test_config_post_rejects_empty_time_server(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -756,7 +756,7 @@ bool test_config_post_rejects_empty_time_servers_entry(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -782,7 +782,7 @@ bool test_config_post_rejects_non_string_time_servers_entry(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -809,7 +809,7 @@ bool test_config_post_rejects_non_string_authorized_listener_entry(Context& ctx)
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -846,7 +846,7 @@ bool test_config_post_rejects_invalid_audio_sample_rate(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0 &&
          r.body.indexOf("ERR_CONFIG_SCHEMA") < 0;
 }
@@ -864,7 +864,7 @@ bool test_config_post_rejects_invalid_audio_channels(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0 &&
          r.body.indexOf("ERR_CONFIG_SCHEMA") < 0;
 }
@@ -882,7 +882,7 @@ bool test_config_post_rejects_invalid_audio_sample_width(Context& ctx) {
 
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0 &&
          r.body.indexOf("ERR_CONFIG_SCHEMA") < 0;
 }
@@ -896,21 +896,21 @@ bool test_config_state_includes_config_revision(Context&) {
   st.device_sign_fingerprint_hex = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
   st.config_revision = 7;
 
-  auto r_state = azt::dispatch_request("GET", "/api/v1/config/state", "", st);
+  auto r_state = azt::dispatch_request("GET", "/api/v0/config/state", "", st);
   return r_state.code == 200 && r_state.body.indexOf("\"config_revision\":7") >= 0;
 }
 
 bool test_config_patch_rejects_unset_admin(Context&) {
   azt::AppState st{};
   st.managed = false;
-  auto r = azt::dispatch_request("POST", "/api/v1/config/patch", "{}", st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config/patch", "{}", st);
   return r.code == 409 && r.body.indexOf("ERR_CONFIG_PATCH_UNSET_ADMIN") >= 0;
 }
 
 bool test_config_patch_rejects_invalid_json(Context&) {
   azt::AppState st{};
   st.managed = true;
-  auto r = azt::dispatch_request("POST", "/api/v1/config/patch", "{not-json", st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config/patch", "{not-json", st);
   return r.code == 400 && r.body.indexOf("ERR_CONFIG_SCHEMA") >= 0;
 }
 
@@ -924,7 +924,7 @@ bool test_config_patch_requires_config_version_1(Context&) {
   p["device_label"] = "x";
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config/patch", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config/patch", body, st);
   return r.code == 400 || (r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0);
 }
 
@@ -939,7 +939,7 @@ bool test_config_patch_rejects_version_conflict(Context&) {
   p["device_label"] = "x";
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config/patch", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config/patch", body, st);
   return r.code == 409 && r.body.indexOf("ERR_CONFIG_VERSION_CONFLICT") >= 0;
 }
 
@@ -955,7 +955,7 @@ bool test_config_patch_forbids_admin_key_and_ota_fields(Context&) {
   p["device_label"] = "x";
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config/patch", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config/patch", body, st);
   return r.code == 403 && r.body.indexOf("ERR_PATCH_PATH_FORBIDDEN") >= 0;
 }
 
@@ -976,19 +976,19 @@ bool test_config_patch_requires_signature(Context& ctx) {
   p["device_label"] = "x";
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/config/patch", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/config/patch", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CONFIG_SIGNATURE") >= 0;
 }
 
 bool test_certificate_post_invalid_json(Context&) {
   azt::AppState st{};
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", "{bad-json", st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", "{bad-json", st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_SCHEMA") >= 0;
 }
 
 bool test_certificate_post_missing_fields(Context&) {
   azt::AppState st{};
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", "{}", st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", "{}", st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_SCHEMA") >= 0 &&
          r.body.indexOf("missing certificate_payload_b64/signature fields") >= 0;
 }
@@ -1028,7 +1028,7 @@ bool test_certificate_post_invalid_payload_b64(Context&) {
   doc["signature_b64"] = "AAAA";
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_PAYLOAD_B64") >= 0;
 }
 
@@ -1041,7 +1041,7 @@ bool test_certificate_post_payload_json_invalid(Context&) {
   doc["signature_b64"] = "AAAA";
   String body;
   serializeJson(doc, body);
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_PAYLOAD_JSON") >= 0;
 }
 
@@ -1055,7 +1055,7 @@ bool test_certificate_post_device_mismatch(Context&) {
                                          st.device_sign_fingerprint_hex,
                                          st.admin_fingerprint_hex,
                                          "cert-dev-mismatch");
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_DEVICE_MISMATCH") >= 0;
 }
 
@@ -1069,7 +1069,7 @@ bool test_certificate_post_admin_mismatch(Context&) {
                                          st.device_sign_fingerprint_hex,
                                          "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                                          "cert-admin-mismatch");
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CERT_ADMIN_MISMATCH") >= 0;
 }
 
@@ -1084,7 +1084,7 @@ bool test_certificate_post_admin_not_configured(Context&) {
                                          st.device_sign_fingerprint_hex,
                                          st.admin_fingerprint_hex,
                                          "cert-admin-not-configured");
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 500 && r.body.indexOf("ERR_CERT_ADMIN_NOT_CONFIGURED") >= 0;
 }
 
@@ -1102,7 +1102,7 @@ bool test_certificate_post_admin_fp_invalid(Context& ctx) {
                                          st.device_sign_fingerprint_hex,
                                          st.admin_fingerprint_hex,
                                          "cert-admin-fp-invalid");
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_ADMIN_FP") >= 0;
 }
 
@@ -1120,7 +1120,7 @@ bool test_certificate_post_signature_verify_fail(Context& ctx) {
                                          st.device_sign_fingerprint_hex,
                                          st.admin_fingerprint_hex,
                                          "cert-sig-verify-fail");
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return (r.code == 401 && r.body.indexOf("ERR_CERT_SIG_VERIFY") >= 0) || (r.code == 400 && r.body.indexOf("ERR_CERT_SCHEMA") >= 0);
 }
 
@@ -1139,7 +1139,7 @@ bool test_certificate_post_signature_b64_invalid(Context& ctx) {
                                          st.admin_fingerprint_hex,
                                          "cert-sig-b64-invalid",
                                          "@@not-b64@@");
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return (r.code == 401 && r.body.indexOf("ERR_CERT_SIG_VERIFY") >= 0) || (r.code == 400 && r.body.indexOf("ERR_CERT_SCHEMA") >= 0);
 }
 
@@ -1152,7 +1152,7 @@ bool test_certificate_post_signature_algorithm_wrong(Context&) {
   serializeJson(doc, body);
 
   azt::AppState st{};
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_SCHEMA") >= 0;
 }
 
@@ -1165,7 +1165,7 @@ bool test_certificate_post_missing_signature_b64(Context&) {
   serializeJson(doc, body);
 
   azt::AppState st{};
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_SCHEMA") >= 0;
 }
 
@@ -1188,7 +1188,7 @@ bool test_certificate_post_missing_device_fields(Context&) {
   st.device_sign_public_key_b64 = "DEVICE_KEY_A";
   st.device_sign_fingerprint_hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   st.admin_fingerprint_hex = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 400 && r.body.indexOf("ERR_CERT_DEVICE_MISMATCH") >= 0;
 }
 
@@ -1212,7 +1212,7 @@ bool test_certificate_post_missing_admin_field(Context&) {
   st.device_sign_public_key_b64 = "DEVICE_KEY_A";
   st.device_sign_fingerprint_hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   st.admin_fingerprint_hex = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-  auto r = azt::dispatch_request("POST", "/api/v1/device/certificate", body, st);
+  auto r = azt::dispatch_request("POST", "/api/v0/device/certificate", body, st);
   return r.code == 401 && r.body.indexOf("ERR_CERT_ADMIN_MISMATCH") >= 0;
 }
 

@@ -50,8 +50,8 @@ def apply_config(*, in_path: str, key_path: str, host: str, port: int, timeout: 
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
     base = f"http://{host}:{port}"
-    apply_res = http_json("POST", f"{base}/api/v1/config", signed_cfg, timeout=timeout)
-    state_res = get_json(f"{base}/api/v1/config/state", timeout=timeout)
+    apply_res = http_json("POST", f"{base}/api/v0/config", signed_cfg, timeout=timeout)
+    state_res = get_json(f"{base}/api/v0/config/state", timeout=timeout)
     ok = bool(apply_res.get("ok")) and bool(state_res.get("ok"))
     return ok, {
         "host": host,
@@ -79,8 +79,8 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
     base = f"http://{host}:{port}"
-    patch_res = http_json("POST", f"{base}/api/v1/config/patch", signed_cfg, timeout=timeout)
-    state_res = get_json(f"{base}/api/v1/config/state", timeout=timeout)
+    patch_res = http_json("POST", f"{base}/api/v0/config/patch", signed_cfg, timeout=timeout)
+    state_res = get_json(f"{base}/api/v0/config/state", timeout=timeout)
     ok = bool(patch_res.get("ok")) and bool(state_res.get("ok"))
     return ok, {
         "host": host,
@@ -94,7 +94,7 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
 
 def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: str, issue_id: str, title: str, expected: str, actual: str, repro: list[str], evidence: list[str], meta: list[str], nonce: str, cert_serial: str, no_upload_device_cert: bool, out_path: str) -> tuple[bool, str | None, dict]:
     keyp = Path(key_path)
-    state = get_json(f"http://{host}:{port}/api/v1/config/state", timeout=timeout)
+    state = get_json(f"http://{host}:{port}/api/v0/config/state", timeout=timeout)
     if not state.get("ok"):
         return False, "ERR_STATE_QUERY", {"state": state}
 
@@ -104,7 +104,7 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
         return False, "ERR_KEY_OWNERSHIP", {"key_fingerprint": key_fp, "device_fingerprint": device_fp}
 
     nonce_hex = nonce.strip() or secrets.token_hex(16)
-    att = get_json(f"http://{host}:{port}/api/v1/device/attestation?nonce={quote(nonce_hex, safe='')}", timeout=timeout)
+    att = get_json(f"http://{host}:{port}/api/v0/device/attestation?nonce={quote(nonce_hex, safe='')}", timeout=timeout)
     if not att.get("ok"):
         return False, "ERR_ATTESTATION_QUERY", {"attestation": att}
 
@@ -183,7 +183,7 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
             "signature_algorithm": "ed25519",
             "signature_b64": base64.b64encode(cert_sig_raw).decode("ascii"),
         }
-        upload_res = http_json("POST", f"http://{host}:{port}/api/v1/device/certificate", cert_doc, timeout=timeout)
+        upload_res = http_json("POST", f"http://{host}:{port}/api/v0/device/certificate", cert_doc, timeout=timeout)
         if not upload_res.get("ok"):
             return False, "ERR_DEVICE_CERT_UPLOAD", {"upload": upload_res}
 

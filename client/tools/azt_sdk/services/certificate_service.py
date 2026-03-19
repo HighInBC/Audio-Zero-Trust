@@ -39,7 +39,7 @@ def _validate_attestation(*, att: dict, state: dict, host: str, port: int, attes
 
 
 def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, attestation_path: str | None, attestation_max_age_s: int, cert_serial: str, valid_from_utc: str, valid_until_utc: str, out_path: str | None = None) -> tuple[bool, str | None, dict]:
-    state = get_json(f"http://{host}:{port}/api/v1/config/state", timeout=timeout)
+    state = get_json(f"http://{host}:{port}/api/v0/config/state", timeout=timeout)
     if not bool(state.get("ok")):
         return False, "STATE_GET_FAILED", {"state": state}
 

@@ -897,15 +897,15 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
-  if (method == "POST" && path == "/api/v1/config") {
+  if (method == "POST" && path == "/api/v0/config") {
     return handle_config_post_json(state, body, false);
   }
 
-  if (method == "POST" && path == "/api/v1/config/patch") {
+  if (method == "POST" && path == "/api/v0/config/patch") {
     return handle_config_patch_json(state, body);
   }
 
-  if ((method == "POST" || method == "GET") && path == "/api/v1/device/reboot") {
+  if ((method == "POST" || method == "GET") && path == "/api/v0/device/reboot") {
     r.code = 200;
     r.content_type = "application/json";
     r.body = "{\"ok\":true,\"rebooting\":true}";
@@ -913,7 +913,7 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
-  if (method == "GET" && path == "/api/v1/device/upgrade") {
+  if (method == "GET" && path == "/api/v0/device/upgrade") {
     r.code = 200;
     r.content_type = "text/html; charset=utf-8";
     r.body =
@@ -928,14 +928,14 @@ HttpDispatchResult dispatch_request(const String& method,
         "const f=document.getElementById('f').files[0]; if(!f){o.textContent='pick file'; return;}"
         "o.textContent='Uploading '+f.name+' ...';"
         "try{const b=await f.arrayBuffer();"
-        "const r=await fetch('/api/v1/device/upgrade',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:b});"
+        "const r=await fetch('/api/v0/device/upgrade',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:b});"
         "const t=await r.text(); o.textContent='HTTP '+r.status+'\\n'+t;}catch(e){o.textContent=String(e);}"
         "};"
         "</script></body></html>";
     return r;
   }
 
-  if (method == "GET" && path.startsWith("/api/v1/device/attestation")) {
+  if (method == "GET" && path.startsWith("/api/v0/device/attestation")) {
     String nonce = parse_query_param(path, "nonce");
     if (nonce.length() < 8 || nonce.length() > 256) {
       r.code = 400;
@@ -983,7 +983,7 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
-  if (method == "GET" && path == "/api/v1/device/certificate") {
+  if (method == "GET" && path == "/api/v0/device/certificate") {
     Preferences p;
     if (!p.begin("aztcfg", true)) {
       r.code = 500;
@@ -1005,7 +1005,7 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
-  if (method == "POST" && path == "/api/v1/device/certificate") {
+  if (method == "POST" && path == "/api/v0/device/certificate") {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, body);
     if (err) {
@@ -1115,7 +1115,14 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
-  if (method == "GET" && path == "/api/v1/config/state") {
+  if (method == "GET" && path == "/api/v0/capabilities") {
+    r.code = 200;
+    r.body = "{\"ok\":true,\"api_major\":0,\"api_minor\":0,\"protocol_major\":0,\"protocol_minor\":0,\"container_major\":0,\"container_minor\":0,\"supported_features\":[\"config\",\"config_patch\",\"attestation\",\"certificate\",\"ota_upgrade\",\"stream\"]}";
+    r.content_type = "application/json";
+    return r;
+  }
+
+  if (method == "GET" && path == "/api/v0/config/state") {
     String status = !state.managed ? "UNSET_ADMIN" : (state.signed_config_ready ? "MANAGED" : "PENDING_SIGNED_CONFIG");
     bool wifi_cfg = state.wifi_ssid.length() > 0 && state.wifi_pass.length() > 0;
     bool recording_key_cfg = state.recording_pubkey_pem.length() > 0 && state.recording_fingerprint_hex.length() == 64;
@@ -1143,7 +1150,7 @@ HttpDispatchResult dispatch_request(const String& method,
       time_staleness_s = static_cast<long>(now_epoch - static_cast<time_t>(state.time_last_sync_epoch));
     }
     r.code = 200;
-    r.body = "{\"ok\":true,\"state\":\"" + status +
+    r.body = "{\"ok\":true,\"api_major\":0,\"api_minor\":0,\"protocol_major\":0,\"protocol_minor\":0,\"container_major\":0,\"container_minor\":0,\"state\":\"" + status +
              "\",\"signed_config_ready\":" +
              String(state.signed_config_ready ? "true" : "false") +
              ",\"device_label\":\"" + state.device_label +
@@ -1186,7 +1193,7 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
-  if (method == "GET" && (path == "/api/v1/device/signing-public-key.pem" || path == "/api/v1/device/signing-public-key")) {
+  if (method == "GET" && (path == "/api/v0/device/signing-public-key.pem" || path == "/api/v0/device/signing-public-key")) {
     String pem;
     if (!ed25519_pub_raw_to_spki_pem(state.device_sign_public_key_b64, pem)) {
       r.code = 500;
@@ -1784,7 +1791,7 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
     return;
   }
 
-  if (method == "POST" && path == "/api/v1/device/upgrade") {
+  if (method == "POST" && path == "/api/v0/device/upgrade") {
     Serial.printf("AZT_OTA_POST begin content_len=%d from=%s\n", content_len, remote_ip.c_str());
     String err;
     if (handle_ota_upgrade_bundle_post(client, content_len, state, err)) {

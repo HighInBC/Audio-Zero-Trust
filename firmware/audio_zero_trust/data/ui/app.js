@@ -56,7 +56,7 @@ function renderCliHint() {
     'python3 client/tools/azt_tool.py sign-config --in unsigned_config.json --key admin_private_key.pem --out signed_config.json',
     '',
     '# Optional manual verify:',
-    `curl -sS ${base}/api/v1/config/state`,
+    `curl -sS ${base}/api/v0/config/state`,
   ].join('\n');
 }
 
@@ -76,7 +76,7 @@ function downloadUnsignedJson() {
 
 async function loadState() {
   try {
-    const r = await fetch('/api/v1/config/state');
+    const r = await fetch('/api/v0/config/state');
     const j = await r.json();
 
     setText('deviceLabel', j.device_label || '-');
@@ -157,7 +157,7 @@ async function rebootDevice() {
   const ok = confirm('Reboot device now?');
   if (!ok) return;
   try {
-    const r = await fetch('/api/v1/device/reboot', { method: 'POST' });
+    const r = await fetch('/api/v0/device/reboot', { method: 'POST' });
     const t = await r.text();
     rawOut.textContent = `Reboot request HTTP ${r.status}\n${t}\n\nDevice may take a few seconds to come back.`;
   } catch (e) {
@@ -177,7 +177,7 @@ async function applySignedConfig() {
     const text = await file.text();
     const payload = JSON.parse(text);
 
-    const r = await fetch('/api/v1/config', {
+    const r = await fetch('/api/v0/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

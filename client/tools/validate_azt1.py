@@ -80,8 +80,13 @@ def main() -> int:
         off = nl + 1
 
         # Plain-header expectations
-        if reqi(plain, "version") != 1:
-            fail("ERR_HEADER_FIELD", "version must be 1")
+        if reqi(plain, "version") != 0:
+            fail("ERR_HEADER_FIELD", "version must be 0")
+        if reqi(plain, "container_major") != 0:
+            fail("ERR_HEADER_FIELD", "container_major must be 0")
+        cminor = reqi(plain, "container_minor")
+        if cminor is None or cminor < 0:
+            fail("ERR_HEADER_FIELD", "container_minor must be >= 0")
         if reqs(plain, "next_header_key_wrap") != "rsa-oaep-sha256":
             fail("ERR_HEADER_FIELD", "next_header_key_wrap mismatch")
         if reqs(plain, "next_header_cipher") != "aes-256-gcm":

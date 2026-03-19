@@ -11,9 +11,9 @@ from tools.azt_client.http import get_json
 
 
 def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tuple[bool, dict]:
-    state = get_json(f"http://{host}:{port}/api/v1/config/state", timeout=timeout)
+    state = get_json(f"http://{host}:{port}/api/v0/config/state", timeout=timeout)
     att = get_json(
-        f"http://{host}:{port}/api/v1/device/attestation?nonce={quote(nonce, safe='')}",
+        f"http://{host}:{port}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
         timeout=timeout,
     )
 

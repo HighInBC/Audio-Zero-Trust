@@ -302,7 +302,7 @@ def main() -> int:
     base = f'http://{device_ip}:8080'
     state0 = None
     try:
-        state0 = http_json('GET', base + '/api/v1/config/state')
+        state0 = http_json('GET', base + '/api/v0/config/state')
         print({'state_before': state0})
     except Exception as e:
         print({'warn': 'http_state_unreachable', 'ip': device_ip, 'detail': str(e)})
@@ -328,7 +328,7 @@ def main() -> int:
         base = f'http://{device_ip}:8080'
         time.sleep(1.5)
         try:
-            state1 = http_json('GET', base + '/api/v1/config/state')
+            state1 = http_json('GET', base + '/api/v0/config/state')
             print({'state_after': state1})
         except Exception as e:
             print({'ok': False, 'error': 'HTTP_UNREACHABLE_AFTER_SERIAL_BOOTSTRAP', 'ip': device_ip, 'detail': str(e)})
@@ -363,13 +363,13 @@ def main() -> int:
       print({'ok': False, 'error': 'MISSING_ADMIN_KEY_ARTIFACT', 'detail': f'device is {state_name} with unknown admin fingerprint; cannot safely update signed config', 'fingerprint': state_fp, 'ip': device_ip})
       return 5
 
-    r1 = http_json('POST', base + '/api/v1/config', signed)
+    r1 = http_json('POST', base + '/api/v0/config', signed)
     print({'initial_signed_result': r1})
 
-    r2 = http_json('POST', base + '/api/v1/config', signed)
+    r2 = http_json('POST', base + '/api/v0/config', signed)
     print({'signed_result': r2})
 
-    state1 = http_json('GET', base + '/api/v1/config/state')
+    state1 = http_json('GET', base + '/api/v0/config/state')
     print({'state_after': state1})
 
     if state1.get('admin_fingerprint_hex') != fp:

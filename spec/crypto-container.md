@@ -45,7 +45,9 @@ Trailing partial chunk bytes MAY exist (live capture truncation); validators may
 
 Required keys used by current validators/generator:
 
-- `version` = `1`
+- `version` = `0`
+- `container_major` = `0`
+- `container_minor` = non-negative integer (currently `0`)
 - `next_header_key_wrap` = `"rsa-oaep-sha256"`
 - `next_header_cipher` = `"aes-256-gcm"`
 - `next_header_wrapped_key_b64` (base64)
@@ -64,7 +66,7 @@ Required keys used by current validators/generator:
 - `this_header_signing_key_fingerprint_alg` = `"sha256-raw-ed25519-pub"`
 - `this_header_signing_key_fingerprint_hex`
 - `device_certificate_serial` (string, optional but recommended when certified)
-- `device_certificate` (JSON object, optional; full signed certificate document as returned by `/api/v1/device/certificate`)
+- `device_certificate` (JSON object, optional; full signed certificate document as returned by `/api/v0/device/certificate`)
 - `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
 - `chain_alg` = `"sha256-link"`
 - `chain_domain` = `"AZT1-CHAIN-V1"`
@@ -200,7 +202,7 @@ Current `client/tools/validate_azt1.py` categories include:
 
 ## 8) Compatibility notes
 
-- `version != 1` is unsupported.
+- `version != 0` is unsupported (current pre-release major baseline).
 - Unknown JSON fields should be ignored unless they contradict required fields.
 - `0xFFFF` next-header sentinel mode is supported and used for detached/decode workflows.
 - This document describes current passing behavior; keep synchronized with validator + firmware header builder.

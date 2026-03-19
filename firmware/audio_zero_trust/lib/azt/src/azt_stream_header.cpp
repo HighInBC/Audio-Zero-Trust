@@ -111,7 +111,9 @@ bool build_header_prefix(StreamCtx& sc,
   }
 
   String plain_header = "{";
-  plain_header += "\"version\":1,";
+  plain_header += "\"version\":0,";
+  plain_header += "\"container_major\":0,";
+  plain_header += "\"container_minor\":0,";
   plain_header += "\"next_header_key_wrap\":\"rsa-oaep-sha256\",";
   plain_header += "\"next_header_cipher\":\"aes-256-gcm\",";
   plain_header += "\"next_header_wrapped_key_b64\":\"" + b64(wrapped_header_key.data(), wrapped_header_key.size()) + "\",";

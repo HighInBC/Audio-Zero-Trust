@@ -146,7 +146,7 @@ def configure_device(
     if device_ip:
         base = f"http://{device_ip}:8080"
         try:
-            state0 = http_json("GET", base + "/api/v1/config/state")
+            state0 = http_json("GET", base + "/api/v0/config/state")
         except Exception as e:
             state0_err = str(e)
 
@@ -207,7 +207,7 @@ def configure_device(
             }
 
         time.sleep(1.0)
-        state1 = http_json("GET", f"http://{device_ip}:8080/api/v1/config/state")
+        state1 = http_json("GET", f"http://{device_ip}:8080/api/v0/config/state")
         ok = state1.get("admin_fingerprint_hex") == fp
         return (0 if ok else 6), ok, (None if ok else "POSTCHECK_FP_MISMATCH"), {
             **common,
@@ -222,9 +222,9 @@ def configure_device(
             return 0, True, None, {**common, "path": "http-existing", "state": state_name, "state_before": state0}
         return 5, False, "MISSING_ADMIN_KEY_ARTIFACT", {**common, "state": state_name, "fingerprint": state_fp}
 
-    r1 = http_json("POST", base + "/api/v1/config", signed)
-    r2 = http_json("POST", base + "/api/v1/config", signed)
-    state1 = http_json("GET", base + "/api/v1/config/state")
+    r1 = http_json("POST", base + "/api/v0/config", signed)
+    r2 = http_json("POST", base + "/api/v0/config", signed)
+    state1 = http_json("GET", base + "/api/v0/config/state")
     ok = state1.get("admin_fingerprint_hex") == fp
     return (0 if ok else 6), ok, (None if ok else "POSTCHECK_FP_MISMATCH"), {
         **common,
