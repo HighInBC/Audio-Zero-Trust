@@ -18,7 +18,7 @@ This repo is kept focused on code, tooling, and specs needed to build, flash, pr
 - `firmware/` — firmware projects (canonical app is `audio_zero_trust`)
 - `client/` — host-side client tooling, SDK, and client tests
 - `recorder/` — recorder implementation, tests, and recorder-specific docs
-- - `spec/` — format/spec documents used by implementations
+- `spec/` — format/spec documents used by implementations (including `spec/compatibility-policy.md`)
 
 ## Quick setup (fresh Linux host)
 

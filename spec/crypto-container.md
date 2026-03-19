@@ -204,3 +204,4 @@ Current `client/tools/validate_azt1.py` categories include:
 - Unknown JSON fields should be ignored unless they contradict required fields.
 - `0xFFFF` next-header sentinel mode is supported and used for detached/decode workflows.
 - This document describes current passing behavior; keep synchronized with validator + firmware header builder.
+- Repository-wide compatibility governance is defined in `spec/compatibility-policy.md`.
