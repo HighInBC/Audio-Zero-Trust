@@ -46,14 +46,14 @@ Then log out/login (or reboot) so group membership is applied.
 HTTPS:
 
 ```bash
-git clone <REPO_URL> Audio-Zero-Trust
+git clone https://github.com/HighInBC/Audio-Zero-Trust.git Audio-Zero-Trust
 cd Audio-Zero-Trust
 ```
 
 SSH:
 
 ```bash
-git clone git@github.com:<owner>/Audio-Zero-Trust.git Audio-Zero-Trust
+git clone git@github.com:HighInBC/Audio-Zero-Trust.git Audio-Zero-Trust
 cd Audio-Zero-Trust
 ```
 
