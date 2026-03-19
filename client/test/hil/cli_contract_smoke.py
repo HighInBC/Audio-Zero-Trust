@@ -47,8 +47,8 @@ def main() -> int:
     failures: list[str] = []
 
     ident = f"contract-{int(time.time())}"
-    rc, obj, raw = run_cmd(args.tool_cmd, ["create-credentials", "--identity", ident])
-    errs = require_envelope(obj, "create-credentials")
+    rc, obj, raw = run_cmd(args.tool_cmd, ["create-signing-credentials", "--identity", ident])
+    errs = require_envelope(obj, "create-signing-credentials")
     if rc != 0:
         errs.append(f"exit={rc}")
     payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
@@ -56,7 +56,7 @@ def main() -> int:
     if not art:
         errs.append("missing payload.artifacts")
     if errs:
-        failures.append("create-credentials: " + "; ".join(errs) + f" | raw={raw[:300]}")
+        failures.append("create-signing-credentials: " + "; ".join(errs) + f" | raw={raw[:300]}")
 
     for cmd in (["erase-device", "--port", "/dev/null"], ["flash-device", "--port", "/dev/null"]):
         # Expected to fail on invalid port but still should emit envelope.

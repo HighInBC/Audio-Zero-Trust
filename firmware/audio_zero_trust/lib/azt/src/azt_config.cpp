@@ -156,7 +156,7 @@ static bool validate_stored_device_certificate(const AppState& state,
   String payload_b64 = String((const char*)(cert_doc["certificate_payload_b64"] | ""));
   String sig_alg = String((const char*)(cert_doc["signature_algorithm"] | ""));
   String sig_b64 = String((const char*)(cert_doc["signature_b64"] | ""));
-  if (payload_b64.length() == 0 || sig_b64.length() == 0 || sig_alg != "rsa-pss-sha256") return false;
+  if (payload_b64.length() == 0 || sig_b64.length() == 0 || sig_alg != "ed25519") return false;
 
   std::vector<uint8_t> payload_raw;
   if (!b64_decode_vec(payload_b64, payload_raw) || payload_raw.empty()) return false;
@@ -176,11 +176,14 @@ static bool validate_stored_device_certificate(const AppState& state,
   if (chip_id != state.device_chip_id_hex) return false;
   if (admin_fp != state.admin_fingerprint_hex) return false;
 
-  String admin_fp_calc;
-  if (!compute_pubkey_spki_sha256_hex(state.admin_pubkey_pem, admin_fp_calc)) return false;
-  if (admin_fp_calc != state.admin_fingerprint_hex) return false;
+  std::vector<uint8_t> admin_pub_raw;
+  if (!b64_decode_vec(state.admin_pubkey_pem, admin_pub_raw)) return false;
+  if (admin_pub_raw.size() != crypto_sign_ed25519_PUBLICKEYBYTES) return false;
+  uint8_t h[32] = {0};
+  if (!sha256_bytes(admin_pub_raw.data(), admin_pub_raw.size(), h)) return false;
+  if (hex_lower(h, sizeof(h)) != state.admin_fingerprint_hex) return false;
 
-  if (!verify_rsa_pss_sha256_signature(state.admin_pubkey_pem, payload_raw, sig_b64)) return false;
+  if (!verify_ed25519_signature_b64(state.admin_pubkey_pem, payload_raw, sig_b64)) return false;
 
   out_cert_serial = cert_serial;
   return true;

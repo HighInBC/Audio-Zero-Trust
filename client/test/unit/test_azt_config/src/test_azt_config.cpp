@@ -1,8 +1,6 @@
 #include "test_azt_registry.h"
 
-#include <mbedtls/md.h>
-#include <mbedtls/pk.h>
-#include <mbedtls/rsa.h>
+#include <sodium.h>
 #include <esp_system.h>
 #include <Preferences.h>
 
@@ -14,87 +12,39 @@
 namespace azt_test {
 namespace {
 
-// Throwaway test-only keypair for local unit tests. Never use in production.
-static const char* kTestAdminPrivateKeyPem = R"PEM(-----BEGIN RSA PRIVATE KEY-----
-MIIEpQIBAAKCAQEAzAedMnuIkQu+K2MfuHISbV5bsWTwAnKHjU4Hu+S+nKlfKqqc
-ud1SMj7Hs/8qWwQgOtZqGEW5RL4hlYi8UpKVLeJD1J7JG5Wv4ofc4vMcetcvX+6D
-c1Z7Kbo1hoGmHpSARVumHtCZjaTpV38hN3TLUnNZAku3s1EmCHv7sGTVHmn7MkL5
-s5oV64QgBd3zvWUUqmjSsQ6Ck2QwdacaWehz/It5pefCtR+r33XlwQmoVfV6f0iE
-ZfVseoLRim79h+9qHBew3fqLqB5V+YHptNz2Wn4Wtdi9H4jeXQsmNl856eRzFYCq
-cNqI9bEMSvkYGITusqcJMBZW5ZjK5R0V+cUu0QIDAQABAoIBACpHxaapfOJ56X26
-O9+QHAt4C05WmXoYW8jHi8i/HVT/sE36LyJBIABzjBTb4t4bm8Y1mqTPBhadw/3l
-6Qi/gZSRl/betNQ3j8xE1Vxeft9h6lpZ5fmnyTwbb24hPdiGc5Jr7J/kIH3+17Af
-EzYXyO6cIqzcHgRV46jMcJrcOmHju8aPnV5B3wRAeKNOoBAUfT8iiCmLpvz1bXTo
-Nysr+hRDNG1MsLcK+uktOZEg+mzyfhgFIZC66x4k05KL9xMM5OU1jtT0TSf0DvTg
-OLboIFOzHVfaWZc66LLLr9vUcxOInrQmKAhPFHi35utJOPZjFtaLq8RDjNQO8PEG
-S+mZLhUCgYEA5WMJVH8FD0rKDRr6TeaHrTHsamozdMUdNbDO2ZvMrnBcKCcd/TXw
-HVZ7d06tNIgpMUwiwYNrNfwcBfJgkSiJ9DQRoq0NTAZQAQuMoOj2T9xySDt2jqGa
-x3NvENN1iNeBwvq4A22zqkGyybfoGgD8lkPw9+mVjlW5IkP6pD85gvcCgYEA47Nz
-tEmm2kpndP9fxGaHMpXDlC05LhpY9FqJpcVEyMQzhxhC9PwSZZvreC94t3nvveO/
-ZT3NQ8NMgUy0C52yGuqFqxGiKt+hJnwVL6EnCX7BDBR8qEUbbL3VQv5JVnEmRQXc
-80UkoYUulD9VJiLqvMvIQHBhqRvlEZE4hMTfoncCgYEAgheYwwMGq5WO4b/bFTMY
-33Dg07lHVYI0/q43odJqUsQGf/8vUtu0Qe86Nn+4W4KdWggD7hvKQeOpQPYlLi3/
-jy+4kLn0QJmT5gPWzatRhhlP9wdCRcIBNfyRkMlcby9JuHrYwZkFvBlmfGCAkb7d
-gZsmnnMrDn4vcO98xonU5CECgYEA2OYsJWSzR+TwQAazVwbDanA26YNaoIwAiGNm
-Ez6ikwwyeVGnFm63p4qq9sVhnITO1neH7gy85vu2eMR0DUyeR/12bspRS73SaDJy
-i/hakzTm93bcd/28bg02hKZtfaYy6jT3j9QhXKrc/+KEXduM92K20os6vDgSMHXA
-/Nf8n2kCgYEAw7JrSKQAVPjnFozOgp6TJ9wvI31Tp3aeU39VPias9qLTUW5g4Q7Z
-bXCmDxoGi83N3tFWaHz30qPE3wRiFlBBaSV88pvGb52vhHgObIWJX1uTBtydPdE4
-7nNWwL2V2NP2ieWMVznxEy4falJhSw9z+JmYAWRBKaalKGgYxOTVJDQ=
------END RSA PRIVATE KEY-----
-)PEM";
+// Deterministic test-only Ed25519 signing identity. Never use in production.
+static const unsigned char kTestAdminSeed[32] = {
+  0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,
+  0x39,0x30,0x61,0x62,0x63,0x64,0x65,0x66,
+  0x41,0x42,0x43,0x44,0x45,0x46,0x47,0x48,
+  0x49,0x4a,0x4b,0x4c,0x4d,0x4e,0x4f,0x50
+};
 
-static const char* kTestAdminPublicKeyPem = R"PEM(-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzAedMnuIkQu+K2MfuHIS
-bV5bsWTwAnKHjU4Hu+S+nKlfKqqcud1SMj7Hs/8qWwQgOtZqGEW5RL4hlYi8UpKV
-LeJD1J7JG5Wv4ofc4vMcetcvX+6Dc1Z7Kbo1hoGmHpSARVumHtCZjaTpV38hN3TL
-UnNZAku3s1EmCHv7sGTVHmn7MkL5s5oV64QgBd3zvWUUqmjSsQ6Ck2QwdacaWehz
-/It5pefCtR+r33XlwQmoVfV6f0iEZfVseoLRim79h+9qHBew3fqLqB5V+YHptNz2
-Wn4Wtdi9H4jeXQsmNl856eRzFYCqcNqI9bEMSvkYGITusqcJMBZW5ZjK5R0V+cUu
-0QIDAQAB
------END PUBLIC KEY-----
-)PEM";
-
-static int test_rng_cb(void*, unsigned char* out, size_t len) {
-  esp_fill_random(out, len);
-  return 0;
+bool test_admin_pub_b64_and_fp(String& out_pub_b64, String& out_fp_hex) {
+  out_pub_b64 = "";
+  out_fp_hex = "";
+  if (sodium_init() < 0) return false;
+  unsigned char pk[crypto_sign_ed25519_PUBLICKEYBYTES] = {0};
+  unsigned char sk[crypto_sign_ed25519_SECRETKEYBYTES] = {0};
+  if (crypto_sign_ed25519_seed_keypair(pk, sk, kTestAdminSeed) != 0) return false;
+  out_pub_b64 = azt::b64(pk, sizeof(pk));
+  uint8_t h[32] = {0};
+  if (!azt::sha256_bytes(pk, sizeof(pk), h)) return false;
+  out_fp_hex = azt::hex_lower(h, sizeof(h));
+  return out_pub_b64.length() > 0 && out_fp_hex.length() == 64;
 }
 
-bool sign_rsa_pss_sha256_b64(const String& private_pem,
-                                  const uint8_t* msg,
-                                  size_t msg_len,
-                                  String& out_sig_b64) {
+bool sign_ed25519_b64(const uint8_t* msg,
+                      size_t msg_len,
+                      String& out_sig_b64) {
   out_sig_b64 = "";
-  uint8_t hash[32] = {0};
-  if (!azt::sha256_bytes(msg, msg_len, hash)) return false;
-
-  mbedtls_pk_context pk;
-  mbedtls_pk_init(&pk);
-  int rc = mbedtls_pk_parse_key(&pk,
-                                reinterpret_cast<const unsigned char*>(private_pem.c_str()),
-                                private_pem.length() + 1,
-                                nullptr,
-                                0);
-  if (rc != 0) {
-    mbedtls_pk_free(&pk);
-    return false;
-  }
-
-  if (!mbedtls_pk_can_do(&pk, MBEDTLS_PK_RSA)) {
-    mbedtls_pk_free(&pk);
-    return false;
-  }
-  mbedtls_rsa_context* rsa = mbedtls_pk_rsa(pk);
-  mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, MBEDTLS_MD_SHA256);
-
-  size_t sig_len = mbedtls_pk_get_len(&pk);
-  std::vector<uint8_t> sig(sig_len, 0);
-  rc = mbedtls_pk_sign(&pk, MBEDTLS_MD_SHA256, hash, sizeof(hash), sig.data(), &sig_len, test_rng_cb, nullptr);
-  mbedtls_pk_free(&pk);
-  if (rc != 0) return false;
-
-  sig.resize(sig_len);
-  out_sig_b64 = azt::b64(sig.data(), sig.size());
+  if (sodium_init() < 0) return false;
+  unsigned char pk[crypto_sign_ed25519_PUBLICKEYBYTES] = {0};
+  unsigned char sk[crypto_sign_ed25519_SECRETKEYBYTES] = {0};
+  if (crypto_sign_ed25519_seed_keypair(pk, sk, kTestAdminSeed) != 0) return false;
+  unsigned char sig[crypto_sign_ed25519_BYTES] = {0};
+  if (crypto_sign_ed25519_detached(sig, nullptr, msg, msg_len, sk) != 0) return false;
+  out_sig_b64 = azt::b64(sig, sizeof(sig));
   return out_sig_b64.length() > 0;
 }
 
@@ -125,11 +75,11 @@ bool write_test_device_certificate(const String& device_pub_b64,
   payload += "\"valid_from_utc\":\"2026-03-14T00:00:00Z\",";
   payload += "\"valid_until_utc\":\"2036-03-14T00:00:00Z\",";
   payload += "\"certificate_serial\":\"" + cert_serial + "\",";
-  payload += "\"signature_algorithm\":\"rsa-pss-sha256\"";
+  payload += "\"signature_algorithm\":\"ed25519\"";
   payload += "}";
 
   String sig_b64;
-  if (!sign_rsa_pss_sha256_b64(String(kTestAdminPrivateKeyPem), reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length(), sig_b64)) {
+  if (!sign_ed25519_b64(reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length(), sig_b64)) {
     return false;
   }
   if (tamper_signature && sig_b64.length() > 3) sig_b64.setCharAt(2, sig_b64[2] == 'A' ? 'B' : 'A');
@@ -137,7 +87,7 @@ bool write_test_device_certificate(const String& device_pub_b64,
   String payload_b64 = azt::b64(reinterpret_cast<const uint8_t*>(payload.c_str()), payload.length());
   String cert_json = "{";
   cert_json += "\"certificate_payload_b64\":\"" + payload_b64 + "\",";
-  cert_json += "\"signature_algorithm\":\"rsa-pss-sha256\",";
+  cert_json += "\"signature_algorithm\":\"ed25519\",";
   cert_json += "\"signature_b64\":\"" + sig_b64 + "\"";
   cert_json += "}";
 
@@ -152,12 +102,11 @@ bool write_test_device_certificate(const String& device_pub_b64,
 
 bool test_config_save_load_roundtrip(Context& ctx) {
   seed_device_sign_cache_for_config_tests();
-  if (!ctx.pubkey_pem || ctx.pubkey_pem->length() < 64) return false;
-  String fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(*ctx.pubkey_pem, fp)) return false;
+  String admin_pub_b64, fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, fp)) return false;
 
   azt::AppState st;
-  bool ok = azt::save_config_state(st, *ctx.pubkey_pem, fp, "TestDevice", "ssid-test", "pass-test", true);
+  bool ok = azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "ssid-test", "pass-test", true);
   if (!ok) return false;
 
   azt::AppState loaded;
@@ -168,17 +117,16 @@ bool test_config_save_load_roundtrip(Context& ctx) {
 
 bool test_config_signed_flag_transition(Context& ctx) {
   seed_device_sign_cache_for_config_tests();
-  if (!ctx.pubkey_pem || ctx.pubkey_pem->length() < 64) return false;
-  String fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(*ctx.pubkey_pem, fp)) return false;
+  String admin_pub_b64, fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, fp)) return false;
 
   azt::AppState st;
-  if (!azt::save_config_state(st, *ctx.pubkey_pem, fp, "TestDevice", "ssid-a", "pass-a", false)) return false;
+  if (!azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "ssid-a", "pass-a", false)) return false;
   azt::AppState l1;
   azt::load_config_state(l1);
   if (!l1.managed || l1.signed_config_ready) return false;
 
-  if (!azt::save_config_state(st, *ctx.pubkey_pem, fp, "TestDevice", "ssid-a", "pass-a", true)) return false;
+  if (!azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "ssid-a", "pass-a", true)) return false;
   azt::AppState l2;
   azt::load_config_state(l2);
   return l2.managed && l2.signed_config_ready;
@@ -187,14 +135,14 @@ bool test_config_signed_flag_transition(Context& ctx) {
 bool test_config_boot_cert_verify_valid(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   azt::AppState current;
   azt::load_config_state(current);
 
   azt::AppState st;
-  if (!azt::save_config_state(st, String(kTestAdminPublicKeyPem), admin_fp,
+  if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
                               "TestDevice", "ssid-cert", "pass-cert", true)) return false;
 
   if (!write_test_device_certificate(current.device_sign_public_key_b64,
@@ -215,14 +163,14 @@ bool test_config_boot_cert_verify_valid(Context&) {
 bool test_config_recording_key_migration_from_admin(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   Preferences p;
   p.begin("aztcfg", false);
   p.putBool("managed", true);
   p.putBool("signed_ok", true);
-  p.putString("admin_pem", String(kTestAdminPublicKeyPem));
+  p.putString("admin_pem", admin_pub_b64);
   p.putString("admin_fp", admin_fp);
   p.putString("dev_label", "MigDevice");
   p.putString("wifi_ssid", "ssid-mig");
@@ -246,16 +194,16 @@ bool test_config_recording_key_migration_from_admin(Context&) {
 bool test_config_recording_key_migration_when_rec_fp_invalid(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   Preferences p;
   p.begin("aztcfg", false);
   p.putBool("managed", true);
   p.putBool("signed_ok", true);
-  p.putString("admin_pem", String(kTestAdminPublicKeyPem));
+  p.putString("admin_pem", admin_pub_b64);
   p.putString("admin_fp", admin_fp);
-  p.putString("rec_pem", String(kTestAdminPublicKeyPem));
+  p.putString("rec_pem", admin_pub_b64);
   p.putString("rec_fp", "short");
   p.end();
 
@@ -269,14 +217,14 @@ bool test_config_recording_key_migration_when_rec_fp_invalid(Context&) {
 bool test_config_recording_key_migration_when_rec_pem_missing(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   Preferences p;
   p.begin("aztcfg", false);
   p.putBool("managed", true);
   p.putBool("signed_ok", true);
-  p.putString("admin_pem", String(kTestAdminPublicKeyPem));
+  p.putString("admin_pem", admin_pub_b64);
   p.putString("admin_fp", admin_fp);
   p.putString("rec_fp", admin_fp);
   p.remove("rec_pem");
@@ -291,12 +239,12 @@ bool test_config_recording_key_migration_when_rec_pem_missing(Context&) {
 bool test_save_config_state_legacy_overload_sets_recording_from_admin(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   azt::AppState st;
   if (!azt::save_config_state(st,
-                              String(kTestAdminPublicKeyPem),
+                              admin_pub_b64,
                               admin_fp,
                               "LegacySave",
                               "ssid-legacy",
@@ -314,11 +262,11 @@ bool test_save_config_state_legacy_overload_sets_recording_from_admin(Context&) 
 bool test_reset_managed_preserves_device_keys(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   azt::AppState st;
-  if (!azt::save_config_state(st, String(kTestAdminPublicKeyPem), admin_fp,
+  if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
                               "ResetDevice", "ssid-r", "pass-r", true)) return false;
 
   if (!azt::reset_managed_config_preserve_device_keys(st)) return false;
@@ -364,14 +312,14 @@ bool test_invalid_cert_json_is_cleared_on_load(Context&) {
 bool test_tampered_cert_signature_is_cleared_on_load(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   azt::AppState current;
   azt::load_config_state(current);
 
   azt::AppState st;
-  if (!azt::save_config_state(st, String(kTestAdminPublicKeyPem), admin_fp,
+  if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
                               "TestDevice", "ssid-cert", "pass-cert", true)) return false;
 
   if (!write_test_device_certificate(current.device_sign_public_key_b64,
@@ -401,14 +349,14 @@ bool test_tampered_cert_signature_is_cleared_on_load(Context&) {
 bool test_cert_device_fp_mismatch_is_cleared_on_load(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   azt::AppState current;
   azt::load_config_state(current);
 
   azt::AppState st;
-  if (!azt::save_config_state(st, String(kTestAdminPublicKeyPem), admin_fp,
+  if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
                               "TestDevice", "ssid-cert", "pass-cert", true)) return false;
 
   if (!write_test_device_certificate(current.device_sign_public_key_b64,
@@ -436,14 +384,14 @@ bool test_cert_device_fp_mismatch_is_cleared_on_load(Context&) {
 bool test_cert_admin_fp_mismatch_is_cleared_on_load(Context&) {
   seed_device_sign_cache_for_config_tests();
 
-  String admin_fp;
-  if (!azt::compute_pubkey_spki_sha256_hex(String(kTestAdminPublicKeyPem), admin_fp)) return false;
+  String admin_pub_b64, admin_fp;
+  if (!test_admin_pub_b64_and_fp(admin_pub_b64, admin_fp)) return false;
 
   azt::AppState current;
   azt::load_config_state(current);
 
   azt::AppState st;
-  if (!azt::save_config_state(st, String(kTestAdminPublicKeyPem), admin_fp,
+  if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
                               "TestDevice", "ssid-cert", "pass-cert", true)) return false;
 
   // Use a different admin fingerprint in cert payload to trigger mismatch.

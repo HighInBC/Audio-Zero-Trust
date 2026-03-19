@@ -34,16 +34,9 @@ namespace azt {
 #define AZT_STR2(x) #x
 #define AZT_STR(x) AZT_STR2(x)
 
-static const char* kOtaSignerPublicKeyPem =
-    "-----BEGIN PUBLIC KEY-----\n"
-    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAufIaBCW1Pah3t/GAhWgf\n"
-    "gdfYEVlmxnlCGCORWwL/kjh5wp5RQIFM9gS3/+rL+wpZvHIPdYz1JoRaWzEMY1uE\n"
-    "MAuCuiMvuEDthNNdy9iggBa03dy86nFQTnlYj5BZ7ok/Rgk5k/ZiumHXgmT6cR8s\n"
-    "TrjKtgrvgjbEwjjNYDV56jlnxq2JDH/hMEude8rUH27EjsU2orypK3yBiGocp1Fk\n"
-    "jApLYjmGNGE7Fvdq7RVPnU990MTkprGXMb8hVcVAccmkafxdvlM1N2AOHuKDv6Aw\n"
-    "kraFJjGT+oap/skY0Blbrlgs7502CoD/bQg0PCzJFX+qhNWipe5qZo0p3agMUs+k\n"
-    "0wIDAQAB\n"
-    "-----END PUBLIC KEY-----\n";
+// Default embedded OTA signer key (ed25519 public_key_b64). Empty means
+// OTA must be configured with an explicit signer override during provisioning.
+static const char* kOtaSignerPublicKeyPem = "";
 
 static String json_quote(const String& in) {
   String out = "\"";
@@ -244,7 +237,7 @@ static bool build_mic_cert_signed_payload(const JsonDocument& doc, String& out_p
 
   if (cert_version != 1 || strlen(cert_type) == 0 || strlen(dev_pub) == 0 || strlen(dev_fp) != 64 || strlen(chip_id) != 16 ||
       strlen(admin_fp) != 64 || strlen(valid_from) == 0 ||
-      strlen(valid_until) == 0 || strlen(serial) == 0 || String(sig_alg) != "rsa-pss-sha256") {
+      strlen(valid_until) == 0 || strlen(serial) == 0 || String(sig_alg) != "ed25519") {
     return false;
   }
 
@@ -258,7 +251,7 @@ static bool build_mic_cert_signed_payload(const JsonDocument& doc, String& out_p
   out_payload += "\"valid_from_utc\":\"" + String(valid_from) + "\",";
   out_payload += "\"valid_until_utc\":\"" + String(valid_until) + "\",";
   out_payload += "\"certificate_serial\":\"" + String(serial) + "\",";
-  out_payload += "\"signature_algorithm\":\"rsa-pss-sha256\"";
+  out_payload += "\"signature_algorithm\":\"ed25519\"";
   out_payload += "}";
   return true;
 }
@@ -301,8 +294,35 @@ static bool parse_rsa_key_object(JsonDocument& doc,
   return true;
 }
 
+static bool parse_ed25519_key_object(JsonDocument& doc,
+                                     const char* field_name,
+                                     String& out_pub_b64,
+                                     String& out_fp) {
+  JsonVariant k = doc[field_name];
+  if (k.isNull() || !k.is<JsonObject>()) return false;
+  const char* alg = k["alg"] | "";
+  const char* pub_b64 = k["public_key_b64"] | "";
+  const char* fp_alg = k["fingerprint_alg"] | "";
+  const char* fp_hex = k["fingerprint_hex"] | "";
+  if (String(alg) != "ed25519") return false;
+  if (String(fp_alg) != "sha256-raw-ed25519-pub") return false;
+  if (strlen(pub_b64) == 0 || strlen(fp_hex) != 64) return false;
+
+  std::vector<uint8_t> pub_raw;
+  if (!b64_decode_vec(String(pub_b64), pub_raw)) return false;
+  if (pub_raw.size() != crypto_sign_ed25519_PUBLICKEYBYTES) return false;
+
+  uint8_t h[32] = {0};
+  if (!sha256_bytes(pub_raw.data(), pub_raw.size(), h)) return false;
+  if (hex_lower(h, sizeof(h)) != String(fp_hex)) return false;
+
+  out_pub_b64 = String(pub_b64);
+  out_fp = String(fp_hex);
+  return true;
+}
+
 bool parse_header_key_values(JsonDocument& doc, String& admin_pem, String& admin_fp) {
-  return parse_rsa_key_object(doc, "admin_key", admin_pem, admin_fp);
+  return parse_ed25519_key_object(doc, "admin_key", admin_pem, admin_fp);
 }
 
 static bool verify_config_signature_envelope(JsonDocument& doc,
@@ -335,7 +355,7 @@ static bool verify_config_signature_envelope(JsonDocument& doc,
     return false;
   }
 
-  if (!verify_rsa_pss_sha256_signature(signer_pub_pem, signed_payload_raw, String(sig_b64))) {
+  if (!verify_ed25519_signature_b64(signer_pub_pem, signed_payload_raw, String(sig_b64))) {
     out_err_detail = "signature verification failed";
     return false;
   }
@@ -537,12 +557,21 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
           state.ota_signer_override_fingerprint_hex = "";
         } else if (ota_signer_pem.length() > 0) {
           String ota_fp;
-          if (!compute_pubkey_spki_sha256_hex(ota_signer_pem, ota_fp)) {
+          std::vector<uint8_t> ota_pub_raw;
+          if (!b64_decode_vec(ota_signer_pem, ota_pub_raw) || ota_pub_raw.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
             op.end();
             r.code = 400;
-            r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer pem\"}";
+            r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer key (expected ed25519 public_key_b64)\"}";
             return r;
           }
+          uint8_t h[32] = {0};
+          if (!sha256_bytes(ota_pub_raw.data(), ota_pub_raw.size(), h)) {
+            op.end();
+            r.code = 400;
+            r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer hash\"}";
+            return r;
+          }
+          ota_fp = hex_lower(h, sizeof(h));
           op.putString("ota_signer_pem", ota_signer_pem);
           op.putString("ota_signer_fp", ota_fp);
           state.ota_signer_override_public_key_pem = ota_signer_pem;
@@ -603,12 +632,21 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
         state.ota_signer_override_fingerprint_hex = "";
       } else if (ota_signer_pem.length() > 0) {
         String ota_fp;
-        if (!compute_pubkey_spki_sha256_hex(ota_signer_pem, ota_fp)) {
+        std::vector<uint8_t> ota_pub_raw;
+        if (!b64_decode_vec(ota_signer_pem, ota_pub_raw) || ota_pub_raw.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
           op.end();
           r.code = 400;
-          r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer pem\"}";
+          r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer key (expected ed25519 public_key_b64)\"}";
           return r;
         }
+        uint8_t h[32] = {0};
+        if (!sha256_bytes(ota_pub_raw.data(), ota_pub_raw.size(), h)) {
+          op.end();
+          r.code = 400;
+          r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer hash\"}";
+          return r;
+        }
+        ota_fp = hex_lower(h, sizeof(h));
         op.putString("ota_signer_pem", ota_signer_pem);
         op.putString("ota_signer_fp", ota_fp);
         state.ota_signer_override_public_key_pem = ota_signer_pem;
@@ -981,7 +1019,7 @@ HttpDispatchResult dispatch_request(const String& method,
     String payload_b64 = String((const char*)(doc["certificate_payload_b64"] | ""));
     String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
     String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
-    if (payload_b64.length() == 0 || sig_b64.length() == 0 || sig_alg != "rsa-pss-sha256") {
+    if (payload_b64.length() == 0 || sig_b64.length() == 0 || sig_alg != "ed25519") {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CERT_SCHEMA\",\"detail\":\"missing certificate_payload_b64/signature fields\"}";
       r.content_type = "application/json";
@@ -1030,15 +1068,22 @@ HttpDispatchResult dispatch_request(const String& method,
       return r;
     }
 
-    String admin_fp_calc;
-    if (!compute_pubkey_spki_sha256_hex(state.admin_pubkey_pem, admin_fp_calc) || admin_fp_calc != admin_fp) {
+    std::vector<uint8_t> admin_pub_raw;
+    if (!b64_decode_vec(state.admin_pubkey_pem, admin_pub_raw) || admin_pub_raw.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_ADMIN_FP\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+    uint8_t admin_h[32] = {0};
+    if (!sha256_bytes(admin_pub_raw.data(), admin_pub_raw.size(), admin_h) || hex_lower(admin_h, sizeof(admin_h)) != admin_fp) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CERT_ADMIN_FP\"}";
       r.content_type = "application/json";
       return r;
     }
 
-    if (!verify_rsa_pss_sha256_signature(state.admin_pubkey_pem, payload_raw, sig_b64)) {
+    if (!verify_ed25519_signature_b64(state.admin_pubkey_pem, payload_raw, sig_b64)) {
       r.code = 401;
       r.body = "{\"ok\":false,\"error\":\"ERR_CERT_SIG_VERIFY\"}";
       r.content_type = "application/json";
@@ -1077,7 +1122,11 @@ HttpDispatchResult dispatch_request(const String& method,
     bool recording_key_cfg = state.recording_pubkey_pem.length() > 0 && state.recording_fingerprint_hex.length() == 64;
     String ota_active_pem = state.ota_signer_override_public_key_pem.length() > 0 ? state.ota_signer_override_public_key_pem : String(kOtaSignerPublicKeyPem);
     String ota_active_fp;
-    if (!compute_pubkey_spki_sha256_hex(ota_active_pem, ota_active_fp)) ota_active_fp = "";
+    std::vector<uint8_t> ota_active_pub;
+    if (b64_decode_vec(ota_active_pem, ota_active_pub) && ota_active_pub.size() == crypto_sign_ed25519_PUBLICKEYBYTES) {
+      uint8_t h[32] = {0};
+      if (sha256_bytes(ota_active_pub.data(), ota_active_pub.size(), h)) ota_active_fp = hex_lower(h, sizeof(h));
+    }
     String ota_source = state.ota_signer_override_public_key_pem.length() > 0 ? "serial_override" : "default_embedded";
 
     time_t now_epoch = time(nullptr);
@@ -1431,7 +1480,18 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
                          ? state.ota_signer_override_public_key_pem
                          : String(kOtaSignerPublicKeyPem);
   String trusted_fp;
-  if (!compute_pubkey_spki_sha256_hex(trusted_pem, trusted_fp) || trusted_fp != signer_fp) {
+  std::vector<uint8_t> trusted_pub;
+  if (!b64_decode_vec(trusted_pem, trusted_pub) || trusted_pub.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
+    out_err = "trusted ota signer key invalid";
+    return false;
+  }
+  uint8_t trusted_h[32] = {0};
+  if (!sha256_bytes(trusted_pub.data(), trusted_pub.size(), trusted_h)) {
+    out_err = "trusted ota signer hash failed";
+    return false;
+  }
+  trusted_fp = hex_lower(trusted_h, sizeof(trusted_h));
+  if (trusted_fp != signer_fp) {
     out_err = "signer fingerprint not trusted";
     return false;
   }
@@ -1441,7 +1501,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = "meta_b64 invalid";
     return false;
   }
-  if (!verify_rsa_pss_sha256_signature(trusted_pem, meta_raw, meta_sig_b64)) {
+  if (!verify_ed25519_signature_b64(trusted_pem, meta_raw, meta_sig_b64)) {
     out_err = "meta signature verify failed";
     return false;
   }

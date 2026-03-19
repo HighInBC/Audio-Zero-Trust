@@ -117,7 +117,7 @@ def wait_http_down(tool: ToolRunner, host: str, timeout_s: int = 20) -> bool:
     return False
 
 
-def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wifi_password: str, identity_prefix: str, upload_fs: bool) -> tuple[str, Path, Path, str, list[dict]]:
+def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wifi_password: str, identity_prefix: str, upload_fs: bool) -> tuple[str, Path, Path, str, str, list[dict]]:
     steps: list[dict] = []
 
     # Transitional architecture step: route setup via azt-tool command surface.
@@ -141,23 +141,31 @@ def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wif
         raise RuntimeError(f"tool flash-device failed\n{out_flash}")
 
     rc_creds, obj_creds, out_creds = tool.json(
-        ["create-credentials", "--identity", identity],
+        ["create-signing-credentials", "--identity", identity],
         )
     steps.append({"name": "tool_create_credentials", "ok": rc_creds == 0, "detail": out_creds[-2000:]})
     payload_creds = obj_creds.get("payload") if isinstance(obj_creds, dict) else None
     if rc_creds != 0 or not isinstance(payload_creds, dict) or not payload_creds.get("artifacts"):
-        raise RuntimeError(f"tool create-credentials failed\n{out_creds}")
+        raise RuntimeError(f"tool create-signing-credentials failed\n{out_creds}")
 
     admin_creds_dir = str(payload_creds.get("artifacts") or "")
 
+    rec_identity = f"{identity}-rec"
+    rc_rec_creds, obj_rec_creds, out_rec_creds = tool.json(["create-decoding-credentials", "--identity", rec_identity])
+    steps.append({"name": "tool_create_decoding_credentials", "ok": rc_rec_creds == 0, "detail": out_rec_creds[-2000:]})
+    payload_rec_creds = obj_rec_creds.get("payload") if isinstance(obj_rec_creds, dict) else None
+    if rc_rec_creds != 0 or not isinstance(payload_rec_creds, dict) or not payload_rec_creds.get("artifacts"):
+        raise RuntimeError(f"tool create-decoding-credentials failed\n{out_rec_creds}")
+    rec_creds_dir = str(payload_rec_creds.get("artifacts") or "")
+
     fw_identity = f"{identity}-fw"
-    rc_fw_creds, obj_fw_creds, out_fw_creds = tool.json(["create-credentials", "--identity", fw_identity])
+    rc_fw_creds, obj_fw_creds, out_fw_creds = tool.json(["create-signing-credentials", "--identity", fw_identity])
     steps.append({"name": "tool_create_firmware_credentials", "ok": rc_fw_creds == 0, "detail": out_fw_creds[-2000:]})
     payload_fw_creds = obj_fw_creds.get("payload") if isinstance(obj_fw_creds, dict) else None
     if rc_fw_creds != 0 or not isinstance(payload_fw_creds, dict) or not payload_fw_creds.get("artifacts"):
-        raise RuntimeError(f"tool create-credentials (firmware) failed\n{out_fw_creds}")
+        raise RuntimeError(f"tool create-signing-credentials (firmware) failed\n{out_fw_creds}")
     fw_creds_dir = Path(str(payload_fw_creds.get("artifacts") or ""))
-    fw_pub_path = fw_creds_dir / "public_key.pem"
+    fw_pub_path = fw_creds_dir / "public_key_b64.txt"
     if not fw_pub_path.exists():
         raise RuntimeError(f"expected firmware signer public key missing: {fw_pub_path}")
 
@@ -165,6 +173,7 @@ def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wif
         [
             "configure-device",
             "--admin-creds-dir", admin_creds_dir,
+            "--recorder-creds-dir", rec_creds_dir,
             "--identity", identity,
             "--wifi-ssid", wifi_ssid,
             "--wifi-password", wifi_password,
@@ -210,7 +219,7 @@ def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wif
     if not st2_ok:
         raise RuntimeError(f"signed state not ready after provisioning: {st2}")
 
-    return host, key_path, ota_signer_key_path, admin_creds_dir, steps
+    return host, key_path, ota_signer_key_path, admin_creds_dir, rec_creds_dir, steps
 
 
 def main() -> int:
@@ -254,6 +263,7 @@ def main() -> int:
     setup_steps: list[dict] = []
     host = args.host
     admin_creds_dir = None
+    rec_creds_dir = None
     ota_signer_key_path = None
     run_fresh = not args.fast
 
@@ -261,7 +271,7 @@ def main() -> int:
         try:
             if not wifi_ssid or not wifi_password:
                 raise RuntimeError("missing Wi-Fi credentials: pass --wifi-ssid/--wifi-password or set AZT_WIFI_SSID/AZT_WIFI_PASSWORD (or .secrets/e2e.env)")
-            host, key_path, ota_signer_key_path, admin_creds_dir, setup_steps = fresh_setup(
+            host, key_path, ota_signer_key_path, admin_creds_dir, rec_creds_dir, setup_steps = fresh_setup(
                 tool,
                 host_hint=args.host,
                 port=port,
@@ -336,6 +346,7 @@ def main() -> int:
             rc_cfg_set, obj_cfg_set, out_cfg_set = tool.json([
                 "configure-device",
                 "--admin-creds-dir", str(admin_creds_dir),
+                "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
                 "--identity", identity_label,
                 "--wifi-ssid", wifi_ssid,
                 "--wifi-password", wifi_password,
@@ -358,6 +369,7 @@ def main() -> int:
             rc_cfg_clr, obj_cfg_clr, out_cfg_clr = tool.json([
                 "configure-device",
                 "--admin-creds-dir", str(admin_creds_dir),
+                "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
                 "--identity", identity_label,
                 "--wifi-ssid", wifi_ssid,
                 "--wifi-password", wifi_password,

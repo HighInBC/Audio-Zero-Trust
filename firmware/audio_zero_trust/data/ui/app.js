@@ -17,9 +17,9 @@ function buildUnsignedConfig() {
     config_version: 1,
     device_label: deviceLabel,
     admin_key: {
-      alg: 'rsa-oaep-sha256',
-      public_key_pem: adminPem,
-      fingerprint_alg: 'sha256-spki-der',
+      alg: 'ed25519',
+      public_key_b64: adminPem,
+      fingerprint_alg: 'sha256-raw-ed25519-pub',
       fingerprint_hex: adminFp,
     },
     wifi: {

@@ -12,10 +12,10 @@ from urllib.request import Request, urlopen
 import urllib.error
 
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, ed25519
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_client.config import make_signed_config
-from tools.azt_client.crypto import spki_fp_hex_from_private_key
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
 from tools.azt_client.http import http_json, get_json
 from tools.azt_sdk.services import build_service
 
@@ -32,7 +32,7 @@ def parse_meta(items: list[str]) -> dict:
 
 def sign_bytes(priv_pem: bytes, payload: bytes) -> bytes:
     priv = serialization.load_pem_private_key(priv_pem, password=None)
-    return priv.sign(payload, padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=hashes.SHA256().digest_size), hashes.SHA256())
+    return priv.sign(payload)
 
 
 def public_key_from_pem_bytes(pem: bytes):
@@ -46,7 +46,7 @@ def public_key_from_pem_bytes(pem: bytes):
 def apply_config(*, in_path: str, key_path: str, host: str, port: int, timeout: int, fingerprint: str) -> tuple[bool, dict]:
     unsigned_cfg = json.loads(Path(in_path).read_text())
     keyp = Path(key_path)
-    fp = fingerprint.strip() or spki_fp_hex_from_private_key(keyp)
+    fp = fingerprint.strip() or ed25519_fp_hex_from_private_key(keyp)
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
     base = f"http://{host}:{port}"
@@ -75,7 +75,7 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
     }
 
     keyp = Path(key_path)
-    fp = fingerprint.strip() or spki_fp_hex_from_private_key(keyp)
+    fp = fingerprint.strip() or ed25519_fp_hex_from_private_key(keyp)
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
     base = f"http://{host}:{port}"
@@ -98,7 +98,7 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
     if not state.get("ok"):
         return False, "ERR_STATE_QUERY", {"state": state}
 
-    key_fp = spki_fp_hex_from_private_key(keyp)
+    key_fp = ed25519_fp_hex_from_private_key(keyp)
     device_fp = str(state.get("admin_fingerprint_hex") or "")
     if len(device_fp) != 64 or key_fp != device_fp:
         return False, "ERR_KEY_OWNERSHIP", {"key_fingerprint": key_fp, "device_fingerprint": device_fp}
@@ -151,12 +151,12 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
 
     payload_raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     sig_raw = sign_bytes(keyp.read_bytes(), payload_raw)
-    signer_fp = spki_fp_hex_from_private_key(keyp)
+    signer_fp = ed25519_fp_hex_from_private_key(keyp)
 
     envelope = {
         "kind": "azt-issue-cert",
         "version": 1,
-        "signature_algorithm": "rsa-pss-sha256",
+        "signature_algorithm": "ed25519",
         "signer_fingerprint_hex": signer_fp,
         "payload_b64": base64.b64encode(payload_raw).decode("ascii"),
         "signature_b64": base64.b64encode(sig_raw).decode("ascii"),
@@ -180,7 +180,7 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
         cert_sig_raw = sign_bytes(keyp.read_bytes(), cert_payload_raw)
         cert_doc = {
             "certificate_payload_b64": base64.b64encode(cert_payload_raw).decode("ascii"),
-            "signature_algorithm": "rsa-pss-sha256",
+            "signature_algorithm": "ed25519",
             "signature_b64": base64.b64encode(cert_sig_raw).decode("ascii"),
         }
         upload_res = http_json("POST", f"http://{host}:{port}/api/v1/device/certificate", cert_doc, timeout=timeout)
@@ -204,7 +204,7 @@ def verify_certification(*, in_path: str, key_path: str) -> tuple[bool, dict]:
     payload_raw = base64.b64decode(cert["payload_b64"], validate=True)
     sig_raw = base64.b64decode(cert["signature_b64"], validate=True)
     pub = public_key_from_pem_bytes(Path(key_path).read_bytes())
-    pub.verify(sig_raw, payload_raw, padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=hashes.SHA256().digest_size), hashes.SHA256())
+    pub.verify(sig_raw, payload_raw)
     payload = json.loads(payload_raw.decode("utf-8"))
     return True, {"payload": payload}
 
@@ -264,12 +264,12 @@ def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware
 
     meta_raw = json.dumps(meta, separators=(",", ":"), sort_keys=True).encode("utf-8")
     sig_raw = sign_bytes(keyp.read_bytes(), meta_raw)
-    signer_fp = spki_fp_hex_from_private_key(keyp)
+    signer_fp = ed25519_fp_hex_from_private_key(keyp)
 
     header = {
         "kind": "azt-ota-bundle",
         "version": 1,
-        "signature_algorithm": "rsa-pss-sha256",
+        "signature_algorithm": "ed25519",
         "signer_fingerprint_hex": signer_fp,
         "meta_b64": base64.b64encode(meta_raw).decode("ascii"),
         "meta_signature_b64": base64.b64encode(sig_raw).decode("ascii"),

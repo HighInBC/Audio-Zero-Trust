@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from tools.azt_client.config import make_signed_config
+from tools.azt_client.crypto import ed25519_public_b64_from_private_key, ed25519_fp_hex_from_private_key
 from tools.azt_client.http import http_json
 from tools.provision_unit import (
     detect_device_ip_from_serial,
@@ -45,7 +46,6 @@ def configure_device(
     admin_dir = admin_input if admin_input.is_dir() else admin_input.parent
     recorder_dir = recorder_input if recorder_input.is_dir() else recorder_input.parent
 
-    pub_pem, fp = load_keypair_from_artifact_dir(admin_input)
     rec_pub_pem, rec_fp = load_keypair_from_artifact_dir(recorder_input)
 
     if admin_input.is_file():
@@ -56,12 +56,18 @@ def configure_device(
             priv_path = admin_input / "admin_private_key.pem"
     priv_pem = priv_path.read_bytes()
 
-    # Admin credentials must include a private key for config signing.
+    # Admin credentials are Ed25519 signing credentials.
     from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
     try:
-        serialization.load_pem_private_key(priv_pem, password=None)
+        admin_priv = serialization.load_pem_private_key(priv_pem, password=None)
+        if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
+            raise ValueError("admin signing key must be Ed25519")
     except Exception as e:
-        raise ValueError("admin creds must point to a private key PEM (used to sign config)") from e
+        raise ValueError("admin creds must point to an Ed25519 private key PEM (used to sign config)") from e
+
+    admin_pub_b64 = ed25519_public_b64_from_private_key(priv_path)
+    fp = ed25519_fp_hex_from_private_key(priv_path)
 
     # Input validation for protocol-facing fields.
     ota_signer_public_key_pem = (ota_signer_public_key_pem or "").strip()
@@ -83,7 +89,7 @@ def configure_device(
         except Exception:
             return 11, False, "INVALID_AUTHORIZED_LISTENER_IP", {"detail": listener_ip}
 
-    unsigned_cfg = make_bootstrap(identity, pub_pem, fp, wifi_ssid, wifi_password)
+    unsigned_cfg = make_bootstrap(identity, admin_pub_b64, fp, wifi_ssid, wifi_password)
     if authorized_listener_ips:
         unsigned_cfg["authorized_listener_ips"] = authorized_listener_ips
 

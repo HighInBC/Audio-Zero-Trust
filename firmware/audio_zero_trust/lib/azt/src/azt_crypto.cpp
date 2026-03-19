@@ -1,6 +1,7 @@
 #include "azt_crypto.h"
 
 #include <esp_system.h>
+#include <sodium.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/md.h>
@@ -132,39 +133,18 @@ bool rsa_oaep_sha256_encrypt_pub(const uint8_t* pub_pem,
   return ok;
 }
 
-bool verify_rsa_pss_sha256_signature(const String& pub_pem,
-                                     const std::vector<uint8_t>& payload,
-                                     const String& sig_b64) {
+bool verify_ed25519_signature_b64(const String& pub_b64,
+                                  const std::vector<uint8_t>& payload,
+                                  const String& sig_b64) {
+  std::vector<uint8_t> pub;
   std::vector<uint8_t> sig;
-  if (!b64_decode_vec(sig_b64, sig) || sig.empty()) return false;
+  if (!b64_decode_vec(pub_b64, pub) || pub.size() != crypto_sign_ed25519_PUBLICKEYBYTES) return false;
+  if (!b64_decode_vec(sig_b64, sig) || sig.size() != crypto_sign_ed25519_BYTES) return false;
 
-  uint8_t hash[32] = {0};
-  if (!sha256_bytes(payload.data(), payload.size(), hash)) return false;
-
-  mbedtls_pk_context pk;
-  mbedtls_pk_init(&pk);
-  int rc = mbedtls_pk_parse_public_key(&pk,
-                                       reinterpret_cast<const unsigned char*>(pub_pem.c_str()),
-                                       pub_pem.length() + 1);
-  if (rc != 0) {
-    mbedtls_pk_free(&pk);
-    return false;
-  }
-
-  mbedtls_pk_rsassa_pss_options opts;
-  opts.mgf1_hash_id = MBEDTLS_MD_SHA256;
-  opts.expected_salt_len = MBEDTLS_RSA_SALT_LEN_ANY;
-
-  rc = mbedtls_pk_verify_ext(MBEDTLS_PK_RSASSA_PSS,
-                             &opts,
-                             &pk,
-                             MBEDTLS_MD_SHA256,
-                             hash,
-                             sizeof(hash),
-                             sig.data(),
-                             sig.size());
-  mbedtls_pk_free(&pk);
-  return rc == 0;
+  return crypto_sign_ed25519_verify_detached(sig.data(),
+                                             payload.data(),
+                                             payload.size(),
+                                             pub.data()) == 0;
 }
 
 bool aes256_gcm_encrypt(const uint8_t* key32,

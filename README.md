@@ -83,13 +83,13 @@ python3 client/tools/azt_tool.py flash-device --port /dev/ttyUSB0
 Create admin credentials:
 
 ```bash
-python3 client/tools/azt_tool.py create-credentials --identity admin-main
+python3 client/tools/azt_tool.py create-signing-credentials --identity admin-main
 ```
 
 Optional recorder credentials (separate keypair):
 
 ```bash
-python3 client/tools/azt_tool.py create-credentials --identity recorder-main
+python3 client/tools/azt_tool.py create-decoding-credentials --identity recorder-main
 ```
 
 If you prefer a single key for both roles, use only the admin credentials and reuse them.

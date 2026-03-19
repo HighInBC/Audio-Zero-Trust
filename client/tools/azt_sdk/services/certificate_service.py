@@ -5,10 +5,10 @@ import json
 import time
 from pathlib import Path
 
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
 
-from tools.azt_client.crypto import spki_fp_hex_from_private_key
+
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
 from tools.azt_client.http import get_json
 from tools.azt_sdk.services.attestation_service import verify_attestation
 from tools.azt_sdk.services.device_service import certificate_post
@@ -64,7 +64,7 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
     if not ok_att:
         return False, err_att, detail_att
 
-    signer_fp = spki_fp_hex_from_private_key(Path(key_path))
+    signer_fp = ed25519_fp_hex_from_private_key(Path(key_path))
     if signer_fp != str(state.get("admin_fingerprint_hex") or ""):
         return False, "KEY_OWNERSHIP_MISMATCH", {"key_fingerprint_hex": signer_fp, "state_admin_fingerprint_hex": state.get("admin_fingerprint_hex")}
 
@@ -78,14 +78,14 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
         "valid_from_utc": valid_from_utc,
         "valid_until_utc": valid_until_utc,
         "certificate_serial": cert_serial,
-        "signature_algorithm": "rsa-pss-sha256",
+        "signature_algorithm": "ed25519",
     }
     payload_raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     priv = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
-    sig = priv.sign(payload_raw, padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=hashes.SHA256().digest_size), hashes.SHA256())
+    sig = priv.sign(payload_raw)
     cert_doc = {
         "certificate_payload_b64": base64.b64encode(payload_raw).decode("ascii"),
-        "signature_algorithm": "rsa-pss-sha256",
+        "signature_algorithm": "ed25519",
         "signature_b64": base64.b64encode(sig).decode("ascii"),
     }
 

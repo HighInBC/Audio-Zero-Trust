@@ -20,9 +20,9 @@ bool rsa_oaep_sha256_encrypt_pub(const uint8_t* pub_pem,
                                  size_t in_len,
                                  std::vector<uint8_t>& out);
 bool b64_decode_vec(const String& in, std::vector<uint8_t>& out);
-bool verify_rsa_pss_sha256_signature(const String& pub_pem,
-                                     const std::vector<uint8_t>& payload,
-                                     const String& sig_b64);
+bool verify_ed25519_signature_b64(const String& pub_b64,
+                                  const std::vector<uint8_t>& payload,
+                                  const String& sig_b64);
 bool aes256_gcm_encrypt(const uint8_t* key32,
                         const uint8_t* nonce12,
                         const uint8_t* plaintext,

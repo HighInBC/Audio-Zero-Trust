@@ -21,7 +21,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    sp = sub.add_parser("sign-config", help="Sign an unsigned AZT config JSON with admin RSA key")
+    sp = sub.add_parser("sign-config", help="Sign an unsigned AZT config JSON with admin Ed25519 key")
     sp.add_argument("--in", dest="in_path", required=True, help="Path to unsigned config JSON")
     sp.add_argument("--key", dest="key_path", required=True, help="Path to admin private key PEM")
     sp.add_argument("--out", dest="out_path", required=True, help="Output path for signed config JSON")
@@ -194,11 +194,17 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sflash.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sflash.set_defaults(func=handlers.cmd_flash_device)
 
-    scred = sub.add_parser("create-credentials", help="Generate admin keypair artifacts")
-    scred.add_argument("--identity", default=None, help="Explicit identity label")
-    scred.add_argument("--identity-prefix", default="e2e", help="Identity prefix when --identity is omitted")
-    scred.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
-    scred.set_defaults(func=handlers.cmd_create_credentials)
+    ssigncred = sub.add_parser("create-signing-credentials", help="Generate Ed25519 signing keypair artifacts")
+    ssigncred.add_argument("--identity", default=None, help="Explicit identity label")
+    ssigncred.add_argument("--identity-prefix", default="sign", help="Identity prefix when --identity is omitted")
+    ssigncred.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    ssigncred.set_defaults(func=handlers.cmd_create_signing_credentials)
+
+    sdeccred = sub.add_parser("create-decoding-credentials", help="Generate RSA decoding keypair artifacts")
+    sdeccred.add_argument("--identity", default=None, help="Explicit identity label")
+    sdeccred.add_argument("--identity-prefix", default="decode", help="Identity prefix when --identity is omitted")
+    sdeccred.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    sdeccred.set_defaults(func=handlers.cmd_create_decoding_credentials)
 
     sconf = sub.add_parser("configure-device", help="Apply signed config to device using admin/recorder credentials")
     sconf.add_argument("--admin-creds-dir", required=True, help="Path to admin credentials directory")
