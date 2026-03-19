@@ -86,13 +86,11 @@ Create admin credentials:
 python3 client/tools/azt_tool.py create-signing-credentials --identity admin-main
 ```
 
-Optional recorder credentials (separate keypair):
+Create recorder credentials (required, RSA decoding keypair):
 
 ```bash
 python3 client/tools/azt_tool.py create-decoding-credentials --identity recorder-main
 ```
-
-If you prefer a single key for both roles, use only the admin credentials and reuse them.
 
 ### 8) Configure device (Wi-Fi + signed config)
 
@@ -109,7 +107,7 @@ python3 client/tools/azt_tool.py configure-device \
   --allow-serial-bootstrap
 ```
 
-If you want to use the same keypair for both roles, omit `--recorder-creds-dir`.
+`--recorder-creds-dir` is required: admin signing keys (Ed25519) and recorder decoding keys (RSA) are intentionally different key types.
 
 Set your device IP once for copy/paste-friendly commands:
 
