@@ -7,7 +7,6 @@
 #include <IPAddress.h>
 #include <Preferences.h>
 #include <sodium.h>
-#include <LittleFS.h>
 #include <Update.h>
 #include <mbedtls/sha256.h>
 #include <esp_system.h>
@@ -107,28 +106,6 @@ static String parse_query_param(const String& path, const char* key) {
   return v;
 }
 
-static String ui_content_type_for_path(const String& path) {
-  if (path.endsWith(".html")) return "text/html; charset=utf-8";
-  if (path.endsWith(".css")) return "text/css; charset=utf-8";
-  if (path.endsWith(".js")) return "application/javascript; charset=utf-8";
-  if (path.endsWith(".json")) return "application/json";
-  if (path.endsWith(".txt")) return "text/plain; charset=utf-8";
-  return "application/octet-stream";
-}
-
-static bool read_littlefs_text_file(const String& path, String& out_body) {
-  out_body = "";
-  if (!LittleFS.begin(false)) return false;
-  File f = LittleFS.open(path, "r");
-  if (!f) return false;
-
-  out_body.reserve(static_cast<size_t>(f.size()));
-  while (f.available()) {
-    out_body += static_cast<char>(f.read());
-  }
-  f.close();
-  return true;
-}
 
 static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETKEYBYTES]) {
   Preferences p;
@@ -868,23 +845,12 @@ HttpDispatchResult dispatch_request(const String& method,
                                    AppState& state) {
   HttpDispatchResult r{};
 
-  if (method == "GET" && (path == "/ui" || path == "/ui/" || path.startsWith("/ui/"))) {
-    String file_path = "/ui/index.html";
-    if (path.startsWith("/ui/") && path.length() > 4) {
-      file_path = path;
-    }
-
-    String body;
-    if (!read_littlefs_text_file(file_path, body)) {
-      r.code = 404;
-      r.body = "ui file not found\n";
-      r.content_type = "text/plain";
-      return r;
-    }
-
+  if (method == "GET" && path == "/") {
     r.code = 200;
-    r.body = body;
-    r.content_type = ui_content_type_for_path(file_path);
+    r.content_type = "text/plain";
+    r.body = "Audio Zero Trust device API only\n"
+             "api_major=0 api_minor=0 protocol_major=0 protocol_minor=0 container_major=0 container_minor=0\n"
+             "Try: /api/v0/capabilities\n";
     return r;
   }
 
@@ -910,28 +876,6 @@ HttpDispatchResult dispatch_request(const String& method,
     r.content_type = "application/json";
     r.body = "{\"ok\":true,\"rebooting\":true}";
     r.reboot_after_response = true;
-    return r;
-  }
-
-  if (method == "GET" && path == "/api/v0/device/upgrade") {
-    r.code = 200;
-    r.content_type = "text/html; charset=utf-8";
-    r.body =
-        "<!doctype html><html><head><meta charset='utf-8'><title>AZT OTA Upload</title></head><body>"
-        "<h1>AZT OTA Upgrade</h1>"
-        "<p>Select a .otabundle file (JSON header first line + firmware bytes).</p>"
-        "<input id='f' type='file'/> <button id='u'>Upload</button>"
-        "<pre id='o'></pre>"
-        "<script>"
-        "const o=document.getElementById('o');"
-        "document.getElementById('u').onclick=async()=>{"
-        "const f=document.getElementById('f').files[0]; if(!f){o.textContent='pick file'; return;}"
-        "o.textContent='Uploading '+f.name+' ...';"
-        "try{const b=await f.arrayBuffer();"
-        "const r=await fetch('/api/v0/device/upgrade',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:b});"
-        "const t=await r.text(); o.textContent='HTTP '+r.status+'\\n'+t;}catch(e){o.textContent=String(e);}"
-        "};"
-        "</script></body></html>";
     return r;
   }
 
