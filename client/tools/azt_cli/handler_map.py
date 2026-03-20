@@ -24,6 +24,7 @@ from tools.azt_cli import (
     cmd_stream_probe,
     cmd_stream_redirect_check,
     cmd_stream_validate,
+    cmd_stream_decode,
 )
 
 
@@ -44,6 +45,7 @@ def build_handler_namespace(
         cmd_apply_config=cmd_apply_config,
         cmd_config_patch=cmd_config_patch,
         cmd_stream_validate=cmd_stream_validate.run,
+        cmd_stream_decode=cmd_stream_decode.run,
         cmd_ota_bundle_create=cmd_ota_bundle_create,
         cmd_ota_bundle_post=cmd_ota_bundle_post,
         cmd_certify_issue=cmd_certify_issue,

@@ -67,6 +67,15 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sv.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sv.set_defaults(func=handlers.cmd_stream_validate)
 
+    sd = sub.add_parser("stream-decode", help="Fully validate AZT1 stream and decode PCM to WAV")
+    sd.add_argument("--in", dest="in_path", required=True, help="Input AZT1 file")
+    sd.add_argument("--key", dest="key_path", required=True, help="Recorder private key PEM")
+    sd.add_argument("--out", dest="out_path", default="", help="Output WAV path (default: <in>.wav)")
+    sd.add_argument("--apply-gain", action="store_true", help="Apply recommended_decode_gain from stream header")
+    sd.add_argument("--gain", type=float, default=None, help="Explicit decode gain multiplier (overrides --apply-gain)")
+    sd.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    sd.set_defaults(func=handlers.cmd_stream_decode)
+
     sb = sub.add_parser("ota-bundle-create", help="Create one-file OTA bundle: JSON header line + raw firmware bytes")
     sb.add_argument("--key", dest="key_path", default="", help="Signer private key PEM")
     sb.add_argument("--version", default="", help="Firmware version label (human-readable). Defaults to --version-code when omitted")

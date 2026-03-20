@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import struct
+import wave
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -354,3 +355,336 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     if audio_key is not None and nonce_prefix is not None:
         out["pcm_bytes"] = pcm_bytes
     return out
+
+
+def decode_azt1_stream_to_wav(
+    *,
+    data: bytes,
+    out_wav_path: Path,
+    admin_private_key_pem: bytes | None = None,
+    apply_gain: bool = False,
+    gain: float | None = None,
+) -> dict:
+    # Full-chain validation + decode to WAV in one pass.
+    priv = serialization.load_pem_private_key(admin_private_key_pem, password=None) if admin_private_key_pem else None
+
+    if not data.startswith(b"AZT1\n"):
+        raise ValueError("ERR_MAGIC")
+    off = 5
+    nl = data.find(b"\n", off)
+    if nl < 0:
+        raise ValueError("ERR_HEADER_JSON")
+    plain_line = data[off:nl]
+    plain = json.loads(plain_line.decode("utf-8"))
+    off = nl + 1
+
+    sig_nl = data.find(b"\n", off)
+    if sig_nl < 0:
+        raise ValueError("ERR_HEADER_SIG_LINE")
+    outer_sig_b64 = data[off:sig_nl].decode("utf-8")
+    off = sig_nl + 1
+
+    if plain["version"] != 1:
+        raise ValueError("ERR_VERSION")
+
+    next_fp_hex = plain.get("next_header_recipient_key_fingerprint_hex", plain.get("header_key_fingerprint_hex"))
+    if priv is not None:
+        pub_der = priv.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        hh = hashes.Hash(hashes.SHA256())
+        hh.update(pub_der)
+        if next_fp_hex != hh.finalize().hex():
+            raise ValueError("ERR_KEY_FP_MISMATCH")
+
+    if plain.get("next_header_plaintext_hash_alg") != "sha256":
+        raise ValueError("ERR_PLAIN_HEADER_HASH_ALG")
+
+    enc_header_len = struct.unpack(">H", data[off : off + 2])[0]
+    off += 2
+
+    header_plaintext_hash_verified = False
+    header_encrypted_block_hash_verified = False
+    next_header_mode = "encrypted"
+    dec = None
+    header_ct = b""
+
+    if enc_header_len == 0xFFFF:
+        next_header_mode = "decoded"
+        dec_nl = data.find(b"\n", off)
+        if dec_nl < 0:
+            raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_FORMAT")
+        header_pt = data[off:dec_nl]
+        off = dec_nl + 1
+        dec = json.loads(header_pt.decode("utf-8"))
+
+        plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
+        if not isinstance(plain_hash_b64, str) or not plain_hash_b64:
+            raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH_FIELD")
+        hp = hashes.Hash(hashes.SHA256())
+        hp.update(header_pt)
+        if hp.finalize() != _b64d(plain_hash_b64):
+            raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH")
+        header_plaintext_hash_verified = True
+    else:
+        header_ct = data[off : off + enc_header_len]
+        off += enc_header_len
+
+        exp_len = plain.get("next_header_ciphertext_len")
+        if isinstance(exp_len, int) and exp_len != len(header_ct):
+            raise ValueError("ERR_ENCRYPTED_NEXT_HEADER_LEN")
+        exp_ct_hash_b64 = plain.get("next_header_ciphertext_sha256_b64")
+        if isinstance(exp_ct_hash_b64, str) and exp_ct_hash_b64:
+            hh = hashes.Hash(hashes.SHA256())
+            hh.update(header_ct)
+            if hh.finalize() != _b64d(exp_ct_hash_b64):
+                raise ValueError("ERR_ENCRYPTED_NEXT_HEADER_HASH")
+            header_encrypted_block_hash_verified = True
+
+        if priv is not None:
+            wrapped = _b64d(plain.get("next_header_wrapped_key_b64", plain.get("wrapped_header_key_b64")))
+            header_key = priv.decrypt(wrapped, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+            header_nonce = _b64d(plain.get("next_header_nonce_b64", plain.get("header_nonce_b64")))
+            header_tag = _b64d(plain.get("next_header_tag_b64", plain.get("header_tag_b64")))
+            header_pt = AESGCM(header_key).decrypt(header_nonce, header_ct + header_tag, None)
+            dec = json.loads(header_pt.decode("utf-8"))
+
+            plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
+            if not isinstance(plain_hash_b64, str) or not plain_hash_b64:
+                raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH_FIELD")
+            hp = hashes.Hash(hashes.SHA256())
+            hp.update(header_pt)
+            if hp.finalize() != _b64d(plain_hash_b64):
+                raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH")
+            header_plaintext_hash_verified = True
+
+    chain_alg = str((dec or plain).get("chain_alg", "sha256-link"))
+    v_prev = None
+    chain_key = _b64d(dec["chain_key_b64"]) if (dec is not None and "chain_key_b64" in dec) else None
+
+    device_sign_pub = None
+    if dec is not None and "device_sign_public_key_b64" in dec:
+        device_sign_pub_raw = _b64d(dec["device_sign_public_key_b64"])
+        device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
+    elif isinstance(plain.get("this_header_signing_key_b64"), str) and plain.get("this_header_signing_key_b64"):
+        device_sign_pub_raw = _b64d(plain.get("this_header_signing_key_b64"))
+        device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
+
+    header_sig_verified = False
+    if device_sign_pub is not None:
+        outer_sig = _b64d(outer_sig_b64)
+        device_sign_pub.verify(outer_sig, plain_line)
+        header_sig_verified = True
+
+    audio_key = _b64d(dec["audio_key_b64"]) if dec is not None else None
+    nonce_prefix = _b64d(dec["audio_nonce_prefix_b64"]) if dec is not None else None
+    if audio_key is None or nonce_prefix is None:
+        raise ValueError("ERR_DECODE_KEY_REQUIRED")
+
+    dec_or_plain = (dec or plain)
+    sample_rate_hz = int(dec_or_plain.get("sample_rate_hz", 16000))
+    channels = int(dec_or_plain.get("channels", 1))
+    sample_width_bytes = int(dec_or_plain.get("sample_width_bytes", 2))
+    if sample_width_bytes != 2:
+        raise ValueError("ERR_UNSUPPORTED_SAMPLE_WIDTH")
+    if channels != 1:
+        raise ValueError("ERR_UNSUPPORTED_CHANNELS")
+
+    recommended_gain = float(dec_or_plain.get("recommended_decode_gain", 1.0))
+    frame_duration_ms = float(dec_or_plain.get("audio_frame_duration_ms", 0.0))
+    gain_to_apply = float(gain) if gain is not None else (recommended_gain if apply_gain else 1.0)
+
+    frames = pcm_bytes = pcm_blocks = sig_blocks = sig_verified = 0
+    dropped_notice_blocks = dropped_frames_total = telemetry_blocks = 0
+    seq_to_chain_v: dict[int, bytes] = {}
+    record_seqs: list[int] = []
+    max_verified_ref_seq = 0
+    pcm_out = bytearray()
+
+    while off < len(data):
+        if off + 10 > len(data):
+            break
+        seq = struct.unpack(">I", data[off : off + 4])[0]
+        off += 4
+        block_type = data[off]
+        off += 1
+        body_len = struct.unpack(">I", data[off : off + 4])[0]
+        off += 4
+        tag_len = data[off]
+        off += 1
+        if off + body_len + tag_len + 32 > len(data):
+            break
+        body = data[off : off + body_len]
+        off += body_len
+        tag = data[off : off + tag_len]
+        off += tag_len
+        v_cur = data[off : off + 32]
+        off += 32
+
+        record_seqs.append(seq)
+
+        if chain_alg == "sha256-link":
+            core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
+            if seq == 1:
+                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
+            else:
+                if v_prev is None:
+                    raise ValueError("ERR_CHAIN_STATE")
+                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
+            if v_calc != v_cur:
+                raise ValueError("ERR_CHAIN")
+        else:
+            if chain_key is None or v_prev is None:
+                raise ValueError("ERR_CHAIN_STATE")
+            hm = hmac.HMAC(chain_key, hashes.SHA256())
+            hm.update(struct.pack(">I", seq))
+            hm.update(bytes([block_type]))
+            hm.update(struct.pack(">I", body_len))
+            hm.update(bytes([tag_len]))
+            hm.update(body)
+            hm.update(tag)
+            hm.update(v_prev)
+            if hm.finalize() != v_cur:
+                raise ValueError("ERR_CHAIN")
+        v_prev = v_cur
+        seq_to_chain_v[seq] = v_cur
+
+        if block_type in (0x00, 0x03):
+            if tag_len != 16:
+                raise ValueError("ERR_TAG_LEN")
+            nonce = nonce_prefix + struct.pack(">I", seq) + b"\x00\x00\x00\x00"
+            block_body = AESGCM(audio_key).decrypt(nonce, body + tag, None)
+        elif block_type in (0x01, 0x02):
+            if tag_len != 0:
+                raise ValueError("ERR_TAG_LEN")
+            block_body = body
+        else:
+            raise ValueError(f"ERR_BLOCK_TYPE:{block_type}")
+
+        if block_type == 0x00:
+            pcm_bytes += len(block_body)
+            pcm_blocks += 1
+            if gain_to_apply == 1.0:
+                pcm_out.extend(block_body)
+            else:
+                for i in range(0, len(block_body), 2):
+                    s = int.from_bytes(block_body[i : i + 2], "little", signed=True)
+                    sg = int(round(s * gain_to_apply))
+                    if sg > 32767:
+                        sg = 32767
+                    elif sg < -32768:
+                        sg = -32768
+                    pcm_out.extend(int(sg).to_bytes(2, "little", signed=True))
+        elif block_type == 0x01:
+            sig_blocks += 1
+            if len(block_body) >= 68:
+                ref_seq = struct.unpack(">I", block_body[:4])[0]
+                sig = block_body[4:68]
+                if device_sign_pub is not None and ref_seq in seq_to_chain_v:
+                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                    device_sign_pub.verify(sig, msg)
+                    sig_verified += 1
+                    if ref_seq > max_verified_ref_seq:
+                        max_verified_ref_seq = ref_seq
+        elif block_type == 0x02:
+            dropped_notice_blocks += 1
+            if len(block_body) >= 2:
+                dropped_frames_total += struct.unpack(">H", block_body[:2])[0]
+        elif block_type == 0x03:
+            telemetry_blocks += 1
+        frames += 1
+
+    out_wav_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(out_wav_path), "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(sample_width_bytes)
+        wf.setframerate(sample_rate_hz)
+        wf.writeframes(bytes(pcm_out))
+
+    unsigned_tail_start_seq = (max_verified_ref_seq + 1) if max_verified_ref_seq > 0 else 1
+    unsigned_tail_blocks = sum(1 for s in record_seqs if s >= unsigned_tail_start_seq)
+    unsigned_tail_bytes = max(0, len(data) - off)
+
+    # Compute unsigned-tail audio-equivalent duration (pcm blocks + dropped-frame notices)
+    unsigned_tail_pcm_blocks = 0
+    unsigned_tail_dropped_frames = 0
+    scan_off = 5
+    nl2 = data.find(b"\n", scan_off)
+    scan_off = nl2 + 1
+    sig_nl2 = data.find(b"\n", scan_off)
+    scan_off = sig_nl2 + 1
+    enc_header_len2 = struct.unpack(">H", data[scan_off : scan_off + 2])[0]
+    scan_off += 2
+    if enc_header_len2 == 0xFFFF:
+        dec_nl2 = data.find(b"\n", scan_off)
+        scan_off = dec_nl2 + 1
+    else:
+        scan_off += enc_header_len2
+    while scan_off < len(data):
+        if scan_off + 10 > len(data):
+            break
+        seq2 = struct.unpack(">I", data[scan_off : scan_off + 4])[0]
+        scan_off += 4
+        btype2 = data[scan_off]
+        scan_off += 1
+        body_len2 = struct.unpack(">I", data[scan_off : scan_off + 4])[0]
+        scan_off += 4
+        tag_len2 = data[scan_off]
+        scan_off += 1
+        if scan_off + body_len2 + tag_len2 + 32 > len(data):
+            break
+        body2 = data[scan_off : scan_off + body_len2]
+        scan_off += body_len2
+        scan_off += tag_len2
+        scan_off += 32
+        if seq2 < unsigned_tail_start_seq:
+            continue
+        if btype2 == 0x00:
+            unsigned_tail_pcm_blocks += 1
+        elif btype2 == 0x02 and len(body2) >= 2:
+            unsigned_tail_dropped_frames += struct.unpack(">H", body2[:2])[0]
+
+    unsigned_tail_frames = unsigned_tail_pcm_blocks + unsigned_tail_dropped_frames
+    unsigned_tail_seconds = (unsigned_tail_frames * frame_duration_ms) / 1000.0 if frame_duration_ms > 0 else None
+
+    warnings: list[str] = []
+    if unsigned_tail_blocks > 0:
+        if unsigned_tail_seconds is not None:
+            warnings.append(
+                f"The last {unsigned_tail_blocks} block(s) ({unsigned_tail_seconds:.3f} seconds of audio) are not covered by a verified checkpoint signature and could be tampered with."
+            )
+        else:
+            warnings.append(
+                f"The last {unsigned_tail_blocks} block(s) are not covered by a verified checkpoint signature and could be tampered with."
+            )
+
+    return {
+        "ok": True,
+        "inner_header_mode": next_header_mode,
+        "outer_header_signature_verified": header_sig_verified,
+        "inner_header_plaintext_hash_verified": header_plaintext_hash_verified,
+        "inner_header_encrypted_block_hash_verified": header_encrypted_block_hash_verified,
+        "checkpoint_sig_verifiable": (device_sign_pub is not None),
+        "stream_sigs_verified": sig_verified,
+        "frames": frames,
+        "pcm_blocks": pcm_blocks,
+        "pcm_bytes": pcm_bytes,
+        "dropped_notice_blocks": dropped_notice_blocks,
+        "dropped_frames_total": dropped_frames_total,
+        "telemetry_blocks": telemetry_blocks,
+        "recommended_decode_gain": recommended_gain,
+        "gain_applied": gain_to_apply,
+        "sample_rate_hz": sample_rate_hz,
+        "channels": channels,
+        "sample_width_bytes": sample_width_bytes,
+        "wav_out": str(out_wav_path),
+        "wav_bytes": len(pcm_out),
+        "bytes_total": len(data),
+        "bytes_consumed": off,
+        "unsigned_tail_start_seq": unsigned_tail_start_seq,
+        "unsigned_tail_blocks": unsigned_tail_blocks,
+        "unsigned_tail_pcm_blocks": unsigned_tail_pcm_blocks,
+        "unsigned_tail_dropped_frames": unsigned_tail_dropped_frames,
+        "unsigned_tail_frames": unsigned_tail_frames,
+        "unsigned_tail_seconds": unsigned_tail_seconds,
+        "unsigned_tail_bytes": unsigned_tail_bytes,
+        "warnings": warnings,
+    }
