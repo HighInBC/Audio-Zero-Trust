@@ -140,6 +140,10 @@ def is_file_in_use(file_path: Path) -> bool:
 
 
 def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 60) -> list[Path]:
+    # Scan the full recordings tree recursively from output_dir (YYYY/MM/DD/** included).
+    if not output_dir.exists():
+        return []
+
     now = time.time()
     out: list[Path] = []
     for p in output_dir.rglob("*.azt"):
@@ -229,13 +233,13 @@ class RecordingSession:
     cfg: RecordingConfig
 
     async def run_forever(self) -> None:
-        out_dir = Path(self.cfg.output_dir) / _sanitize_common_name(self.ad.device_name)
-        out_dir.mkdir(parents=True, exist_ok=True)
+        base_out_dir = Path(self.cfg.output_dir)
+        base_out_dir.mkdir(parents=True, exist_ok=True)
 
         while True:
             for backoff in self.cfg.reconnect_backoff_seconds:
                 try:
-                    await self._run_single_rollover(out_dir)
+                    await self._run_single_rollover(base_out_dir)
                     # normal rollover => immediate next file
                     break
                 except AuthorizationError as e:
@@ -247,10 +251,13 @@ class RecordingSession:
             else:
                 await asyncio.sleep(5)
 
-    async def _run_single_rollover(self, out_dir: Path) -> None:
+    async def _run_single_rollover(self, base_out_dir: Path) -> None:
         started = datetime.now(UTC)
+        date_out_dir = base_out_dir / started.strftime("%Y") / started.strftime("%m") / started.strftime("%d")
+        date_out_dir.mkdir(parents=True, exist_ok=True)
+
         filename = make_azt_filename(self.ad.device_name, started)
-        out_path = out_dir / filename
+        out_path = date_out_dir / filename
         print(f"[record] START device={self.ad.device_name} file={out_path}")
 
         # Hourly rollover by wall-clock hour; if disabled, use 24h chunk.
