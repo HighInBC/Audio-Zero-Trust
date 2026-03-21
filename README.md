@@ -104,22 +104,18 @@ python3 client/tools/azt_tool.py configure-device \
   --wifi-ssid "<YOUR_WIFI_SSID>" \
   --wifi-password "<YOUR_WIFI_PASSWORD>" \
   --port /dev/ttyUSB0 \
+  --mdns-enabled \
+  --mdna-hostname azt-mic \
   --allow-serial-bootstrap
 ```
 
 Both `--admin-creds-dir` and `--recorder-creds-dir` are required: admin signing keys (Ed25519) and recorder decoding keys (RSA) are intentionally different key types and must be provided separately.
 
-Set your device IP once for copy/paste-friendly commands:
-
-```bash
-export DEVICE_IP="<DEVICE_IP>"
-```
-
 ### 9) Optional: issue a device certificate from your admin key
 
 ```bash
 python3 client/tools/azt_tool.py certificate-issue \
-  --host "$DEVICE_IP" \
+  --host azt-mic.local \
   --key client/tools/provisioned/admin-main/private_key.pem \
   --cert-serial cert-$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
@@ -127,8 +123,8 @@ python3 client/tools/azt_tool.py certificate-issue \
 ### 10) Validate quickly
 
 ```bash
-python3 client/tools/azt_tool.py state-get --host "$DEVICE_IP"
-python3 client/tools/azt_tool.py stream-probe --host "$DEVICE_IP" --seconds 2
+python3 client/tools/azt_tool.py state-get --host azt-mic.local
+python3 client/tools/azt_tool.py stream-probe --host azt-mic.local --seconds 2
 python3 client/tools/azt_tool.py stream-validate --in client/test/hil/sample.bin --key client/tools/provisioned/admin-main/private_key.pem
 ```
 
