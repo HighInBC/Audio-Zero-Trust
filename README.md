@@ -107,7 +107,7 @@ python3 client/tools/azt_tool.py configure-device \
   --allow-serial-bootstrap
 ```
 
-`--recorder-creds-dir` is required: admin signing keys (Ed25519) and recorder decoding keys (RSA) are intentionally different key types.
+Both `--admin-creds-dir` and `--recorder-creds-dir` are required: admin signing keys (Ed25519) and recorder decoding keys (RSA) are intentionally different key types and must be provided separately.
 
 Set your device IP once for copy/paste-friendly commands:
 
