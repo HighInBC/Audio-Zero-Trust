@@ -542,7 +542,7 @@ def main() -> int:
         results.append({"name": "post_reboot_state", "ok": False, "detail": str(err)})
 
     try:
-        rc_finite, obj_finite, out_finite = tool.json(["stream-probe", "--host", host, "--seconds", str(args.finite_seconds)])
+        rc_finite, obj_finite, out_finite = tool.json(["stream-read", "--host", host, "--seconds", str(args.finite_seconds)])
         payload_finite = obj_finite.get("payload") if isinstance(obj_finite, dict) else None
         finite_bytes = int(payload_finite.get("bytes") or 0) if isinstance(payload_finite, dict) else 0
         ok_fetch = rc_finite == 0 and finite_bytes > 0
@@ -550,7 +550,7 @@ def main() -> int:
     except Exception as err:
         results.append({"name": "finite_fetch", "ok": False, "detail": str(err)})
 
-    results.append({"name": "finite_validate", "ok": True, "detail": "skipped: fetch-sample artifact path removed; stream-probe-only flow"})
+    results.append({"name": "finite_validate", "ok": True, "detail": "skipped: fetch-sample artifact path removed; stream-read-only flow"})
 
     # OTA happy/sad-path checks.
     if ota_signer_key_path is None:
@@ -639,7 +639,7 @@ def main() -> int:
 
     try:
         wait_http_state(tool, host, timeout_s=60)
-        rc_probe, obj_probe, out_probe = tool.json(["stream-probe", "--host", host, "--seconds", str(args.indef_probe_seconds)])
+        rc_probe, obj_probe, out_probe = tool.json(["stream-read", "--host", host, "--seconds", str(args.indef_probe_seconds)])
         payload_probe = obj_probe.get("payload") if isinstance(obj_probe, dict) else None
         if rc_probe == 0 and isinstance(payload_probe, dict):
             n = int(payload_probe.get("bytes") or 0)
@@ -652,7 +652,7 @@ def main() -> int:
     def probe_with_retry(attempts: int = 2) -> tuple[int, dict | None, str]:
         last_rc, last_obj, last_out = 1, None, ""
         for _ in range(attempts):
-            rc, obj, out = tool.json(["stream-probe", "--host", host, "--seconds", str(args.reconnect_seconds)])
+            rc, obj, out = tool.json(["stream-read", "--host", host, "--seconds", str(args.reconnect_seconds)])
             last_rc, last_obj, last_out = rc, obj, out
             payload = obj.get("payload") if isinstance(obj, dict) else None
             if rc == 0 and isinstance(payload, dict) and int(payload.get("bytes") or 0) > 0:
@@ -672,8 +672,8 @@ def main() -> int:
     )
     results.append({"name": "reconnect_fetch", "ok": ok_reconnect, "detail": {"a": payload_a, "b": payload_b, "raw": (out_a + "\n" + out_b)[-500:]}})
 
-    results.append({"name": "reconnect_validate", "ok": True, "detail": "skipped: fetch-sample artifact path removed; stream-probe-only flow"})
-    results.append({"name": "truncation_tolerance", "ok": True, "detail": "skipped: no local sample artifact in stream-probe-only flow"})
+    results.append({"name": "reconnect_validate", "ok": True, "detail": "skipped: fetch-sample artifact path removed; stream-read-only flow"})
+    results.append({"name": "truncation_tolerance", "ok": True, "detail": "skipped: no local sample artifact in stream-read-only flow"})
 
     summary = {
         "ok": all(r["ok"] for r in results),

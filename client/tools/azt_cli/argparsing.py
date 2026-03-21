@@ -338,13 +338,16 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sredir.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sredir.set_defaults(func=handlers.cmd_stream_redirect_check)
 
-    sprobe = sub.add_parser("stream-probe", help="Read stream for N seconds and report bytes")
+    sprobe = sub.add_parser(
+        "stream-read",
+        help="Read stream data and report bytes (omit --seconds to run continuously)",
+    )
     sprobe.add_argument("--host", required=True, help="Device host/IP")
     sprobe.add_argument("--port", type=int, default=8080, help="Device API port")
-    sprobe.add_argument("--seconds", type=float, default=2.0, help="Probe duration seconds")
+    sprobe.add_argument("--seconds", type=float, default=None, help="Optional read duration seconds; omit to run indefinitely")
     sprobe.add_argument("--timeout", type=int, default=10, help="HTTP timeout seconds")
     sprobe.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
-    sprobe.set_defaults(func=handlers.cmd_stream_probe)
+    sprobe.set_defaults(func=handlers.cmd_stream_probe, command_name="stream-read")
 
     _sort_subcommands_alpha(sub)
     return p

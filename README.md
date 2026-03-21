@@ -124,7 +124,9 @@ python3 client/tools/azt_tool.py certificate-issue \
 
 ```bash
 python3 client/tools/azt_tool.py state-get --host azt-mic.local
-python3 client/tools/azt_tool.py stream-probe --host azt-mic.local --seconds 2
+python3 client/tools/azt_tool.py stream-read --host azt-mic.local --seconds 2
+# Omit --seconds to keep reading until interrupted (Ctrl+C)
+python3 client/tools/azt_tool.py stream-read --host azt-mic.local
 python3 client/tools/azt_tool.py stream-validate --in client/test/hil/sample.bin --key client/tools/provisioned/admin-main/private_key.pem
 ```
 

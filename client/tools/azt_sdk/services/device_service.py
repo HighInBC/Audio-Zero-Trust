@@ -86,7 +86,7 @@ def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: in
     return ok, {"status": status, "location": location}
 
 
-def stream_probe(*, host: str, port: int, seconds: float, timeout: int) -> tuple[bool, dict]:
+def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -> tuple[bool, dict]:
     url = f"http://{host}:{port}/stream"
     total = 0
     r = requests.get(url, stream=True, timeout=timeout)
@@ -97,11 +97,12 @@ def stream_probe(*, host: str, port: int, seconds: float, timeout: int) -> tuple
         for chunk in r.iter_content(chunk_size=4096):
             if chunk:
                 total += len(chunk)
-            if time.time() - start >= seconds:
+            if seconds is not None and (time.time() - start >= seconds):
                 break
     finally:
         r.close()
-    return total > 0, {"bytes": total, "seconds": seconds}
+    elapsed = time.time() - start
+    return total > 0, {"bytes": total, "seconds": elapsed, "requested_seconds": seconds}
 
 
 def mdns_fqdn_get(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:

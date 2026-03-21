@@ -73,7 +73,7 @@ def main() -> int:
             ["state-get", "--host", args.host, "--port", str(args.port)],
             ["attestation-get", "--host", args.host, "--nonce", f"contract-{int(time.time())}", "--port", str(args.port)],
             ["stream-redirect-check", "--host", args.host, "--port", str(args.port)],
-            ["stream-probe", "--host", args.host, "--port", str(args.port), "--seconds", "0.5"],
+            ["stream-read", "--host", args.host, "--port", str(args.port), "--seconds", "0.5"],
         ]
         for cmd in device_cmds:
             rc, obj, raw = run_cmd(args.tool_cmd, cmd)
