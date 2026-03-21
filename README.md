@@ -105,7 +105,7 @@ python3 client/tools/azt_tool.py configure-device \
   --wifi-password "<YOUR_WIFI_PASSWORD>" \
   --port /dev/ttyUSB0 \
   --mdns-enabled \
-  --mdna-hostname azt-mic \
+  --mdns-hostname azt-mic \
   --allow-serial-bootstrap
 ```
 
