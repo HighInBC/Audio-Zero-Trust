@@ -36,6 +36,11 @@ namespace azt {
 // Default embedded OTA signer key (ed25519 public_key_b64).
 static const char* kOtaSignerPublicKeyPem = "6n6Ge+vZPN6HC+09FrDdBTlaEzQ0di799FuFCg+XR78=";
 
+// Reboot challenge state (single active nonce).
+static String g_reboot_nonce = "";
+static uint32_t g_reboot_nonce_expires_ms = 0;
+static constexpr uint32_t kRebootNonceTtlMs = 10000;
+
 static String json_quote(const String& in) {
   String out = "\"";
   for (size_t i = 0; i < in.length(); ++i) {
@@ -871,7 +876,81 @@ HttpDispatchResult dispatch_request(const String& method,
     return handle_config_patch_json(state, body);
   }
 
-  if ((method == "POST" || method == "GET") && path == "/api/v0/device/reboot") {
+  if (method == "GET" && path == "/api/v0/device/reboot/challenge") {
+    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_AUTH_NOT_READY\"}";
+      return r;
+    }
+
+    uint8_t rnd[16] = {0};
+    esp_fill_random(rnd, sizeof(rnd));
+    g_reboot_nonce = hex_lower(rnd, sizeof(rnd));
+    g_reboot_nonce_expires_ms = millis() + kRebootNonceTtlMs;
+
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"op\":\"reboot\",\"nonce\":" + json_quote(g_reboot_nonce) +
+             ",\"ttl_ms\":" + String(static_cast<unsigned long>(kRebootNonceTtlMs)) + "}";
+    return r;
+  }
+
+  if (method == "POST" && path == "/api/v0/device/reboot") {
+    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_AUTH_NOT_READY\"}";
+      return r;
+    }
+
+    JsonDocument doc;
+    DeserializationError jerr = deserializeJson(doc, body);
+    if (jerr) {
+      r.code = 400;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_AUTH_SCHEMA\",\"detail\":\"invalid json\"}";
+      return r;
+    }
+
+    String nonce = String((const char*)(doc["nonce"] | ""));
+    String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
+    String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
+    String signer_fp = String((const char*)(doc["signer_fingerprint_hex"] | ""));
+
+    uint32_t now_ms = millis();
+    if (g_reboot_nonce.length() == 0 || g_reboot_nonce_expires_ms == 0 || static_cast<int32_t>(now_ms - g_reboot_nonce_expires_ms) > 0) {
+      g_reboot_nonce = "";
+      g_reboot_nonce_expires_ms = 0;
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_CHALLENGE_EXPIRED\"}";
+      return r;
+    }
+
+    if (nonce.length() == 0 || nonce != g_reboot_nonce || sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.admin_fingerprint_hex) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_AUTH\"}";
+      return r;
+    }
+
+    String signed_msg = String("reboot:") + nonce;
+    std::vector<uint8_t> msg_raw;
+    msg_raw.reserve(signed_msg.length());
+    for (size_t i = 0; i < signed_msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(signed_msg[i]));
+
+    if (!verify_ed25519_signature_b64(state.admin_pubkey_pem, msg_raw, sig_b64)) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_SIG_VERIFY\"}";
+      return r;
+    }
+
+    // Consume nonce on first successful use (single-use challenge).
+    g_reboot_nonce = "";
+    g_reboot_nonce_expires_ms = 0;
+
     r.code = 200;
     r.content_type = "application/json";
     r.body = "{\"ok\":true,\"rebooting\":true}";

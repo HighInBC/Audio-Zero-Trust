@@ -313,8 +313,9 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     skeym.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     skeym.set_defaults(func=handlers.cmd_key_match_check)
 
-    sreboot = sub.add_parser("reboot-device", help="Trigger device reboot")
+    sreboot = sub.add_parser("reboot-device", help="Trigger authenticated device reboot")
     sreboot.add_argument("--host", required=True, help="Device host/IP")
+    sreboot.add_argument("--key", dest="key_path", required=True, help="Admin Ed25519 private key PEM for reboot auth challenge signing")
     sreboot.add_argument("--port", type=int, default=8080, help="Device API port")
     sreboot.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
     sreboot.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")

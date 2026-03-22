@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
+import base64
+from pathlib import Path
 import requests
 from urllib.request import urlopen
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
 from tools.azt_client.http import get_json, http_json
 from tools.provision_unit import detect_device_ip_from_serial
 
@@ -56,8 +62,35 @@ def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> di
     return http_json("POST", f"http://{host}:{port}/api/v0/device/certificate", payload, timeout=timeout)
 
 
-def reboot_device(*, host: str, port: int, timeout: int) -> dict:
-    return http_json("POST", f"http://{host}:{port}/api/v0/device/reboot", {}, timeout=timeout)
+def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
+    ch = get_json(f"http://{host}:{port}/api/v0/device/reboot/challenge", timeout=timeout)
+    if not ch.get("ok"):
+        return {
+            "ok": False,
+            "error": "ERR_REBOOT_CHALLENGE",
+            "detail": ch.get("error") or ch.get("detail") or "challenge request failed",
+            "challenge_response": ch,
+        }
+
+    nonce = str(ch.get("nonce") or "")
+    if not nonce:
+        return {"ok": False, "error": "ERR_REBOOT_CHALLENGE", "detail": "missing nonce in challenge response"}
+
+    priv = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
+    if not isinstance(priv, ed25519.Ed25519PrivateKey):
+        return {"ok": False, "error": "ERR_REBOOT_KEY", "detail": "reboot key must be Ed25519 private key PEM"}
+
+    msg = f"reboot:{nonce}".encode("utf-8")
+    sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
+    signer_fp = ed25519_fp_hex_from_private_key(Path(key_path))
+
+    payload = {
+        "nonce": nonce,
+        "signature_algorithm": "ed25519",
+        "signature_b64": sig_b64,
+        "signer_fingerprint_hex": signer_fp,
+    }
+    return http_json("POST", f"http://{host}:{port}/api/v0/device/reboot", payload, timeout=timeout)
 
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:

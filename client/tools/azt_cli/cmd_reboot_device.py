@@ -7,7 +7,7 @@ from tools.azt_sdk.services.device_service import reboot_device
 
 
 def run(args: argparse.Namespace) -> int:
-    res = reboot_device(host=args.host, port=int(args.port), timeout=int(args.timeout))
+    res = reboot_device(host=args.host, port=int(args.port), timeout=int(args.timeout), key_path=str(args.key_path))
     ok = bool(res.get("ok"))
     emit_envelope(
         command="reboot-device",
