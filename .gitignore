@@ -6,6 +6,10 @@ firmware/audio_zero_trust/lib/azt/build/
 *.elf
 *.map
 
+# allow release binaries only in this directory
+!firmware/releases/
+!firmware/releases/*.bin
+
 # Python
 __pycache__/
 *.pyc
