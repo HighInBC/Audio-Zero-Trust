@@ -82,7 +82,7 @@ Current hardware target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
 
 **How it works:** tooling validates signatures, certificate linkage, and header consistency in one pipeline.
 
-#### 7) OTA safety controls (beyond just “update works”)
+#### 7) OTA safety controls
 
 **What this means:** updates can be restricted to trusted signers and newer versions.
 
