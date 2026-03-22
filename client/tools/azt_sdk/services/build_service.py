@@ -88,70 +88,73 @@ def resolve_esptool() -> str:
 
 
 def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool = False) -> tuple[int, dict, str]:
-    """Flash a specific app firmware.bin deterministically via esptool.
+    """Flash OTA firmware payload using PlatformIO's known-good upload recipe.
 
-    OTA-bundle serial install should only replace the app partition payload
-    (offset 0x10000 on this board profile), leaving bootloader/partitions intact.
+    This builds into an isolated temporary build_dir, replaces that temp
+    firmware.bin with the OTA payload, then runs normal PlatformIO upload with
+    -t nobuild so transport/reset/flash settings match --from-source behavior.
     """
-    _ = env  # kept for callsite compatibility and payload traceability.
     fw_src = Path(firmware_bin)
     if not fw_src.exists():
         raise FileNotFoundError(f"firmware bin not found: {fw_src}")
 
-    esptool = resolve_esptool()
-    use_no_stub = esptool.startswith("/usr/bin/")
-    cmd = [
-        esptool,
-        "--chip",
-        "esp32",
-        "--port",
-        port,
-        "--baud",
-        "115200",
-    ]
-    if use_no_stub:
-        cmd.append("--no-stub")
-    cmd += [
-        "write_flash",
-        "-z",
-        "0x10000",
-        str(fw_src),
-    ]
+    pio = resolve_platformio()
 
-    if not stream:
-        p = subprocess.run(cmd, cwd=str(FW_DIR), text=True, capture_output=True)
-        out = (p.stdout or "") + (p.stderr or "")
-        return p.returncode, {
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="azt-pio-ota-") as td:
+        build_dir = Path(td)
+        common_opts = ["--project-option", f"build_dir={build_dir}"]
+
+        prep_cmd = [pio, "run", "-e", env, *common_opts]
+        prep = subprocess.run(prep_cmd, cwd=str(FW_DIR), text=True, capture_output=True)
+        prep_out = (prep.stdout or "") + (prep.stderr or "")
+        if prep.returncode != 0:
+            return prep.returncode, {
+                "run": prep_cmd,
+                "cwd": str(FW_DIR),
+                "firmware_bin": str(fw_src),
+                "flash_method": "pio_temp_builddir_upload",
+                "temp_build_dir": str(build_dir),
+            }, prep_out
+
+        temp_fw = build_dir / env / "firmware.bin"
+        temp_fw.parent.mkdir(parents=True, exist_ok=True)
+        temp_fw.write_bytes(fw_src.read_bytes())
+
+        cmd = [pio, "run", "-e", env, "-t", "nobuild", "-t", "upload", "--upload-port", port, *common_opts]
+
+        if not stream:
+            p = subprocess.run(cmd, cwd=str(FW_DIR), text=True, capture_output=True)
+            out = prep_out + (p.stdout or "") + (p.stderr or "")
+            return p.returncode, {
+                "run": cmd,
+                "cwd": str(FW_DIR),
+                "firmware_bin": str(fw_src),
+                "flash_method": "pio_temp_builddir_upload",
+                "temp_build_dir": str(build_dir),
+                "temp_build_firmware": str(temp_fw),
+            }, out
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(FW_DIR),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        chunks: list[str] = [prep_out]
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            print(line, end="")
+            chunks.append(line)
+        proc.wait()
+        out = "".join(chunks)
+        return int(proc.returncode or 0), {
             "run": cmd,
             "cwd": str(FW_DIR),
             "firmware_bin": str(fw_src),
-            "flash_method": "esptool_write_flash_app",
-            "esptool": esptool,
-            "esptool_no_stub": use_no_stub,
-            "app_offset": "0x10000",
+            "flash_method": "pio_temp_builddir_upload",
+            "temp_build_dir": str(build_dir),
+            "temp_build_firmware": str(temp_fw),
         }, out
-
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(FW_DIR),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        bufsize=1,
-    )
-    chunks: list[str] = []
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        print(line, end="")
-        chunks.append(line)
-    proc.wait()
-    out = "".join(chunks)
-    return int(proc.returncode or 0), {
-        "run": cmd,
-        "cwd": str(FW_DIR),
-        "firmware_bin": str(fw_src),
-        "flash_method": "esptool_write_flash_app",
-        "esptool": esptool,
-        "esptool_no_stub": use_no_stub,
-        "app_offset": "0x10000",
-    }, out
