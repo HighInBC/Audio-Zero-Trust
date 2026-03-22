@@ -109,9 +109,9 @@ Current hardware target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
 
 #### 11) Time/timestamp awareness
 
-**What this means:** tooling surfaces whether device time is synced or stale, which matters for evidence quality.
+**What this means:** Recording tool create's third party timstamp certificates on finished recording, establishing a no-later-than date for the recording.
 
-**How it works:** device state exposes sync status/timestamps; validators and operators can factor that into trust decisions.
+**How it works:** When the recorder finishes a file it immediately sends a hash of it to the digicert TSA RFC 3161 server. The server responds with a signed timestamp of the hash which is then stored with the recording.
 
 ### Security model (current)
 
