@@ -357,5 +357,25 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sprobe.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sprobe.set_defaults(func=handlers.cmd_stream_probe, command_name="stream-read")
 
+    stls_init = sub.add_parser("tls-ca-init", help="Initialize local TLS CA (auto-generates if missing)")
+    stls_init.add_argument("--common-name", default="Audio-Zero-Trust Local CA", help="CA certificate common name")
+    stls_init.add_argument("--force", action="store_true", help="Regenerate CA even if one already exists")
+    stls_init.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_init.set_defaults(func=handlers.cmd_tls_ca_init)
+
+    stls_export = sub.add_parser("tls-ca-export", help="Export active TLS CA public certificate")
+    stls_export.add_argument("--out", dest="out_path", required=True, help="Output PEM path")
+    stls_export.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_export.set_defaults(func=handlers.cmd_tls_ca_export)
+
+    stls_import = sub.add_parser("tls-ca-import", help="Import trusted TLS CA public certificate (verify-only mode)")
+    stls_import.add_argument("--in", dest="in_path", required=True, help="Input PEM path")
+    stls_import.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_import.set_defaults(func=handlers.cmd_tls_ca_import)
+
+    stls_status = sub.add_parser("tls-ca-status", help="Show local TLS CA material status")
+    stls_status.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_status.set_defaults(func=handlers.cmd_tls_ca_status)
+
     _sort_subcommands_alpha(sub)
     return p
