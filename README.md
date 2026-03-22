@@ -44,31 +44,92 @@ Current hardware target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
 
 ## Deep dive
 
-### Feature set
+### Feature set (with plain-language context)
 
-- Signed configuration application and patch flows
-- Device attestation + certificate workflows
-- Encrypted stream capture/transport + validation tools
-- OTA bundle creation and posting to OTA endpoint
-- Serial flashing paths for:
-  - source builds (`--from-source`)
-  - signed OTA release bundles (`--from-ota`)
-- Deterministic serial OTA flashing profile:
-  - see `docs/serial-flash-profiles.md`
+#### 1) Recording files are tamper-evident
+
+**What this means:** if someone modifies a recording file after capture, validation should fail.
+
+**How it works:** file content is cryptographically signed by the device and structured so integrity checks break when bytes are altered.
+
+#### 2) Files remain verifiable in both encrypted and unlocked workflows
+
+**What this means:** you can validate that a file is structurally/authentically correct before and after unlock/decode steps.
+
+**How it works:** validation tools check signed headers + integrity fields in both protected and decoded forms.
+
+#### 3) Device identity is carried with recordings
+
+**What this means:** a recording can include evidence of *which device* produced it, not just raw audio bytes.
+
+**How it works:** device certificate/certificate serial and signing identity fields are embedded and cross-checked during validation.
+
+#### 4) Self-describing format
+
+**What this means:** files describe their own schema/version/algorithms so validators know how to parse and verify them.
+
+**How it works:** versioned header fields and explicit algorithm/fingerprint metadata are stored in-band.
+
+#### 5) Certificate-based recording trust path
+
+**What this means:** trust in a recording can be rooted in certificate workflows, not just ad-hoc keys.
+
+**How it works:** certificate issue/post/verify flows bind device identity and signing trust to recording validation.
+
+#### 6) Recorder-side auto-validation
+
+**What this means:** recorder workflows can automatically check provenance/integrity before treating data as valid.
+
+**How it works:** tooling validates signatures, certificate linkage, and header consistency in one pipeline.
+
+#### 7) OTA safety controls (beyond just “update works”)
+
+**What this means:** updates can be restricted to trusted signers and newer versions.
+
+**How it works:** OTA bundles carry signed metadata, signer trust is enforced, and anti-rollback version floors are tracked/applied.
+
+#### 8) Deterministic serial install path for release OTA bundles
+
+**What this means:** users can flash official OTA releases over serial without compiling source locally.
+
+**How it works:** `flash-device --from-ota` uses a deterministic full-layout profile and then applies OTA signer/version/floor state.
+(Details: `docs/serial-flash-profiles.md`.)
+
+#### 9) Secure provisioning boundaries
+
+**What this means:** sensitive low-level operations are intentionally separated by trust boundary.
+
+**How it works:** signed HTTP config path is distinct from privileged serial-only controls for bootstrap-level state changes.
+
+#### 10) Discovery with follow-up identity verification
+
+**What this means:** finding a device on the network is not treated as proof of trust by itself.
+
+**How it works:** discovery is followed by cryptographic identity/certificate checks before trust decisions.
+
+#### 11) Time/timestamp awareness
+
+**What this means:** tooling surfaces whether device time is synced or stale, which matters for evidence quality.
+
+**How it works:** device state exposes sync status/timestamps; validators and operators can factor that into trust decisions.
 
 ### Security model (current)
 
-- Host tools sign control/config payloads with Ed25519 admin credentials.
-- Recorder keys are separate RSA credentials.
-- OTA bundle metadata is signed and verified.
-- Serial access is treated as a privileged trust boundary for low-level provisioning/flash operations.
+At a high level, Audio-Zero-Trust combines:
+
+- **Identity** (device/admin/recorder credentials)
+- **Authenticity** (digital signatures)
+- **Integrity** (hash/fingerprint checks)
+- **Operational controls** (OTA signer/version policy + serial trust boundary)
+
+The system is designed so trust decisions are based on verifiable cryptographic evidence rather than network location or naming alone.
 
 ### Threat model / non-goals
 
 Current design intent:
 
-- Resist passive interception and detectable tampering in normal operation.
-- Preserve signed control boundaries for config/cert workflows.
+- Make passive interception and silent file tampering difficult/detectable in normal operation.
+- Preserve signed control boundaries for config/certificate/OTA workflows.
 
 Current non-goals / caveats:
 
@@ -78,7 +139,7 @@ Current non-goals / caveats:
 
 ### Crypto primitives
 
-- **Ed25519**: signing for config/cert/OTA metadata trust workflows
+- **Ed25519**: signing for config/cert/OTA metadata and trust workflows
 - **RSA OAEP (SHA-256)**: recorder decoding key workflow
 - **SHA-256**: fingerprints/hashes for integrity checks and identity binding
 
