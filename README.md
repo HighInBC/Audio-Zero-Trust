@@ -75,8 +75,10 @@ python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0
 ### 6) Flash firmware
 
 ```bash
-python3 client/tools/azt_tool.py flash-device --port /dev/ttyUSB0
+python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0
 ```
+
+Note: `flash-device --from-ota ...` uses `esptool` for deterministic app flashing. The CLI prefers project/PlatformIO-managed `esptool` and uses `--no-stub` to avoid distro packaging issues.
 
 ### 7) Create credentials
 

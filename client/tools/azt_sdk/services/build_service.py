@@ -59,16 +59,28 @@ def flash_device(*, env: str, port: str, stream: bool = False) -> tuple[int, dic
 
 
 def resolve_esptool() -> str:
+    # Prefer repo/platformio managed tools before host-global installs.
+    # Some distro-packaged /usr/bin/esptool installs are incomplete (missing stubs).
     candidates = [
         REPO_ROOT / ".venv" / "bin" / "esptool.py",
         Path.home() / ".platformio" / "penv" / "bin" / "esptool.py",
+        Path.home() / ".platformio" / "penv" / "bin" / "esptool",
         Path(sys.executable).resolve().parent / "esptool.py",
         Path(sys.executable).resolve().parent / "esptool",
     ]
     for c in candidates:
         if c.exists() and c.is_file():
             return str(c)
-    esp = shutil.which("esptool.py") or shutil.which("esptool")
+
+    esp_py = shutil.which("esptool.py")
+    if esp_py and not esp_py.startswith("/usr/bin/"):
+        return esp_py
+    esp = shutil.which("esptool")
+    if esp and not esp.startswith("/usr/bin/"):
+        return esp
+
+    if esp_py:
+        return esp_py
     if esp:
         return esp
     raise FileNotFoundError("esptool not found (install via platformio penv or PATH)")
@@ -94,6 +106,7 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         port,
         "--baud",
         "115200",
+        "--no-stub",
         "write_flash",
         "-z",
         "0x10000",
