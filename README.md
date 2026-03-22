@@ -369,11 +369,6 @@ Major command groups:
 - Ensure user is in `dialout` group
 - Re-login after group change
 
-### mDNS (`.local`) is flaky
-
-- Use direct device IP for OTA/config commands
-- Verify with `state-get --host <ip>`
-
 ### OTA post times out
 
 - Retry with IP instead of `.local`
