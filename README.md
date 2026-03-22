@@ -200,6 +200,14 @@ From release OTA bundle (user/release path):
 python3 client/tools/azt_tool.py flash-device --from-ota firmware/releases/<release>.otabundle --port /dev/ttyUSB0
 ```
 
+Push a release OTA bundle over the network OTA endpoint:
+
+```bash
+python3 client/tools/azt_tool.py ota-bundle-post \
+  --host <Host or IP> \
+  --in firmware/releases/OTA-Audio-Zero-Trust-20260322.otabundle
+```
+
 `--from-ota` validates signed OTA metadata by default and applies OTA signer/version/floor state over serial after flash.
 
 ### 7) Create credentials
