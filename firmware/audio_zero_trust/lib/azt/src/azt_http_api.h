@@ -60,4 +60,9 @@ void handle_client_stream_only(WiFiClient& client, const AppState& state);
 // Returns HTTP-like code and JSON body.
 HttpDispatchResult apply_config_json_from_serial(AppState& state, const String& body);
 
+// Serial-only OTA controls path (physical serial access is the trust boundary).
+// Supports ota_version_code, ota_min_allowed_version_code, ota_min_allowed_version_code_clear,
+// ota_signer_public_key_pem, ota_signer_clear.
+HttpDispatchResult apply_ota_controls_json_from_serial(AppState& state, const String& body);
+
 }  // namespace azt

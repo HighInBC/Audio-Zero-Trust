@@ -1161,6 +1161,169 @@ HttpDispatchResult apply_config_json_from_serial(AppState& state, const String& 
   return handle_config_post_json(state, body, true);
 }
 
+HttpDispatchResult apply_ota_controls_json_from_serial(AppState& state, const String& body) {
+  HttpDispatchResult r{};
+  r.content_type = "application/json";
+
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid json\"}";
+    return r;
+  }
+
+  String ota_signer_pem = String((const char*)(doc["ota_signer_public_key_pem"] | ""));
+  ota_signer_pem.trim();
+  bool ota_signer_clear = doc["ota_signer_clear"] | false;
+
+  bool ota_version_set = !doc["ota_version_code"].isNull();
+  uint64_t ota_version_value = 0;
+  bool ota_floor_set = !doc["ota_min_allowed_version_code"].isNull();
+  bool ota_floor_clear = doc["ota_min_allowed_version_code_clear"] | false;
+  uint64_t ota_floor_value = 0;
+
+  if (ota_version_set) {
+    JsonVariantConst vv = doc["ota_version_code"];
+    if (vv.is<uint64_t>()) {
+      ota_version_value = vv.as<uint64_t>();
+    } else if (vv.is<unsigned long>()) {
+      ota_version_value = static_cast<uint64_t>(vv.as<unsigned long>());
+    } else if (vv.is<const char*>()) {
+      const char* s = vv.as<const char*>();
+      char* end = nullptr;
+      unsigned long long parsed = strtoull(s ? s : "", &end, 10);
+      if (!end || *end != '\0') {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_version_code\"}";
+        return r;
+      }
+      ota_version_value = static_cast<uint64_t>(parsed);
+    } else {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_version_code\"}";
+      return r;
+    }
+    if (ota_version_value == 0) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"ota_version_code must be > 0\"}";
+      return r;
+    }
+  }
+
+  if (ota_floor_set) {
+    JsonVariantConst vf = doc["ota_min_allowed_version_code"];
+    if (vf.is<uint64_t>()) {
+      ota_floor_value = vf.as<uint64_t>();
+    } else if (vf.is<unsigned long>()) {
+      ota_floor_value = static_cast<uint64_t>(vf.as<unsigned long>());
+    } else if (vf.is<const char*>()) {
+      const char* s = vf.as<const char*>();
+      char* end = nullptr;
+      unsigned long long parsed = strtoull(s ? s : "", &end, 10);
+      if (!end || *end != '\0') {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_min_allowed_version_code\"}";
+        return r;
+      }
+      ota_floor_value = static_cast<uint64_t>(parsed);
+    } else {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid ota_min_allowed_version_code\"}";
+      return r;
+    }
+    if (ota_floor_value == 0) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"ota_min_allowed_version_code must be > 0\"}";
+      return r;
+    }
+  }
+
+  if (ota_floor_set && !ota_version_set) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"ota_version_code required when ota_min_allowed_version_code is set\"}";
+    return r;
+  }
+  if (ota_floor_set && ota_floor_clear) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"cannot set and clear ota_min_allowed_version_code together\"}";
+    return r;
+  }
+  if (ota_signer_pem.length() > 0 && ota_signer_clear) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"cannot set and clear ota_signer_public_key_pem together\"}";
+    return r;
+  }
+
+  bool any_change = ota_version_set || ota_floor_set || ota_floor_clear || ota_signer_clear || ota_signer_pem.length() > 0;
+  if (!any_change) {
+    r.code = 400;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"no OTA fields provided\"}";
+    return r;
+  }
+
+  Preferences op;
+  if (!op.begin("aztcfg", false)) {
+    r.code = 500;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"preferences open failed\"}";
+    return r;
+  }
+
+  if (ota_signer_clear) {
+    op.remove("ota_signer_pem");
+    op.remove("ota_signer_fp");
+    state.ota_signer_override_public_key_pem = "";
+    state.ota_signer_override_fingerprint_hex = "";
+  } else if (ota_signer_pem.length() > 0) {
+    String ota_fp;
+    std::vector<uint8_t> ota_pub_raw;
+    if (!b64_decode_vec(ota_signer_pem, ota_pub_raw) || ota_pub_raw.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
+      op.end();
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer key (expected ed25519 public_key_b64)\"}";
+      return r;
+    }
+    uint8_t h[32] = {0};
+    if (!sha256_bytes(ota_pub_raw.data(), ota_pub_raw.size(), h)) {
+      op.end();
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_OTA_SIGNER\",\"detail\":\"invalid ota signer hash\"}";
+      return r;
+    }
+    ota_fp = hex_lower(h, sizeof(h));
+    op.putString("ota_signer_pem", ota_signer_pem);
+    op.putString("ota_signer_fp", ota_fp);
+    state.ota_signer_override_public_key_pem = ota_signer_pem;
+    state.ota_signer_override_fingerprint_hex = ota_fp;
+  }
+
+  if (ota_version_set) {
+    op.putULong64("ota_last_vc", ota_version_value);
+    state.last_ota_version_code = ota_version_value;
+    state.last_ota_version = String((unsigned long long)ota_version_value);
+    op.putString("ota_last_ver", state.last_ota_version);
+  }
+
+  if (ota_floor_clear) {
+    op.remove("ota_min_vc");
+    op.remove("ota_min_ver_code");
+    state.ota_min_allowed_version_code = 0;
+  } else if (ota_floor_set) {
+    uint64_t next_floor = state.ota_min_allowed_version_code;
+    if (ota_floor_value > next_floor) next_floor = ota_floor_value;
+    op.putULong64("ota_min_vc", next_floor);
+    state.ota_min_allowed_version_code = next_floor;
+  }
+
+  op.end();
+
+  r.code = 200;
+  r.body = "{\"ok\":true,\"last_ota_version_code\":" + String(static_cast<unsigned long long>(state.last_ota_version_code)) +
+           ",\"ota_min_allowed_version_code\":" + String(static_cast<unsigned long long>(state.ota_min_allowed_version_code)) +
+           ",\"ota_signer_override_set\":" + String(state.ota_signer_override_public_key_pem.length() > 0 ? "true" : "false") + "}";
+  return r;
+}
+
 bool validate_ota_bundle_header_line(const String& header_line,
                                      String& out_signer_fp,
                                      String& out_meta_b64,

@@ -32,6 +32,7 @@ SerialCommandKind classify_serial_command(const String& line) {
   if (line.startsWith("AZT_CONFIG_BEGIN_LEN ")) return SerialCommandKind::kConfigBeginLen;
   if (line == "AZT_CONFIG_BEGIN") return SerialCommandKind::kConfigBeginLegacy;
   if (line == "AZT_RECOVERY_RESET_CONFIG") return SerialCommandKind::kRecoveryReset;
+  if (line.startsWith("AZT_OTA_APPLY ")) return SerialCommandKind::kOtaApply;
   return SerialCommandKind::kUnknown;
 }
 
@@ -171,6 +172,23 @@ void handle_serial_control(AppState& state,
       xSemaphoreGive(state_mu);
     } else {
       Serial.println(format_recovery_reset_result_line(false, false));
+    }
+    return;
+  }
+
+  if (cmd == SerialCommandKind::kOtaApply) {
+    String body = line.substring(String("AZT_OTA_APPLY ").length());
+    body.trim();
+    if (body.length() == 0) {
+      Serial.println("AZT_OTA_APPLY code=400 body={\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"missing json payload\"}");
+      return;
+    }
+    if (xSemaphoreTake(state_mu, pdMS_TO_TICKS(1000)) == pdTRUE) {
+      auto r = apply_ota_controls_json_from_serial(state, body);
+      Serial.printf("AZT_OTA_APPLY code=%d body=%s\n", r.code, r.body.c_str());
+      xSemaphoreGive(state_mu);
+    } else {
+      Serial.println("AZT_OTA_APPLY code=503 body={\"ok\":false,\"error\":\"ERR_STATE_LOCK\"}");
     }
     return;
   }

@@ -32,6 +32,7 @@ enum class SerialCommandKind {
   kConfigBeginLen,
   kConfigBeginLegacy,
   kRecoveryReset,
+  kOtaApply,
 };
 SerialCommandKind classify_serial_command(const String& line);
 

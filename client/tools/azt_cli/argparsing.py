@@ -197,9 +197,16 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     serase.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     serase.set_defaults(func=handlers.cmd_erase_device)
 
-    sflash = sub.add_parser("flash-device", help="Flash firmware to device")
+    sflash = sub.add_parser("flash-device", help="Flash firmware to device (source build or OTA bundle)")
     sflash.add_argument("--port", default="/dev/ttyUSB0", help="Serial port (e.g. /dev/ttyUSB0)")
     sflash.add_argument("--env", default="m5stack-atom-m4-2-native", help="PlatformIO environment")
+    sflash.add_argument("--from-source", action="store_true", help="Flash from current source build")
+    sflash.add_argument("--from-ota", default="", help="Flash from OTA bundle file (.otabundle)")
+    sflash.add_argument("--firmware-key", default="", help="Signer key PEM path (private/public) or raw Ed25519 public-key b64; defaults to embedded dev OTA key")
+    sflash.add_argument("--bypass-validation", action="store_true", help="Skip OTA signature/metadata validation checks (unsafe)")
+    sflash.add_argument("--apply-ota-state", dest="apply_ota_state", action="store_true", default=True, help="After OTA serial flash, apply OTA signer/version/floor state over serial (default: on)")
+    sflash.add_argument("--no-apply-ota-state", dest="apply_ota_state", action="store_false", help="Do not apply OTA signer/version/floor state after OTA serial flash")
+    sflash.add_argument("--ota-floor-code", default="", help="Override OTA floor code for serial state apply (default: rollback_floor_code from bundle when present)")
     sflash.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sflash.set_defaults(func=handlers.cmd_flash_device)
 
