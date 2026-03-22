@@ -78,7 +78,13 @@ python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0
 python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0
 ```
 
-Note: `flash-device --from-ota ...` uses `esptool` for deterministic app flashing. The CLI prefers project/PlatformIO-managed `esptool` and uses `--no-stub` to avoid distro packaging issues.
+For release OTA bundles over serial:
+
+```bash
+python3 client/tools/azt_tool.py flash-device --from-ota firmware/releases/<release>.otabundle --port /dev/ttyUSB0
+```
+
+`--from-ota` uses a deterministic **v1 full-layout** serial flash profile (no source compile required at flash time), validates signed OTA metadata by default, then applies OTA signer/version/floor state over serial. See `docs/serial-flash-profiles.md` for the full profile contract.
 
 ### 7) Create credentials
 
@@ -135,7 +141,7 @@ python3 client/tools/azt_tool.py stream-validate --in client/test/hil/sample.bin
 ## Test layout
 
 - `client/test/unit/` — client/tooling unit tests
-- `client/test/hil/` — host-in-the-loop integration tests
+- `client/test/hil/` — host-in-the-loop integration tests (including `flash_from_ota_smoke.py`)
 - `firmware/test/audio_zero_trust_tests/` — firmware-targeted tests
 - `recorder/test/` — recorder tests (scaffold)
 
