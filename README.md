@@ -10,6 +10,20 @@ It exists to provide:
 
 > ⚠️ **Security notice:** This project is actively under development and is **not yet security hardened**. Do not treat it as production-safe for high-risk environments.
 
+## Contributing
+
+This project is in an early stage and has not been audited. It likely contains bugs, edge cases, and incomplete areas.
+
+Additional eyes are extremely valuable—especially around:
+- correctness and edge cases
+- security assumptions and failure modes
+- protocol and format design
+- tooling and usability
+
+If you find issues, please open an issue. Pull requests and design discussions are very welcome.
+
+---
+
 If you just want to install and run, jump to **[Install](#install)**.
 
 ---
