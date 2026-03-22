@@ -95,19 +95,31 @@ Current hardware target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
 **How it works:** `flash-device --from-ota` uses a deterministic full-layout profile and then applies OTA signer/version/floor state.
 (Details: `docs/serial-flash-profiles.md`.)
 
-#### 9) Secure provisioning boundaries
+#### 9) Bring-your-own OTA signer key (custom release authority)
+
+**What this means:** you can replace the default embedded OTA signer trust with your own firmware signing key.
+
+**How it works:**
+
+- you sign OTA bundles with your private key,
+- devices are configured (serial-privileged path) to trust the matching public key,
+- OTA verification accepts only bundles from trusted signer keys.
+
+If you control the signer key, you control what firmware the device will accept via OTA.
+
+#### 10) Secure provisioning boundaries
 
 **What this means:** sensitive low-level operations are intentionally separated by trust boundary.
 
 **How it works:** signed HTTP config path is distinct from privileged serial-only controls for bootstrap-level state changes.
 
-#### 10) Discovery with follow-up identity verification
+#### 11) Discovery with follow-up identity verification
 
 **What this means:** finding a device on the network is not treated as proof of trust by itself.
 
 **How it works:** discovery is followed by cryptographic identity/certificate checks before trust decisions.
 
-#### 11) Time/timestamp awareness
+#### 12) Time/timestamp awareness
 
 **What this means:** Recording tool create's third party timstamp certificates on finished recording, establishing a no-later-than date for the recording.
 
@@ -209,6 +221,46 @@ python3 client/tools/azt_tool.py ota-bundle-post \
 ```
 
 `--from-ota` validates signed OTA metadata by default and applies OTA signer/version/floor state over serial after flash.
+
+### 6b) Use your own firmware signer key (custom OTA authority)
+
+Generate a firmware signing keypair:
+
+```bash
+python3 client/tools/azt_tool.py create-signing-credentials --identity firmware-master
+```
+
+Configure device trust to that signer using serial-privileged config path:
+
+```bash
+python3 client/tools/azt_tool.py configure-device \
+  --admin-creds-dir client/tools/provisioned/admin-main \
+  --recorder-creds-dir client/tools/provisioned/recorder-main \
+  --identity livingroom \
+  --wifi-ssid "<YOUR_WIFI_SSID>" \
+  --wifi-password "<YOUR_WIFI_PASSWORD>" \
+  --port /dev/ttyUSB0 \
+  --allow-serial-bootstrap \
+  --ota-signer-public-key-pem client/tools/provisioned/firmware-master/public_key_b64.txt
+```
+
+Compile current source, sign OTA metadata with your firmware key, and output bundle in one command:
+
+```bash
+python3 client/tools/azt_tool.py ota-bundle-create \
+  --key client/tools/provisioned/firmware-master/private_key.pem \
+  --version-code timestamp \
+  --rollback-floor-code same \
+  --out firmware/releases/OTA-Audio-Zero-Trust-$(date -u +%Y%m%d).otabundle
+```
+
+You can use `--post --host <device>` instead of `--out` to create and immediately post upgrade payload.
+
+High-level flow:
+
+1. Serial-configure device trust to your signer key.
+2. Build + sign release OTA bundle with your private key.
+3. Install via OTA endpoint (`ota-bundle-post`) or serial (`flash-device --from-ota`).
 
 ### 7) Create credentials
 
