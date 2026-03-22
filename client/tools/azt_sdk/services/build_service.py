@@ -63,6 +63,7 @@ def resolve_esptool() -> str:
     # Some distro-packaged /usr/bin/esptool installs are incomplete (missing stubs).
     candidates = [
         REPO_ROOT / ".venv" / "bin" / "esptool.py",
+        REPO_ROOT / ".venv" / "bin" / "esptool",
         Path.home() / ".platformio" / "penv" / "bin" / "esptool.py",
         Path.home() / ".platformio" / "penv" / "bin" / "esptool",
         Path(sys.executable).resolve().parent / "esptool.py",
@@ -98,6 +99,7 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         raise FileNotFoundError(f"firmware bin not found: {fw_src}")
 
     esptool = resolve_esptool()
+    use_no_stub = esptool.startswith("/usr/bin/")
     cmd = [
         esptool,
         "--chip",
@@ -106,7 +108,10 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         port,
         "--baud",
         "115200",
-        "--no-stub",
+    ]
+    if use_no_stub:
+        cmd.append("--no-stub")
+    cmd += [
         "write_flash",
         "-z",
         "0x10000",
@@ -121,6 +126,8 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
             "cwd": str(FW_DIR),
             "firmware_bin": str(fw_src),
             "flash_method": "esptool_write_flash_app",
+            "esptool": esptool,
+            "esptool_no_stub": use_no_stub,
             "app_offset": "0x10000",
         }, out
 
@@ -144,5 +151,7 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         "cwd": str(FW_DIR),
         "firmware_bin": str(fw_src),
         "flash_method": "esptool_write_flash_app",
+        "esptool": esptool,
+        "esptool_no_stub": use_no_stub,
         "app_offset": "0x10000",
     }, out
