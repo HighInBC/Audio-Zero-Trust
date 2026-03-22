@@ -247,15 +247,12 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
 
     version_label = (args.version or "").strip() or str(version_code)
 
-    rf_raw = (getattr(args, "rollback_floor_code", "") or "").strip().lower()
+    rf_raw = (getattr(args, "rollback_floor_code", "same") or "same").strip().lower()
     rollback_floor_code = None
-    if rf_raw:
-        if rf_raw == "same":
-            rollback_floor_code = version_code
-        else:
-            rollback_floor_code = int(rf_raw)
+    if rf_raw == "same" or rf_raw == "":
+        rollback_floor_code = version_code
     else:
-        print("WARN ota-bundle-create: no rollback floor set; this build will not raise anti-rollback floor")
+        rollback_floor_code = int(rf_raw)
 
     ok, payload = ops.ota_bundle_create(
         repo_root=REPO_ROOT,

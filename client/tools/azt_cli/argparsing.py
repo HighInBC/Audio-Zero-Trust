@@ -80,7 +80,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sb.add_argument("--key", dest="key_path", default="", help="Signer private key PEM")
     sb.add_argument("--version", default="", help="Firmware version label (human-readable). Defaults to --version-code when omitted")
     sb.add_argument("--version-code", default="", help="Monotonic numeric version code used for anti-rollback, or 'timestamp' for current UTC YYYYMMDDHHMMSS")
-    sb.add_argument("--rollback-floor-code", default="", help="Minimum allowed version_code after this update, or 'same'. If omitted, no new floor is set")
+    sb.add_argument("--rollback-floor-code", default="same", help="Minimum allowed version_code after this update, or 'same' (default). Use 0 only if you intentionally allow unrestricted rollback")
     sb.add_argument("--channel", default="main", help="Channel label (default: main)")
     sb.add_argument("--env", default="m5stack-atom-m4-2-native", help="PlatformIO env for build fallback")
     sb.add_argument("--firmware", dest="firmware_path", default="", help="Optional firmware .bin path (if omitted, always rebuild current source)")

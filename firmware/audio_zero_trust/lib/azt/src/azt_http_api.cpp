@@ -1720,6 +1720,9 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
       out_err = rf_err;
       return false;
     }
+  } else {
+    out_err = "missing rollback_floor_code (required for OTA bundle acceptance; set --rollback-floor-code, e.g. 'same')";
+    return false;
   }
 
   if (ota_version_code < state.ota_min_allowed_version_code) {
