@@ -88,75 +88,126 @@ def resolve_esptool() -> str:
 
 
 def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool = False) -> tuple[int, dict, str]:
-    """Flash OTA firmware payload using PlatformIO's known-good upload recipe.
+    """Flash OTA payload with deterministic full image layout (v1 profile).
 
-    This builds into an isolated temporary build_dir, replaces that temp
-    firmware.bin with the OTA payload, then runs normal PlatformIO upload with
-    -t nobuild so transport/reset/flash settings match --from-source behavior.
+    Uses the same offsets/segments as source upload for ESP32:
+      0x1000  bootloader.bin
+      0x8000  partitions.bin
+      0xe000  boot_app0.bin
+      0x10000 <OTA payload firmware.bin>
+
+    Bootloader/partitions are taken from release flash profile when present,
+    else from local .pio build artifacts for the selected env.
     """
     fw_src = Path(firmware_bin)
     if not fw_src.exists():
         raise FileNotFoundError(f"firmware bin not found: {fw_src}")
 
-    pio = resolve_platformio()
+    prof_dir = REPO_ROOT / "firmware" / "releases" / "flash-profile-v1"
+    pio_build = FW_DIR / ".pio" / "build" / env
 
-    import tempfile
-    with tempfile.TemporaryDirectory(prefix="azt-pio-ota-") as td:
-        build_dir = Path(td)
-        env_vars = dict(__import__('os').environ)
-        env_vars["PLATFORMIO_BUILD_DIR"] = str(build_dir)
+    bootloader = prof_dir / "bootloader.bin"
+    partitions = prof_dir / "partitions.bin"
+    if not bootloader.exists():
+        bootloader = pio_build / "bootloader.bin"
+    if not partitions.exists():
+        partitions = pio_build / "partitions.bin"
 
-        prep_cmd = [pio, "run", "-e", env]
-        prep = subprocess.run(prep_cmd, cwd=str(FW_DIR), text=True, capture_output=True, env=env_vars)
-        prep_out = (prep.stdout or "") + (prep.stderr or "")
-        if prep.returncode != 0:
-            return prep.returncode, {
-                "run": prep_cmd,
-                "cwd": str(FW_DIR),
-                "firmware_bin": str(fw_src),
-                "flash_method": "pio_temp_builddir_upload",
-                "temp_build_dir": str(build_dir),
-            }, prep_out
-
-        temp_fw = build_dir / env / "firmware.bin"
-        temp_fw.parent.mkdir(parents=True, exist_ok=True)
-        temp_fw.write_bytes(fw_src.read_bytes())
-
-        cmd = [pio, "run", "-e", env, "-t", "nobuild", "-t", "upload", "--upload-port", port]
-
-        if not stream:
-            p = subprocess.run(cmd, cwd=str(FW_DIR), text=True, capture_output=True, env=env_vars)
-            out = prep_out + (p.stdout or "") + (p.stderr or "")
-            return p.returncode, {
-                "run": cmd,
-                "cwd": str(FW_DIR),
-                "firmware_bin": str(fw_src),
-                "flash_method": "pio_temp_builddir_upload",
-                "temp_build_dir": str(build_dir),
-                "temp_build_firmware": str(temp_fw),
-            }, out
-
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(FW_DIR),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=1,
-            env=env_vars,
+    if not bootloader.exists() or not partitions.exists():
+        missing = []
+        if not bootloader.exists():
+            missing.append(str(bootloader))
+        if not partitions.exists():
+            missing.append(str(partitions))
+        raise FileNotFoundError(
+            "missing deterministic flash-profile artifacts. "
+            "Provide firmware/releases/flash-profile-v1/{bootloader.bin,partitions.bin} "
+            "or ensure local .pio build artifacts exist for env. Missing: " + ", ".join(missing)
         )
-        chunks: list[str] = [prep_out]
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            print(line, end="")
-            chunks.append(line)
-        proc.wait()
-        out = "".join(chunks)
-        return int(proc.returncode or 0), {
+
+    boot_app0 = Path.home() / ".platformio" / "packages" / "framework-arduinoespressif32" / "tools" / "partitions" / "boot_app0.bin"
+    if not boot_app0.exists():
+        raise FileNotFoundError(f"boot_app0.bin not found: {boot_app0}")
+
+    # Prefer tool-esptoolpy from PlatformIO package set to match source upload path.
+    esptool = Path.home() / ".platformio" / "packages" / "tool-esptoolpy" / "esptool.py"
+    if not esptool.exists():
+        esptool = Path(resolve_esptool())
+
+    esptool_cmd = [str(esptool)]
+    if str(esptool).endswith('.py'):
+        py = sys.executable
+        pio_penv_py = Path.home() / '.platformio' / 'penv' / 'bin' / 'python'
+        if str(esptool).startswith(str(Path.home() / '.platformio' / 'packages')) and pio_penv_py.exists():
+            py = str(pio_penv_py)
+        esptool_cmd = [py, str(esptool)]
+
+    cmd = [
+        *esptool_cmd,
+        "--chip",
+        "esp32",
+        "--port",
+        port,
+        "--baud",
+        "115200",
+        "--before",
+        "default_reset",
+        "--after",
+        "hard_reset",
+        "write_flash",
+        "-z",
+        "--flash_mode",
+        "dio",
+        "--flash_freq",
+        "40m",
+        "--flash_size",
+        "4MB",
+        "0x1000",
+        str(bootloader),
+        "0x8000",
+        str(partitions),
+        "0xe000",
+        str(boot_app0),
+        "0x10000",
+        str(fw_src),
+    ]
+
+    if not stream:
+        p = subprocess.run(cmd, cwd=str(FW_DIR), text=True, capture_output=True)
+        out = (p.stdout or "") + (p.stderr or "")
+        return p.returncode, {
             "run": cmd,
             "cwd": str(FW_DIR),
             "firmware_bin": str(fw_src),
-            "flash_method": "pio_temp_builddir_upload",
-            "temp_build_dir": str(build_dir),
-            "temp_build_firmware": str(temp_fw),
+            "flash_method": "esptool_deterministic_v1_full_layout",
+            "bootloader_bin": str(bootloader),
+            "partitions_bin": str(partitions),
+            "boot_app0_bin": str(boot_app0),
+            "app_offset": "0x10000",
         }, out
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(FW_DIR),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+    )
+    chunks: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="")
+        chunks.append(line)
+    proc.wait()
+    out = "".join(chunks)
+    return int(proc.returncode or 0), {
+        "run": cmd,
+        "cwd": str(FW_DIR),
+        "firmware_bin": str(fw_src),
+        "flash_method": "esptool_deterministic_v1_full_layout",
+        "bootloader_bin": str(bootloader),
+        "partitions_bin": str(partitions),
+        "boot_app0_bin": str(boot_app0),
+        "app_offset": "0x10000",
+    }, out
