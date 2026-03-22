@@ -58,42 +58,57 @@ def flash_device(*, env: str, port: str, stream: bool = False) -> tuple[int, dic
     return _run_pio(env=env, port=port, target="upload", stream=stream)
 
 
-def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool = False) -> tuple[int, dict, str]:
-    """Flash a specific firmware.bin while reusing PlatformIO upload settings.
+def resolve_esptool() -> str:
+    candidates = [
+        REPO_ROOT / ".venv" / "bin" / "esptool.py",
+        Path.home() / ".platformio" / "penv" / "bin" / "esptool.py",
+        Path(sys.executable).resolve().parent / "esptool.py",
+        Path(sys.executable).resolve().parent / "esptool",
+    ]
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return str(c)
+    esp = shutil.which("esptool.py") or shutil.which("esptool")
+    if esp:
+        return esp
+    raise FileNotFoundError("esptool not found (install via platformio penv or PATH)")
 
-    Strategy:
-    - ensure build dir exists for env (creates upload metadata)
-    - overwrite .pio/build/<env>/firmware.bin with requested binary
-    - run upload in nobuild mode
+
+def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool = False) -> tuple[int, dict, str]:
+    """Flash a specific app firmware.bin deterministically via esptool.
+
+    OTA-bundle serial install should only replace the app partition payload
+    (offset 0x10000 on this board profile), leaving bootloader/partitions intact.
     """
-    pio = resolve_platformio()
+    _ = env  # kept for callsite compatibility and payload traceability.
     fw_src = Path(firmware_bin)
     if not fw_src.exists():
         raise FileNotFoundError(f"firmware bin not found: {fw_src}")
 
-    prep = subprocess.run(
-        [pio, "run", "-e", env],
-        cwd=str(FW_DIR),
-        text=True,
-        capture_output=True,
-    )
-    prep_out = (prep.stdout or "") + (prep.stderr or "")
-    if prep.returncode != 0:
-        return prep.returncode, {"run": [pio, "run", "-e", env], "cwd": str(FW_DIR)}, prep_out
+    esptool = resolve_esptool()
+    cmd = [
+        esptool,
+        "--chip",
+        "esp32",
+        "--port",
+        port,
+        "--baud",
+        "115200",
+        "write_flash",
+        "-z",
+        "0x10000",
+        str(fw_src),
+    ]
 
-    build_fw = FW_DIR / ".pio" / "build" / env / "firmware.bin"
-    build_fw.parent.mkdir(parents=True, exist_ok=True)
-    build_fw.write_bytes(fw_src.read_bytes())
-
-    cmd = [pio, "run", "-e", env, "-t", "nobuild", "-t", "upload", "--upload-port", port]
     if not stream:
         p = subprocess.run(cmd, cwd=str(FW_DIR), text=True, capture_output=True)
-        out = prep_out + (p.stdout or "") + (p.stderr or "")
+        out = (p.stdout or "") + (p.stderr or "")
         return p.returncode, {
             "run": cmd,
             "cwd": str(FW_DIR),
             "firmware_bin": str(fw_src),
-            "replaced_build_firmware": str(build_fw),
+            "flash_method": "esptool_write_flash_app",
+            "app_offset": "0x10000",
         }, out
 
     proc = subprocess.Popen(
@@ -104,7 +119,7 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         stderr=subprocess.STDOUT,
         bufsize=1,
     )
-    chunks: list[str] = [prep_out]
+    chunks: list[str] = []
     assert proc.stdout is not None
     for line in proc.stdout:
         print(line, end="")
@@ -115,5 +130,6 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         "run": cmd,
         "cwd": str(FW_DIR),
         "firmware_bin": str(fw_src),
-        "replaced_build_firmware": str(build_fw),
+        "flash_method": "esptool_write_flash_app",
+        "app_offset": "0x10000",
     }, out
