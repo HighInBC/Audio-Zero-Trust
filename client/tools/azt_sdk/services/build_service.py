@@ -103,10 +103,11 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
     import tempfile
     with tempfile.TemporaryDirectory(prefix="azt-pio-ota-") as td:
         build_dir = Path(td)
-        common_opts = ["--project-option", f"build_dir={build_dir}"]
+        env_vars = dict(__import__('os').environ)
+        env_vars["PLATFORMIO_BUILD_DIR"] = str(build_dir)
 
-        prep_cmd = [pio, "run", "-e", env, *common_opts]
-        prep = subprocess.run(prep_cmd, cwd=str(FW_DIR), text=True, capture_output=True)
+        prep_cmd = [pio, "run", "-e", env]
+        prep = subprocess.run(prep_cmd, cwd=str(FW_DIR), text=True, capture_output=True, env=env_vars)
         prep_out = (prep.stdout or "") + (prep.stderr or "")
         if prep.returncode != 0:
             return prep.returncode, {
@@ -121,10 +122,10 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         temp_fw.parent.mkdir(parents=True, exist_ok=True)
         temp_fw.write_bytes(fw_src.read_bytes())
 
-        cmd = [pio, "run", "-e", env, "-t", "nobuild", "-t", "upload", "--upload-port", port, *common_opts]
+        cmd = [pio, "run", "-e", env, "-t", "nobuild", "-t", "upload", "--upload-port", port]
 
         if not stream:
-            p = subprocess.run(cmd, cwd=str(FW_DIR), text=True, capture_output=True)
+            p = subprocess.run(cmd, cwd=str(FW_DIR), text=True, capture_output=True, env=env_vars)
             out = prep_out + (p.stdout or "") + (p.stderr or "")
             return p.returncode, {
                 "run": cmd,
@@ -142,6 +143,7 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             bufsize=1,
+            env=env_vars,
         )
         chunks: list[str] = [prep_out]
         assert proc.stdout is not None
