@@ -197,20 +197,27 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
         ser.write(f'AZT_CONFIG_BEGIN_LEN {len(blob)}\n'.encode('utf-8'))
 
         begin_ok = False
+        device_ip: str | None = None
         t_begin = time.time() + 5
         while time.time() < t_begin:
             line = ser.readline().decode('utf-8', errors='replace').strip()
             if not line:
                 continue
             print({'serial': line})
+            m = ip_re.search(line)
+            if m:
+                device_ip = m.group(1)
+            m2 = wifi_ip_re.search(line)
+            if m2:
+                device_ip = m2.group(1)
             if line.startswith('AZT_CONFIG_BEGIN_LEN OK'):
                 begin_ok = True
                 break
             if line.startswith('AZT_CONFIG_BEGIN_LEN ERR'):
-                return False, None
+                return False, device_ip
 
         if not begin_ok:
-            return False, None
+            return False, device_ip
 
         step = 128
         for i in range(0, len(blob), step):
@@ -218,7 +225,6 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
             time.sleep(0.002)
 
         apply_ok = False
-        device_ip: str | None = None
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             line = ser.readline().decode('utf-8', errors='replace').strip()
