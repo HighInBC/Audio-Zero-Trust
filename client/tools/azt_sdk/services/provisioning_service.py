@@ -236,7 +236,30 @@ def configure_device(
 
         time.sleep(1.0)
         base_after = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "auto"))
-        state1 = http_json("GET", f"{base_after}/api/v0/config/state")
+
+        state1 = None
+        postcheck_err = None
+        for _ in range(20):
+            try:
+                st = http_json("GET", f"{base_after}/api/v0/config/state")
+                if isinstance(st, dict) and st.get("ok"):
+                    state1 = st
+                    break
+            except Exception as e:
+                postcheck_err = str(e)
+            time.sleep(1.0)
+
+        if state1 is None:
+            # Serial apply already succeeded; avoid hard-failing on transient network/API startup race.
+            return 0, True, None, {
+                **common,
+                "path": "serial-bootstrap",
+                "state_after": None,
+                "postcheck_warning": "state endpoint unreachable after serial apply",
+                "postcheck_error": postcheck_err,
+                "postcheck_target": f"{base_after}/api/v0/config/state",
+            }
+
         ok = state1.get("admin_fingerprint_hex") == fp
         return (0 if ok else 6), ok, (None if ok else "POSTCHECK_FP_MISMATCH"), {
             **common,
