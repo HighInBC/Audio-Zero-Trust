@@ -442,6 +442,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
   }
 
   bool tls_set = false;
+  bool tls_was_configured = state.tls_server_cert_configured && state.tls_server_key_configured;
   String tls_cert_serial = "";
   String tls_srv_cert = "";
   String tls_srv_key = "";
@@ -632,6 +633,9 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
     r.code = 200;
     r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
+    if (tls_set && !tls_was_configured) {
+      r.reboot_after_response = true;
+    }
     return r;
   }
 
@@ -723,6 +727,9 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   r.code = 200;
   r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
+  if (tls_set && !tls_was_configured) {
+    r.reboot_after_response = true;
+  }
   return r;
 }
 
