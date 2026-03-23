@@ -4,6 +4,7 @@ import json
 import os
 import ssl
 import urllib.error
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 
@@ -19,13 +20,14 @@ def _ssl_context_for_url(url: str):
         return ssl.create_default_context(cafile=ca_override)
 
     # Prefer imported verifier cert, then local issuer cert if present.
+    repo_root = Path(__file__).resolve().parents[3]
     candidates = [
-        "client/tools/pki/trusted_ca_cert.pem",
-        "client/tools/pki/ca_cert.pem",
+        repo_root / "client" / "tools" / "pki" / "trusted_ca_cert.pem",
+        repo_root / "client" / "tools" / "pki" / "ca_cert.pem",
     ]
     for p in candidates:
-        if os.path.exists(p):
-            return ssl.create_default_context(cafile=p)
+        if p.exists():
+            return ssl.create_default_context(cafile=str(p))
 
     return ssl.create_default_context()
 

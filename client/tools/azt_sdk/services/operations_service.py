@@ -51,7 +51,7 @@ def apply_config(*, in_path: str, key_path: str, host: str, port: int, timeout: 
     fp = fingerprint.strip() or ed25519_fp_hex_from_private_key(keyp)
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "http"))
+    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     apply_res = http_json("POST", f"{base}/api/v0/config", signed_cfg, timeout=timeout)
     state_res = get_json(f"{base}/api/v0/config/state", timeout=timeout)
     ok = bool(apply_res.get("ok")) and bool(state_res.get("ok"))
@@ -80,7 +80,7 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
     fp = fingerprint.strip() or ed25519_fp_hex_from_private_key(keyp)
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "http"))
+    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     patch_res = http_json("POST", f"{base}/api/v0/config/patch", signed_cfg, timeout=timeout)
     state_res = get_json(f"{base}/api/v0/config/state", timeout=timeout)
     ok = bool(patch_res.get("ok")) and bool(state_res.get("ok"))
@@ -96,7 +96,7 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
 
 def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: str, issue_id: str, title: str, expected: str, actual: str, repro: list[str], evidence: list[str], meta: list[str], nonce: str, cert_serial: str, no_upload_device_cert: bool, out_path: str) -> tuple[bool, str | None, dict]:
     keyp = Path(key_path)
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "http"))
+    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     state = get_json(f"{base}/api/v0/config/state", timeout=timeout)
     if not state.get("ok"):
         return False, "ERR_STATE_QUERY", {"state": state}
@@ -301,7 +301,7 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
         return False, "ERR_OTA_BUNDLE_NOT_FOUND", {"path": str(bundle_path)}
 
     data = bundle_path.read_bytes()
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "http"))
+    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{base}{upgrade_path}"
     req = Request(url, data=data, method="POST", headers={"Content-Type": "application/octet-stream"})
     try:

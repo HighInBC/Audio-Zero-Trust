@@ -312,9 +312,10 @@ Issue/install device TLS certificate (admin-signed install payload):
 ```bash
 python3 client/tools/azt_tool.py tls-cert-issue \
   --host azt-mic.local \
-  --key client/tools/provisioned/admin-main/private_key.pem \
-  --cert-serial tls-$(date -u +%Y%m%d%H%M%S)
+  --key client/tools/provisioned/admin-main/private_key.pem
 ```
+
+`--cert-serial` is optional; if omitted it is auto-generated.
 
 Export CA public cert for verifier-only clients:
 
@@ -331,6 +332,7 @@ python3 client/tools/azt_tool.py tls-ca-import --in ca_public.pem
 Use HTTPS transport in CLI/SDK:
 
 ```bash
+# optional: AZT_SCHEME defaults to auto and prefers HTTPS when local TLS CA trust is present
 export AZT_SCHEME=https
 # optional override path; otherwise defaults to client/tools/pki/trusted_ca_cert.pem or ca_cert.pem
 export AZT_TLS_CA_CERT=client/tools/pki/trusted_ca_cert.pem

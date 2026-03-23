@@ -13,7 +13,7 @@ from tools.azt_sdk.services.url_service import base_url
 
 
 def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "http"))
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
     att = get_json(
         f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",

@@ -146,7 +146,7 @@ def configure_device(
     state0 = None
     state0_err = None
     if device_ip:
-        base = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "http"))
+        base = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "auto"))
         try:
             state0 = http_json("GET", base + "/api/v0/config/state")
         except Exception as e:
@@ -209,7 +209,7 @@ def configure_device(
             }
 
         time.sleep(1.0)
-        base_after = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "http"))
+        base_after = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "auto"))
         state1 = http_json("GET", f"{base_after}/api/v0/config/state")
         ok = state1.get("admin_fingerprint_hex") == fp
         return (0 if ok else 6), ok, (None if ok else "POSTCHECK_FP_MISMATCH"), {

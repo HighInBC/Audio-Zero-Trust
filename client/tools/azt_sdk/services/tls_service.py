@@ -154,7 +154,7 @@ def _load_ca_signer() -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
 def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_path: str, cert_serial: str, valid_days: int = 180) -> dict:
     ca_key, ca_cert = _load_ca_signer()
 
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "http"))
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     csr_res = get_json(f"{b}/api/v0/tls/csr", timeout=timeout)
     if not csr_res.get("ok"):
         raise RuntimeError(f"tls csr fetch failed: {csr_res}")

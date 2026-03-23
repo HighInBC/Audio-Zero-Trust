@@ -9,7 +9,7 @@ import os
 
 
 def run(args: argparse.Namespace) -> int:
-    b = base_url(host=str(args.host), port=int(args.port), scheme=os.getenv("AZT_SCHEME", "http"))
+    b = base_url(host=str(args.host), port=int(args.port), scheme=os.getenv("AZT_SCHEME", "auto"))
     res = get_json(f"{b}/api/v0/tls/state", timeout=int(args.timeout))
     ok = bool(res.get("ok"))
     emit_envelope(
