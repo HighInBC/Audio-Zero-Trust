@@ -140,6 +140,9 @@ static bool ensure_device_keypair(AppState& state) {
   state.device_certificate_serial = "";
   state.device_certificate_json = "";
   state.discovery_announcement_json = "";
+  state.tls_certificate_serial = "";
+  state.tls_server_cert_configured = false;
+  state.tls_ca_cert_configured = false;
   return true;
 }
 
@@ -213,6 +216,9 @@ void load_config_state(AppState& state) {
   state.device_certificate_serial = g_prefs.getString("dev_cert_sn", "");
   state.device_certificate_json = "";
   state.discovery_announcement_json = g_prefs.getString("disc_json", "");
+  state.tls_certificate_serial = g_prefs.getString("tls_cert_sn", "");
+  state.tls_server_cert_configured = g_prefs.getString("tls_srv_cert", "").length() > 0;
+  state.tls_ca_cert_configured = g_prefs.getString("tls_ca_cert", "").length() > 0;
   state.device_sign_public_key_b64 = g_prefs.getString("dev_sign_pub", state.device_sign_public_key_b64);
   state.device_sign_fingerprint_hex = g_prefs.getString("dev_sign_fp", state.device_sign_fingerprint_hex);
   state.ota_signer_override_public_key_pem = g_prefs.getString("ota_signer_pem", "");
@@ -384,6 +390,9 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   g_prefs.remove("disc_json");
   g_prefs.remove("ota_signer_pem");
   g_prefs.remove("ota_signer_fp");
+  g_prefs.remove("tls_srv_cert");
+  g_prefs.remove("tls_ca_cert");
+  g_prefs.remove("tls_cert_sn");
   g_prefs.remove("cfg_rev");
   g_prefs.end();
 
@@ -403,6 +412,9 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.device_certificate_serial = "";
   state.device_certificate_json = "";
   state.discovery_announcement_json = "";
+  state.tls_certificate_serial = "";
+  state.tls_server_cert_configured = false;
+  state.tls_ca_cert_configured = false;
   state.ota_signer_override_public_key_pem = "";
   state.ota_signer_override_fingerprint_hex = "";
   state.config_revision = 0;

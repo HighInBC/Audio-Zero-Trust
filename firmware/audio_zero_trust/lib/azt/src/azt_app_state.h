@@ -22,6 +22,11 @@ struct AppState {
   String device_certificate_json;
   String discovery_announcement_json;
 
+  // TLS server certificate state (certificate material is stored in prefs).
+  String tls_certificate_serial;
+  bool tls_server_cert_configured = false;
+  bool tls_ca_cert_configured = false;
+
   // Runtime Wi-Fi diagnostics (non-secret)
   String wifi_last_connect_source;
   int wifi_last_status = 0;
