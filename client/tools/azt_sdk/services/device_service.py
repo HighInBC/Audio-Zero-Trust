@@ -21,19 +21,7 @@ from tools.azt_sdk.services.url_service import base_url
 def _state_get_v0(*, host: str, port: int, timeout: int) -> dict:
     scheme = os.getenv("AZT_SCHEME", "auto")
     b = base_url(host=host, port=port, scheme=scheme)
-    try:
-        return get_json(f"{b}/api/v0/config/state", timeout=timeout)
-    except Exception as e:
-        # Auto mode prefers HTTPS when local CA is present; right after provisioning
-        # the HTTPS listener may still be coming up. Fall back once to HTTP on the
-        # requested API port for better UX.
-        if str(scheme).strip().lower() == "auto":
-            b_http = base_url(host=host, port=port, scheme="http")
-            try:
-                return get_json(f"{b_http}/api/v0/config/state", timeout=timeout)
-            except Exception:
-                pass
-        raise e
+    return get_json(f"{b}/api/v0/config/state", timeout=timeout)
 
 
 def _state_get_v1_legacy(*, host: str, port: int, timeout: int) -> dict:
