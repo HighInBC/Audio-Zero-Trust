@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+import argparse
+
+from tools.azt_cli.output import emit_envelope
+from tools.azt_client.http import get_json
+from tools.azt_sdk.services.url_service import base_url
+import os
+
+
+def run(args: argparse.Namespace) -> int:
+    b = base_url(host=str(args.host), port=int(args.port), scheme=os.getenv("AZT_SCHEME", "http"))
+    res = get_json(f"{b}/api/v0/tls/state", timeout=int(args.timeout))
+    ok = bool(res.get("ok"))
+    emit_envelope(
+        command="tls-status",
+        ok=ok,
+        payload={"response": res},
+        error=None if ok else str(res.get("error") or "TLS_STATUS_FAILED"),
+        detail=res.get("detail"),
+        as_json=bool(getattr(args, "as_json", False)),
+    )
+    return 0 if ok else 1
