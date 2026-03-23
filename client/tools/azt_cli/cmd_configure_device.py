@@ -101,6 +101,13 @@ def run(args: argparse.Namespace) -> int:
                     else:
                         keyp = admin_key_path
 
+                    san_hosts = [device_ip]
+                    mdns_name = str(getattr(args, "mdns_hostname", "") or "").strip()
+                    if mdns_name:
+                        san_hosts.append(mdns_name)
+                        if not mdns_name.endswith(".local"):
+                            san_hosts.append(f"{mdns_name}.local")
+
                     tls_result = tls_bootstrap(
                         host=device_ip,
                         admin_key_path=str(keyp),
@@ -110,6 +117,8 @@ def run(args: argparse.Namespace) -> int:
                         valid_days=int(getattr(args, "tls_valid_days", 180)),
                         reboot_on_https_failure=True,
                         reboot_wait_seconds=int(getattr(args, "tls_reboot_wait_seconds", 8)),
+                        san_hosts=san_hosts,
+                        verify_host=(f"{mdns_name}.local" if mdns_name else device_ip),
                     )
                     out_payload["tls_bootstrap"] = {
                         "attempted": True,

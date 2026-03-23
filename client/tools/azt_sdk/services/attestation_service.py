@@ -12,6 +12,15 @@ from tools.azt_client.http import get_json
 from tools.azt_sdk.services.url_service import base_url
 
 
+def _nonce_matches(payload_nonce: str, requested_nonce: str) -> bool:
+    if payload_nonce == requested_nonce:
+        return True
+    # Some firmware builds may echo query suffix in nonce field (e.g. "<nonce>?nonce=<nonce>").
+    if payload_nonce.startswith(requested_nonce + "?nonce="):
+        return True
+    return False
+
+
 def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
@@ -26,7 +35,7 @@ def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tup
         and isinstance(payload, dict)
         and payload.get("attestation_version") == 1
         and payload.get("attestation_type") == "device_key_ownership"
-        and payload.get("nonce") == nonce
+        and _nonce_matches(str(payload.get("nonce") or ""), nonce)
         and payload.get("device_sign_public_key_b64") == state.get("device_sign_public_key_b64")
         and payload.get("device_sign_fingerprint_hex") == state.get("device_sign_fingerprint_hex")
         and payload.get("device_chip_id_hex") == state.get("device_chip_id_hex")

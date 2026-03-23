@@ -159,7 +159,7 @@ def _load_ca_signer(*, ca_key_path: str = "", ca_cert_path: str = "") -> tuple[e
     return key, cert, key_path, cert_path
 
 
-def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_path: str, cert_serial: str, valid_days: int = 180, scheme: str = "auto", ca_key_path: str = "", ca_cert_path: str = "") -> dict:
+def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_path: str, cert_serial: str, valid_days: int = 180, scheme: str = "auto", ca_key_path: str = "", ca_cert_path: str = "", san_hosts: list[str] | None = None) -> dict:
     ca_key, ca_cert, _, active_ca_cert_path = _load_ca_signer(ca_key_path=ca_key_path, ca_cert_path=ca_cert_path)
 
     b = base_url(host=host, port=port, scheme=scheme)
@@ -179,11 +179,18 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
 
     now = datetime.now(timezone.utc)
     san_entries: list[x509.GeneralName] = []
-    h = (host or "").strip()
-    try:
-        san_entries.append(x509.IPAddress(ipaddress.ip_address(h)))
-    except Exception:
-        if h:
+    san_inputs = san_hosts if san_hosts is not None else [host]
+    seen_san: set[str] = set()
+    for raw_h in san_inputs:
+        h = (raw_h or "").strip()
+        if not h:
+            continue
+        if h in seen_san:
+            continue
+        seen_san.add(h)
+        try:
+            san_entries.append(x509.IPAddress(ipaddress.ip_address(h)))
+        except Exception:
             san_entries.append(x509.DNSName(h))
 
     builder = (
@@ -261,7 +268,9 @@ def tls_bootstrap(*,
                   reboot_on_https_failure: bool = True,
                   reboot_wait_seconds: int = 8,
                   ca_key_path: str = "",
-                  ca_cert_path: str = "") -> dict:
+                  ca_cert_path: str = "",
+                  san_hosts: list[str] | None = None,
+                  verify_host: str | None = None) -> dict:
     # Ensure default local CA exists when caller does not provide explicit CA paths.
     if not (ca_key_path or "").strip() and not (ca_cert_path or "").strip():
         tls_ca_init()
@@ -280,11 +289,13 @@ def tls_bootstrap(*,
         scheme="http",
         ca_key_path=ca_key_path,
         ca_cert_path=ca_cert_path,
+        san_hosts=san_hosts,
     )
 
     https_state = None
     https_error = ""
-    https_url = f"{base_url(host=host, port=int(https_port), scheme='https')}/api/v0/config/state"
+    verify_host_value = (verify_host or host)
+    https_url = f"{base_url(host=verify_host_value, port=int(https_port), scheme='https')}/api/v0/config/state"
     try:
         https_state = get_json(https_url, timeout=int(timeout))
     except Exception as e:
