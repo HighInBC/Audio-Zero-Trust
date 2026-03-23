@@ -1,5 +1,7 @@
 #include "azt_serial_control.h"
 
+#include <esp_system.h>
+
 #include "azt_config.h"
 #include "azt_http_api.h"
 
@@ -104,14 +106,22 @@ void handle_serial_control(AppState& state,
   static constexpr uint32_t kConfigRxTimeoutMs = 30000;
 
   auto apply_buffered_config = [&]() {
+    bool reboot_after_response = false;
     if (xSemaphoreTake(state_mu, pdMS_TO_TICKS(1000)) == pdTRUE) {
       auto r = apply_config_json_from_serial(state, serial_state.config_buf);
       Serial.printf("AZT_CONFIG_APPLY code=%d body=%s\n", r.code, r.body.c_str());
+      reboot_after_response = r.reboot_after_response;
       xSemaphoreGive(state_mu);
     } else {
       Serial.println(format_config_apply_lock_error_line());
     }
     clear_serial_config_rx_state(serial_state);
+
+    if (reboot_after_response) {
+      Serial.println("AZT_REBOOT reason=tls_config_applied");
+      delay(150);
+      esp_restart();
+    }
   };
 
   if (serial_state.config_mode && serial_state.config_len_mode) {
