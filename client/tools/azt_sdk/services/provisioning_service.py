@@ -4,10 +4,12 @@ import ipaddress
 import json
 import time
 from pathlib import Path
+import os
 
 from tools.azt_client.config import make_signed_config
 from tools.azt_client.crypto import ed25519_public_b64_from_private_key, ed25519_fp_hex_from_private_key
 from tools.azt_client.http import http_json
+from tools.azt_sdk.services.url_service import base_url
 from tools.provision_unit import (
     detect_device_ip_from_serial,
     load_keypair_from_artifact_dir,
@@ -144,7 +146,7 @@ def configure_device(
     state0 = None
     state0_err = None
     if device_ip:
-        base = f"http://{device_ip}:8080"
+        base = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "http"))
         try:
             state0 = http_json("GET", base + "/api/v0/config/state")
         except Exception as e:
@@ -207,7 +209,8 @@ def configure_device(
             }
 
         time.sleep(1.0)
-        state1 = http_json("GET", f"http://{device_ip}:8080/api/v0/config/state")
+        base_after = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "http"))
+        state1 = http_json("GET", f"{base_after}/api/v0/config/state")
         ok = state1.get("admin_fingerprint_hex") == fp
         return (0 if ok else 6), ok, (None if ok else "POSTCHECK_FP_MISMATCH"), {
             **common,

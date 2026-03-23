@@ -15,6 +15,7 @@ from cryptography.x509.oid import NameOID
 
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
 from tools.azt_client.http import get_json, http_json
+from tools.azt_sdk.services.url_service import base_url
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PKI_DIR = REPO_ROOT / "client" / "tools" / "pki"
@@ -152,7 +153,8 @@ def _load_ca_signer() -> tuple[ed25519.Ed25519PrivateKey, x509.Certificate]:
 def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_path: str, cert_serial: str, valid_days: int = 180) -> dict:
     ca_key, ca_cert = _load_ca_signer()
 
-    csr_res = get_json(f"http://{host}:{port}/api/v0/tls/csr", timeout=timeout)
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "http"))
+    csr_res = get_json(f"{b}/api/v0/tls/csr", timeout=timeout)
     if not csr_res.get("ok"):
         raise RuntimeError(f"tls csr fetch failed: {csr_res}")
 
@@ -201,11 +203,11 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         "signature_algorithm": "ed25519",
         "signature_b64": sig_b64,
     }
-    post = http_json("POST", f"http://{host}:{port}/api/v0/tls/cert", req, timeout=timeout)
+    post = http_json("POST", f"{b}/api/v0/tls/cert", req, timeout=timeout)
     if not post.get("ok"):
         raise RuntimeError(f"tls cert post failed: {post}")
 
-    tls_state = get_json(f"http://{host}:{port}/api/v0/tls/state", timeout=timeout)
+    tls_state = get_json(f"{b}/api/v0/tls/state", timeout=timeout)
     return {
         "csr": csr_res,
         "install_response": post,
