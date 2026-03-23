@@ -229,9 +229,14 @@ def configure_device(
             common["ip_detected"] = ip_from_serial
 
         if not device_ip:
-            return 8, False, "IP_NOT_DETECTED_AFTER_SERIAL_BOOTSTRAP", {
+            # Serial apply succeeded; do not fail purely because IP extraction missed a log format variant.
+            return 0, True, None, {
                 **common,
-                "detail": "device IP not detected from serial output; provide --ip or retry",
+                "path": "serial-bootstrap",
+                "state_after": None,
+                "postcheck_warning": "serial apply succeeded but device IP was not parsed from serial output",
+                "postcheck_error": "IP_NOT_DETECTED_AFTER_SERIAL_BOOTSTRAP",
+                "detail": "device IP not detected from serial output; provide --ip for deterministic postcheck",
             }
 
         time.sleep(1.0)
