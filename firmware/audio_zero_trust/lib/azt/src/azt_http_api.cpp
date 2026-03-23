@@ -105,7 +105,16 @@ static String parse_query_param(const String& path, const char* key) {
   int k = query.indexOf(token);
   if (k < 0) return "";
   int start = k + token.length();
-  int end = query.indexOf('&', start);
+  int end_amp = query.indexOf('&', start);
+  int end_q = query.indexOf('?', start);
+  int end = -1;
+  if (end_amp >= 0 && end_q >= 0) {
+    end = std::min(end_amp, end_q);
+  } else if (end_amp >= 0) {
+    end = end_amp;
+  } else if (end_q >= 0) {
+    end = end_q;
+  }
   String v = (end < 0) ? query.substring(start) : query.substring(start, end);
   v.trim();
   return v;
