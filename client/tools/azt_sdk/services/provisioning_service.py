@@ -10,6 +10,7 @@ from tools.azt_client.config import make_signed_config
 from tools.azt_client.crypto import ed25519_public_b64_from_private_key, ed25519_fp_hex_from_private_key
 from tools.azt_client.http import http_json
 from tools.azt_sdk.services.url_service import base_url
+from tools.azt_sdk.services.tls_service import tls_material_generate
 from tools.provision_unit import (
     detect_device_ip_from_serial,
     load_keypair_from_artifact_dir,
@@ -41,6 +42,8 @@ def configure_device(
     ota_signer_clear: bool,
     mdns_enabled: bool,
     mdns_hostname: str,
+    tls_bootstrap: bool,
+    tls_valid_days: int,
 ) -> tuple[int, bool, str | None, dict]:
     admin_input = Path(admin_creds_dir)
     recorder_input = Path(recorder_creds_dir) if recorder_creds_dir else admin_input
@@ -118,6 +121,25 @@ def configure_device(
             "hostname": mdns_hostname,
         }
 
+    tls_material = None
+    if bool(tls_bootstrap):
+        san_hosts: list[str] = []
+        if mdns_hostname:
+            san_hosts.append(mdns_hostname)
+            if not mdns_hostname.endswith(".local"):
+                san_hosts.append(f"{mdns_hostname}.local")
+        tls_material = tls_material_generate(
+            cert_serial="",
+            valid_days=int(max(1, tls_valid_days)),
+            san_hosts=san_hosts,
+        )
+        unsigned_cfg["tls"] = {
+            "tls_certificate_serial": tls_material["tls_certificate_serial"],
+            "tls_server_certificate_pem": tls_material["tls_server_certificate_pem"],
+            "tls_server_private_key_pem": tls_material["tls_server_private_key_pem"],
+            "tls_ca_certificate_pem": tls_material["tls_ca_certificate_pem"],
+        }
+
     if ota_version_code is not None:
         unsigned_cfg["ota_version_code"] = int(ota_version_code)
     if ota_min_version_code is not None:
@@ -175,7 +197,11 @@ def configure_device(
         "ota_signer_clear": bool(ota_signer_clear),
         "mdns_enabled": bool(mdns_enabled),
         "mdns_hostname": mdns_hostname,
+        "tls_bootstrap_requested": bool(tls_bootstrap),
     }
+    if tls_material:
+        common["tls_certificate_serial"] = tls_material.get("tls_certificate_serial")
+        common["tls_ca_fingerprint_hex"] = tls_material.get("ca_fingerprint_hex")
     if detected_ip:
         common["ip_detected"] = detected_ip
     if state0_err:

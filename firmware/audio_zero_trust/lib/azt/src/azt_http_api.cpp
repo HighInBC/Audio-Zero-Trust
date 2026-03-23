@@ -441,6 +441,34 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     new_mdns_hostname.trim();
   }
 
+  bool tls_set = false;
+  String tls_cert_serial = "";
+  String tls_srv_cert = "";
+  String tls_srv_key = "";
+  String tls_ca_cert = "";
+  JsonVariant tls = doc["tls"];
+  if (!tls.isNull()) {
+    if (!tls.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid tls object\"}";
+      return r;
+    }
+    tls_set = true;
+    tls_cert_serial = String((const char*)(tls["tls_certificate_serial"] | ""));
+    tls_srv_cert = String((const char*)(tls["tls_server_certificate_pem"] | ""));
+    tls_srv_key = String((const char*)(tls["tls_server_private_key_pem"] | ""));
+    tls_ca_cert = String((const char*)(tls["tls_ca_certificate_pem"] | ""));
+    tls_cert_serial.trim();
+    tls_srv_cert.trim();
+    tls_srv_key.trim();
+    tls_ca_cert.trim();
+    if (tls_cert_serial.length() == 0 || tls_srv_cert.length() == 0 || tls_srv_key.length() == 0) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"tls requires serial/server certificate/private key\"}";
+      return r;
+    }
+  }
+
   String ota_signer_pem = String((const char*)(doc["ota_signer_public_key_pem"] | ""));
   ota_signer_pem.trim();
   bool ota_signer_clear = doc["ota_signer_clear"] | false;
@@ -528,6 +556,29 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       p.end();
     }
 
+    if (tls_set) {
+      Preferences tp;
+      if (tp.begin("aztcfg", false)) {
+        bool ok_put = true;
+        ok_put = ok_put && tp.putString("tls_srv_key", tls_srv_key) > 0;
+        ok_put = ok_put && tp.putString("tls_srv_cert", tls_srv_cert) > 0;
+        if (tls_ca_cert.length() > 0) {
+          ok_put = ok_put && tp.putString("tls_ca_cert", tls_ca_cert) > 0;
+        }
+        ok_put = ok_put && tp.putString("tls_cert_sn", tls_cert_serial) > 0;
+        tp.end();
+        if (!ok_put) {
+          r.code = 500;
+          r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_TLS_STORE\",\"detail\":\"failed to persist tls config\"}";
+          return r;
+        }
+      }
+      state.tls_server_key_configured = true;
+      state.tls_server_cert_configured = true;
+      state.tls_ca_cert_configured = tls_ca_cert.length() > 0;
+      state.tls_certificate_serial = tls_cert_serial;
+    }
+
     if (allow_ota_signer_override && (ota_signer_pem.length() > 0 || ota_signer_clear || ota_version_set || ota_floor_set || ota_floor_clear)) {
       Preferences op;
       if (op.begin("aztcfg", false)) {
@@ -601,6 +652,29 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
   if (p.begin("aztcfg", false)) {
     p.putString("disc_json", state.discovery_announcement_json);
     p.end();
+  }
+
+  if (tls_set) {
+    Preferences tp;
+    if (tp.begin("aztcfg", false)) {
+      bool ok_put = true;
+      ok_put = ok_put && tp.putString("tls_srv_key", tls_srv_key) > 0;
+      ok_put = ok_put && tp.putString("tls_srv_cert", tls_srv_cert) > 0;
+      if (tls_ca_cert.length() > 0) {
+        ok_put = ok_put && tp.putString("tls_ca_cert", tls_ca_cert) > 0;
+      }
+      ok_put = ok_put && tp.putString("tls_cert_sn", tls_cert_serial) > 0;
+      tp.end();
+      if (!ok_put) {
+        r.code = 500;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_TLS_STORE\",\"detail\":\"failed to persist tls config\"}";
+        return r;
+      }
+    }
+    state.tls_server_key_configured = true;
+    state.tls_server_cert_configured = true;
+    state.tls_ca_cert_configured = tls_ca_cert.length() > 0;
+    state.tls_certificate_serial = tls_cert_serial;
   }
 
   if (allow_ota_signer_override && (ota_signer_pem.length() > 0 || ota_signer_clear || ota_version_set || ota_floor_set || ota_floor_clear)) {

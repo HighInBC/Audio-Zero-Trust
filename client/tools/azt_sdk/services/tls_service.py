@@ -257,6 +257,73 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
     }
 
 
+def tls_material_generate(*,
+                          cert_serial: str,
+                          valid_days: int = 180,
+                          san_hosts: list[str] | None = None,
+                          ca_key_path: str = "",
+                          ca_cert_path: str = "") -> dict:
+    ca_key, ca_cert, _, active_ca_cert_path = _load_ca_signer(ca_key_path=ca_key_path, ca_cert_path=ca_cert_path)
+
+    serial_value = (cert_serial or "").strip()
+    if not serial_value:
+        serial_value = "tls-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+    tls_key = ec.generate_private_key(ec.SECP256R1())
+    pub = tls_key.public_key()
+
+    now = datetime.now(timezone.utc)
+    san_entries: list[x509.GeneralName] = []
+    san_inputs = san_hosts if san_hosts is not None else []
+    seen_san: set[str] = set()
+    for raw_h in san_inputs:
+        h = (raw_h or "").strip()
+        if not h or h in seen_san:
+            continue
+        seen_san.add(h)
+        try:
+            san_entries.append(x509.IPAddress(ipaddress.ip_address(h)))
+        except Exception:
+            san_entries.append(x509.DNSName(h))
+
+    cn = "azt-device"
+    if san_inputs:
+        cn = (san_inputs[0] or cn)
+
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
+        .issuer_name(ca_cert.subject)
+        .public_key(pub)
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=max(1, int(valid_days))))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+    )
+    if san_entries:
+        builder = builder.add_extension(x509.SubjectAlternativeName(san_entries), critical=False)
+
+    cert = builder.sign(private_key=ca_key, algorithm=hashes.SHA256())
+
+    server_cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    server_key_pem = tls_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
+    ).decode("utf-8")
+    ca_cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+
+    return {
+        "tls_certificate_serial": serial_value,
+        "tls_server_certificate_pem": server_cert_pem,
+        "tls_server_private_key_pem": server_key_pem,
+        "tls_ca_certificate_pem": ca_cert_pem,
+        "ca_cert_path": str(active_ca_cert_path),
+        "ca_fingerprint_hex": _fingerprint_hex(active_ca_cert_path.read_bytes()),
+        "san_hosts": list(seen_san),
+    }
+
+
 def tls_bootstrap(*,
                   host: str,
                   admin_key_path: str,
