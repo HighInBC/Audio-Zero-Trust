@@ -240,7 +240,9 @@ def configure_device(
             }
 
         time.sleep(1.0)
-        base_after = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "auto"))
+        # Post-serial liveness check should not depend on AZT_SCHEME auto-selection.
+        # Force HTTP bootstrap endpoint here to avoid premature HTTPS-only probes.
+        base_after = base_url(host=device_ip, port=8080, scheme="http")
 
         state1 = None
         postcheck_err = None
