@@ -5,11 +5,16 @@ import os
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import base64
+import json
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
+
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
+from tools.azt_client.http import get_json, http_json
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PKI_DIR = REPO_ROOT / "client" / "tools" / "pki"
@@ -132,3 +137,79 @@ def tls_ca_status() -> dict:
         payload["active_ca_cert_path"] = ""
         payload["active_ca_fingerprint_hex"] = ""
     return payload
+
+
+def _load_ca_signer() -> tuple[ed25519.Ed25519PrivateKey, x509.Certificate]:
+    if not (CA_KEY.exists() and CA_CERT.exists()):
+        tls_ca_init()
+    key = serialization.load_pem_private_key(CA_KEY.read_bytes(), password=None)
+    if not isinstance(key, ed25519.Ed25519PrivateKey):
+        raise RuntimeError("local CA private key is not Ed25519")
+    cert = x509.load_pem_x509_certificate(CA_CERT.read_bytes())
+    return key, cert
+
+
+def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_path: str, cert_serial: str, valid_days: int = 180) -> dict:
+    ca_key, ca_cert = _load_ca_signer()
+
+    csr_res = get_json(f"http://{host}:{port}/api/v0/tls/csr", timeout=timeout)
+    if not csr_res.get("ok"):
+        raise RuntimeError(f"tls csr fetch failed: {csr_res}")
+
+    public_key_pem = str(csr_res.get("public_key_pem") or "")
+    dev_fp = str(csr_res.get("device_sign_fingerprint_hex") or "")
+    chip_id = str(csr_res.get("device_chip_id_hex") or "")
+    if not public_key_pem or not dev_fp or not chip_id:
+        raise RuntimeError("tls csr response missing required fields")
+
+    pub = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+
+    now = datetime.now(timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"azt-device-{chip_id}")]))
+        .issuer_name(ca_cert.subject)
+        .public_key(pub)
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=max(1, int(valid_days))))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .sign(private_key=ca_key, algorithm=None)
+    )
+
+    server_cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    ca_cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+
+    admin_fp = ed25519_fp_hex_from_private_key(Path(admin_key_path))
+    admin_priv = serialization.load_pem_private_key(Path(admin_key_path).read_bytes(), password=None)
+    if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
+        raise RuntimeError("admin key must be Ed25519 private key")
+
+    payload_obj = {
+        "device_sign_fingerprint_hex": dev_fp,
+        "device_chip_id_hex": chip_id,
+        "admin_signer_fingerprint_hex": admin_fp,
+        "tls_certificate_serial": cert_serial,
+        "tls_server_certificate_pem": server_cert_pem,
+        "tls_ca_certificate_pem": ca_cert_pem,
+    }
+    payload_raw = json.dumps(payload_obj, separators=(",", ":")).encode("utf-8")
+    sig_b64 = base64.b64encode(admin_priv.sign(payload_raw)).decode("ascii")
+
+    req = {
+        "tls_payload_b64": base64.b64encode(payload_raw).decode("ascii"),
+        "signature_algorithm": "ed25519",
+        "signature_b64": sig_b64,
+    }
+    post = http_json("POST", f"http://{host}:{port}/api/v0/tls/cert", req, timeout=timeout)
+    if not post.get("ok"):
+        raise RuntimeError(f"tls cert post failed: {post}")
+
+    tls_state = get_json(f"http://{host}:{port}/api/v0/tls/state", timeout=timeout)
+    return {
+        "csr": csr_res,
+        "install_response": post,
+        "tls_state": tls_state,
+        "ca_cert_path": str(CA_CERT),
+        "ca_fingerprint_hex": _fingerprint_hex(CA_CERT.read_bytes()),
+    }

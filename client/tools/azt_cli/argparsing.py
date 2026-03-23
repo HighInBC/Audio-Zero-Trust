@@ -377,5 +377,15 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     stls_status.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     stls_status.set_defaults(func=handlers.cmd_tls_ca_status)
 
+    stls_issue = sub.add_parser("tls-cert-issue", help="Issue/install device TLS server certificate from local CA")
+    stls_issue.add_argument("--host", required=True, help="Device host/IP")
+    stls_issue.add_argument("--key", dest="key_path", required=True, help="Admin Ed25519 private key PEM")
+    stls_issue.add_argument("--cert-serial", required=True, help="TLS certificate serial")
+    stls_issue.add_argument("--valid-days", type=int, default=180, help="Issued TLS certificate validity in days")
+    stls_issue.add_argument("--port", type=int, default=8080, help="Device API port")
+    stls_issue.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
+    stls_issue.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_issue.set_defaults(func=handlers.cmd_tls_cert_issue)
+
     _sort_subcommands_alpha(sub)
     return p
