@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 from tools.azt_cli.output import emit_envelope
 from tools.azt_client.http import http_json
@@ -71,8 +72,20 @@ def run(args: argparse.Namespace) -> int:
             if device_ip:
                 tls_state = None
                 tls_state_error = None
+                http_base = base_url(host=device_ip, port=8080, scheme="http")
+
+                # Device often reports IP before HTTP API is fully ready; wait briefly.
+                wait_attempts = 10
+                for _ in range(wait_attempts):
+                    try:
+                        probe = http_json("GET", f"{http_base}/api/v0/config/state", timeout=3)
+                        if isinstance(probe, dict) and probe.get("ok"):
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(1.0)
+
                 try:
-                    http_base = base_url(host=device_ip, port=8080, scheme="http")
                     tls_state = http_json("GET", f"{http_base}/api/v0/tls/state", timeout=15)
                 except Exception as e:
                     tls_state_error = str(e)
@@ -108,18 +121,31 @@ def run(args: argparse.Namespace) -> int:
                         if not mdns_name.endswith(".local"):
                             san_hosts.append(f"{mdns_name}.local")
 
-                    tls_result = tls_bootstrap(
-                        host=device_ip,
-                        admin_key_path=str(keyp),
-                        http_port=8080,
-                        https_port=8443,
-                        timeout=15,
-                        valid_days=int(getattr(args, "tls_valid_days", 180)),
-                        reboot_on_https_failure=True,
-                        reboot_wait_seconds=int(getattr(args, "tls_reboot_wait_seconds", 8)),
-                        san_hosts=san_hosts,
-                        verify_host=(f"{mdns_name}.local" if mdns_name else device_ip),
-                    )
+                    tls_result = None
+                    tls_bootstrap_error = None
+                    for _ in range(3):
+                        try:
+                            tls_result = tls_bootstrap(
+                                host=device_ip,
+                                admin_key_path=str(keyp),
+                                http_port=8080,
+                                https_port=8443,
+                                timeout=15,
+                                valid_days=int(getattr(args, "tls_valid_days", 180)),
+                                reboot_on_https_failure=True,
+                                reboot_wait_seconds=int(getattr(args, "tls_reboot_wait_seconds", 8)),
+                                san_hosts=san_hosts,
+                                verify_host=(f"{mdns_name}.local" if mdns_name else device_ip),
+                            )
+                            tls_bootstrap_error = None
+                            break
+                        except Exception as e:
+                            tls_bootstrap_error = str(e)
+                            time.sleep(1.0)
+
+                    if tls_result is None:
+                        raise RuntimeError(tls_bootstrap_error or "TLS bootstrap failed")
+
                     out_payload["tls_bootstrap"] = {
                         "attempted": True,
                         **tls_result,
