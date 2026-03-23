@@ -225,6 +225,8 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
             time.sleep(0.002)
 
         apply_ok = False
+        saw_reboot = False
+        saw_post_reboot_service_banner = False
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             line = ser.readline().decode('utf-8', errors='replace').strip()
@@ -233,14 +235,22 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
             print({'serial': line})
             if 'AZT_CONFIG_APPLY code=200' in line:
                 apply_ok = True
+            if line.startswith('AZT_REBOOT '):
+                saw_reboot = True
+            if line.startswith('AZT_HTTP api_port=') or line.startswith('AZT_HTTPS '):
+                saw_post_reboot_service_banner = True
             m = ip_re.search(line)
             if m:
                 device_ip = m.group(1)
             m2 = wifi_ip_re.search(line)
             if m2:
                 device_ip = m2.group(1)
+
             if apply_ok and device_ip:
-                break
+                # If reboot path is triggered, keep reading until service banners reappear
+                # so logs include post-reboot HTTPS status.
+                if not saw_reboot or saw_post_reboot_service_banner:
+                    break
 
         return apply_ok, device_ip
 
