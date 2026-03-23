@@ -147,7 +147,7 @@ def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int =
         return None
 
     ip_re = re.compile(r'AZT_IP=(\d+\.\d+\.\d+\.\d+)')
-    generic_ip_re = re.compile(r'\b(\d+\.\d+\.\d+\.\d+)\b')
+    wifi_ip_re = re.compile(r'AZT_WIFI_CONNECTED.*\bip=(\d+\.\d+\.\d+\.\d+)')
 
     end = time.time() + timeout_s
     with serial.Serial(port, baudrate=baud, timeout=0.25) as ser:
@@ -166,9 +166,8 @@ def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int =
             if m:
                 return m.group(1)
 
-            # Fallback for older firmware if it prints just an IP line.
-            m2 = generic_ip_re.search(line)
-            if m2 and not line.startswith('E ('):
+            m2 = wifi_ip_re.search(line)
+            if m2:
                 return m2.group(1)
 
     return None
