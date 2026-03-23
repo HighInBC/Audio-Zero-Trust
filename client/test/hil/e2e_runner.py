@@ -134,7 +134,7 @@ def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wif
     identity = f"{identity_prefix}-{stamp}"
 
     rc_flash, out_flash = tool.cmd(
-        ["flash-device", "--port", port],
+        ["flash-device", "--from-source", "--port", port],
         )
     steps.append({"name": "tool_flash_device", "ok": rc_flash == 0, "detail": out_flash[-2500:]})
     if rc_flash != 0:
@@ -514,7 +514,7 @@ def main() -> int:
 
     # Reboot + post-reboot contract checks.
     try:
-        rc_rb, obj_rb, out_rb = tool.json(["reboot-device", "--host", host])
+        rc_rb, obj_rb, out_rb = tool.json(["reboot-device", "--host", host, "--key", str(key_path)])
         payload_rb = obj_rb.get("payload") if isinstance(obj_rb, dict) else None
         reboot = payload_rb.get("response") if isinstance(payload_rb, dict) and isinstance(payload_rb.get("response"), dict) else {"ok": False, "detail": out_rb}
         reboot_ok = bool(reboot.get("ok")) and rc_rb == 0
@@ -562,26 +562,20 @@ def main() -> int:
         floor_before = int(st0.get("ota_min_allowed_version_code") or 0)
 
         base_code = int(time.time())
-        out_no_floor = out_dir / "e2e_ota_no_floor.otabundle"
-        rc_make_nf, _, out_make_nf = tool.json([
+
+        # Explicitly verify invalid rollback floor (0) is rejected by CLI.
+        out_floor_zero = out_dir / "e2e_ota_floor_zero_invalid.otabundle"
+        rc_make_zero, obj_make_zero, out_make_zero = tool.json([
             "ota-bundle-create",
             "--key", str(ota_signer_key_path),
             "--version-code", str(base_code),
-            "--out", str(out_no_floor),
+            "--rollback-floor-code", "0",
+            "--out", str(out_floor_zero),
         ])
-        ok_make_nf = rc_make_nf == 0 and out_no_floor.exists() and out_no_floor.stat().st_size > 0
-        results.append({"name": "ota_no_floor_create", "ok": ok_make_nf, "detail": out_make_nf[-400:]})
-
-        rc_post_nf, obj_post_nf, out_post_nf = tool.json(["ota-bundle-post", "--host", host, "--in", str(out_no_floor)])
-        ok_post_nf = rc_post_nf == 0 and isinstance(obj_post_nf, dict) and bool(obj_post_nf.get("ok"))
-        results.append({"name": "ota_no_floor_post", "ok": ok_post_nf, "detail": obj_post_nf if isinstance(obj_post_nf, dict) else out_post_nf[-400:]})
-
-        # Reboot is required after accepted OTA.
-        time.sleep(3)
-        up_ok_nf, up_state_nf = wait_http_state(tool, host, timeout_s=60)
-        floor_after_nf = int(up_state_nf.get("ota_min_allowed_version_code") or 0) if up_ok_nf and isinstance(up_state_nf, dict) else -1
-        # Omitted rollback floor should not raise the floor.
-        results.append({"name": "ota_no_floor_state", "ok": up_ok_nf and floor_after_nf == floor_before, "detail": {"before": floor_before, "after": floor_after_nf}})
+        detail_make_zero = obj_make_zero if isinstance(obj_make_zero, dict) else {"raw": out_make_zero[-500:]}
+        err_make_zero = json.dumps(detail_make_zero)
+        ok_make_zero = (rc_make_zero != 0) and ("ERR_OTA_ROLLBACK_FLOOR_INVALID" in err_make_zero)
+        results.append({"name": "ota_floor_zero_rejected", "ok": ok_make_zero, "detail": detail_make_zero})
 
         high_code = base_code + 1000
         out_floor = out_dir / "e2e_ota_floor_same.otabundle"
@@ -595,6 +589,17 @@ def main() -> int:
         ok_make_f = rc_make_f == 0 and out_floor.exists() and out_floor.stat().st_size > 0
         results.append({"name": "ota_floor_same_create", "ok": ok_make_f, "detail": out_make_f[-400:]})
 
+        prev_scheme = os.environ.get("AZT_SCHEME")
+
+        # Explicit HTTPS OTA expectation (currently unsupported).
+        os.environ["AZT_SCHEME"] = "https"
+        rc_post_https, obj_post_https, out_post_https = tool.json(["ota-bundle-post", "--host", host, "--port", "8443", "--in", str(out_floor)])
+        detail_https = obj_post_https if isinstance(obj_post_https, dict) else {"raw": out_post_https[-500:]}
+        err_https = json.dumps(detail_https)
+        ok_https = (rc_post_https != 0) and ("ERR_OTA_HTTPS_UNSUPPORTED" in err_https)
+        results.append({"name": "ota_https_unsupported", "ok": ok_https, "detail": detail_https})
+
+        os.environ["AZT_SCHEME"] = "http"
         rc_post_f, obj_post_f, out_post_f = tool.json(["ota-bundle-post", "--host", host, "--in", str(out_floor)])
         if rc_post_f != 0 and "No route to host" in (out_post_f or ""):
             wait_http_state(tool, host, timeout_s=60)
@@ -627,10 +632,19 @@ def main() -> int:
         ok_post_l = (rc_post_l != 0) and ("version_code below rollback floor" in err_blob)
         results.append({"name": "ota_lowcode_reject", "ok": ok_post_l, "detail": detail_l})
 
+        if prev_scheme is None:
+            os.environ.pop("AZT_SCHEME", None)
+        else:
+            os.environ["AZT_SCHEME"] = prev_scheme
+
     except Exception as err:
-        results.append({"name": "ota_no_floor_create", "ok": False, "detail": str(err)})
-        results.append({"name": "ota_no_floor_post", "ok": False, "detail": str(err)})
-        results.append({"name": "ota_no_floor_state", "ok": False, "detail": str(err)})
+        if 'prev_scheme' in locals():
+            if prev_scheme is None:
+                os.environ.pop("AZT_SCHEME", None)
+            else:
+                os.environ["AZT_SCHEME"] = prev_scheme
+        results.append({"name": "ota_floor_zero_rejected", "ok": False, "detail": str(err)})
+        results.append({"name": "ota_https_unsupported", "ok": False, "detail": str(err)})
         results.append({"name": "ota_floor_same_create", "ok": False, "detail": str(err)})
         results.append({"name": "ota_floor_same_post", "ok": False, "detail": str(err)})
         results.append({"name": "ota_floor_same_state", "ok": False, "detail": str(err)})

@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_client.config import make_signed_config
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
-from tools.azt_client.http import http_json, get_json
+from tools.azt_client.http import http_json, get_json, urlopen_with_tls
 from tools.azt_sdk.services import build_service
 from tools.azt_sdk.services.url_service import base_url
 import os
@@ -305,7 +305,7 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
     url = f"{base}{upgrade_path}"
     req = Request(url, data=data, method="POST", headers={"Content-Type": "application/octet-stream"})
     try:
-        with urlopen(req, timeout=timeout) as r:
+        with urlopen_with_tls(req, timeout=timeout) as r:
             body = r.read().decode("utf-8", errors="replace")
             try:
                 parsed = json.loads(body)

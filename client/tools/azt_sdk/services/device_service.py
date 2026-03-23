@@ -4,8 +4,8 @@ from urllib.parse import quote
 
 import base64
 from pathlib import Path
+from urllib.request import Request
 import requests
-from urllib.request import urlopen
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
 import os
 
-from tools.azt_client.http import get_json, http_json
+from tools.azt_client.http import get_json, http_json, urlopen_with_tls, requests_verify_for_url
 from tools.provision_unit import detect_device_ip_from_serial
 from tools.azt_sdk.services.url_service import base_url
 
@@ -106,10 +106,12 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    with urlopen(f"{b}/api/v0/device/signing-public-key.pem", timeout=timeout) as r:
+    pem_url = f"{b}/api/v0/device/signing-public-key.pem"
+    alias_url = f"{b}/api/v0/device/signing-public-key"
+    with urlopen_with_tls(Request(pem_url, method="GET"), timeout=timeout) as r:
         pem_body = r.read().decode("utf-8", errors="replace")
         pem_ct = r.headers.get("Content-Type", "")
-    with urlopen(f"{b}/api/v0/device/signing-public-key", timeout=timeout) as r:
+    with urlopen_with_tls(Request(alias_url, method="GET"), timeout=timeout) as r:
         pem_alias = r.read().decode("utf-8", errors="replace")
 
     has_pem = "BEGIN PUBLIC KEY" in pem_body
@@ -125,7 +127,7 @@ def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict
 def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: int, timeout: int) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     req_url = f"{b}/stream?seconds={seconds}"
-    r = requests.get(req_url, allow_redirects=False, timeout=timeout)
+    r = requests.get(req_url, allow_redirects=False, timeout=timeout, verify=requests_verify_for_url(req_url))
     status = int(r.status_code)
     location = r.headers.get("Location")
     ok = (status == 307) and bool(location and f":{stream_port}/stream" in location)
@@ -136,10 +138,9 @@ def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{b}/stream"
     total = 0
-    r = requests.get(url, stream=True, timeout=timeout)
+    import time
+    r = requests.get(url, stream=True, timeout=timeout, verify=requests_verify_for_url(url))
     try:
-        import time
-
         start = time.time()
         for chunk in r.iter_content(chunk_size=4096):
             if chunk:

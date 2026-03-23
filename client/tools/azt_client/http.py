@@ -32,6 +32,38 @@ def _ssl_context_for_url(url: str):
     return ssl.create_default_context()
 
 
+def requests_verify_for_url(url: str):
+    if not url.startswith("https://"):
+        return True
+    insecure = os.getenv("AZT_TLS_INSECURE", "").strip().lower() in {"1", "true", "yes", "on"}
+    if insecure:
+        return False
+
+    ca_override = os.getenv("AZT_TLS_CA_CERT", "").strip()
+    if ca_override:
+        return ca_override
+
+    repo_root = Path(__file__).resolve().parents[3]
+    candidates = [
+        repo_root / "client" / "tools" / "pki" / "trusted_ca_cert.pem",
+        repo_root / "client" / "tools" / "pki" / "ca_cert.pem",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return True
+
+
+def urlopen_with_tls(req_or_url, *, timeout: int = 10):
+    if isinstance(req_or_url, str):
+        req = Request(req_or_url, method="GET")
+        url = req_or_url
+    else:
+        req = req_or_url
+        url = getattr(req, "full_url", "")
+    return urlopen(req, timeout=timeout, context=_ssl_context_for_url(url))
+
+
 def http_json(method: str, url: str, payload: dict | None = None, timeout: int = 10) -> dict:
     data = None
     headers = {}
@@ -39,9 +71,8 @@ def http_json(method: str, url: str, payload: dict | None = None, timeout: int =
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     req = Request(url, data=data, method=method, headers=headers)
-    ctx = _ssl_context_for_url(url)
     try:
-        with urlopen(req, timeout=timeout, context=ctx) as r:
+        with urlopen_with_tls(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
