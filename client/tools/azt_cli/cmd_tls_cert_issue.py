@@ -21,10 +21,9 @@ def run(args: argparse.Namespace) -> int:
             admin_key_path=str(args.key_path),
             cert_serial=cert_serial,
             valid_days=int(args.valid_days),
+            scheme="http",
         )
         payload["next_steps"] = [
-            "export AZT_SCHEME=https",
-            f"export AZT_TLS_CA_CERT={payload.get('ca_cert_path','client/tools/pki/ca_cert.pem')}",
             f"python3 client/tools/azt_tool.py state-get --host {host} --port 8443",
         ]
         emit_envelope(command="tls-cert-issue", ok=True, payload=payload, as_json=bool(getattr(args, "as_json", False)))

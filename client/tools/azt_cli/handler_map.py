@@ -31,6 +31,7 @@ from tools.azt_cli import (
     cmd_tls_ca_status,
     cmd_tls_cert_issue,
     cmd_tls_status,
+    cmd_tls_bootstrap,
 )
 
 
@@ -83,5 +84,6 @@ def build_handler_namespace(
         cmd_tls_ca_status=cmd_tls_ca_status.run,
         cmd_tls_cert_issue=cmd_tls_cert_issue.run,
         cmd_tls_status=cmd_tls_status.run,
+        cmd_tls_bootstrap=cmd_tls_bootstrap.run,
         cmd_provision_unit=cli_commands.cmd_provision_unit,
     )

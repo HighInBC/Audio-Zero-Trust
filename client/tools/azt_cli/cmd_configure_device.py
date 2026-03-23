@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tools.azt_cli.output import emit_envelope
+from tools.azt_client.http import http_json
+from tools.azt_sdk.services.url_service import base_url
 from tools.azt_sdk.services.provisioning_service import configure_device
+from tools.azt_sdk.services.tls_service import tls_bootstrap
 
 
 def run(args: argparse.Namespace) -> int:
@@ -60,12 +63,67 @@ def run(args: argparse.Namespace) -> int:
             mdns_enabled=bool(getattr(args, "mdns_enabled", False)),
             mdns_hostname=(getattr(args, "mdns_hostname", "") or ""),
         )
+        out_payload = (payload if isinstance(payload, dict) else {})
+
+        # Optional automatic TLS bootstrap: only run when device is reachable and TLS is not already configured.
+        if ok and bool(getattr(args, "tls_bootstrap", True)):
+            device_ip = str(out_payload.get("ip") or "").strip()
+            if device_ip:
+                tls_state = None
+                tls_state_error = None
+                try:
+                    http_base = base_url(host=device_ip, port=8080, scheme="http")
+                    tls_state = http_json("GET", f"{http_base}/api/v0/tls/state", timeout=15)
+                except Exception as e:
+                    tls_state_error = str(e)
+
+                tls_already_configured = bool(
+                    isinstance(tls_state, dict)
+                    and tls_state.get("ok")
+                    and tls_state.get("tls_server_cert_configured")
+                    and tls_state.get("tls_server_key_configured")
+                    and tls_state.get("tls_ca_cert_configured")
+                )
+
+                if tls_already_configured:
+                    out_payload["tls_bootstrap"] = {
+                        "attempted": False,
+                        "skipped": True,
+                        "reason": "already_configured",
+                        "tls_state": tls_state,
+                    }
+                else:
+                    admin_key_path = Path(admin_dir)
+                    if admin_key_path.is_dir():
+                        keyp = admin_key_path / "private_key.pem"
+                        if not keyp.exists():
+                            keyp = admin_key_path / "admin_private_key.pem"
+                    else:
+                        keyp = admin_key_path
+
+                    tls_result = tls_bootstrap(
+                        host=device_ip,
+                        admin_key_path=str(keyp),
+                        http_port=8080,
+                        https_port=8443,
+                        timeout=15,
+                        valid_days=int(getattr(args, "tls_valid_days", 180)),
+                        reboot_on_https_failure=True,
+                        reboot_wait_seconds=int(getattr(args, "tls_reboot_wait_seconds", 8)),
+                    )
+                    out_payload["tls_bootstrap"] = {
+                        "attempted": True,
+                        **tls_result,
+                        "precheck_tls_state": tls_state,
+                        "precheck_error": tls_state_error,
+                    }
+
         emit_envelope(
             command="configure-device",
             ok=ok,
             error=err,
-            detail=payload.get("detail") if isinstance(payload, dict) else None,
-            payload=(payload if isinstance(payload, dict) else {}),
+            detail=out_payload.get("detail") if isinstance(out_payload, dict) else None,
+            payload=out_payload,
             as_json=bool(getattr(args, "as_json", False)),
         )
         return int(code)

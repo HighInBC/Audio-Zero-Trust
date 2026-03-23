@@ -141,20 +141,28 @@ def tls_ca_status() -> dict:
     return payload
 
 
-def _load_ca_signer() -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
-    if not (CA_KEY.exists() and CA_CERT.exists()):
+def _load_ca_signer(*, ca_key_path: str = "", ca_cert_path: str = "") -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate, Path, Path]:
+    key_path = Path(ca_key_path).expanduser() if (ca_key_path or "").strip() else CA_KEY
+    cert_path = Path(ca_cert_path).expanduser() if (ca_cert_path or "").strip() else CA_CERT
+
+    using_default_paths = (key_path == CA_KEY and cert_path == CA_CERT)
+    if using_default_paths and not (key_path.exists() and cert_path.exists()):
         tls_ca_init()
-    key = serialization.load_pem_private_key(CA_KEY.read_bytes(), password=None)
+
+    if not key_path.exists() or not cert_path.exists():
+        raise FileNotFoundError(f"CA materials not found (key={key_path}, cert={cert_path})")
+
+    key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
     if not isinstance(key, ec.EllipticCurvePrivateKey):
-        raise RuntimeError("local CA private key is not EC")
-    cert = x509.load_pem_x509_certificate(CA_CERT.read_bytes())
-    return key, cert
+        raise RuntimeError("CA private key is not EC")
+    cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    return key, cert, key_path, cert_path
 
 
-def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_path: str, cert_serial: str, valid_days: int = 180) -> dict:
-    ca_key, ca_cert = _load_ca_signer()
+def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_path: str, cert_serial: str, valid_days: int = 180, scheme: str = "auto", ca_key_path: str = "", ca_cert_path: str = "") -> dict:
+    ca_key, ca_cert, _, active_ca_cert_path = _load_ca_signer(ca_key_path=ca_key_path, ca_cert_path=ca_cert_path)
 
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme=scheme)
     csr_res = get_json(f"{b}/api/v0/tls/csr", timeout=timeout)
     if not csr_res.get("ok"):
         raise RuntimeError(f"tls csr fetch failed: {csr_res}")
@@ -232,13 +240,104 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         "csr": csr_res,
         "install_response": post,
         "tls_state": tls_state,
-        "ca_cert_path": str(CA_CERT),
-        "ca_fingerprint_hex": _fingerprint_hex(CA_CERT.read_bytes()),
+        "ca_cert_path": str(active_ca_cert_path),
+        "ca_fingerprint_hex": _fingerprint_hex(active_ca_cert_path.read_bytes()),
         "https_usage_hint": {
-            "scheme_env": "AZT_SCHEME=https",
-            "ca_env": f"AZT_TLS_CA_CERT={CA_CERT}",
             "api_https_port": 8443,
             "api_http_port": 8080,
             "stream_http_port": 8081,
         },
+    }
+
+
+def tls_bootstrap(*,
+                  host: str,
+                  admin_key_path: str,
+                  http_port: int = 8080,
+                  https_port: int = 8443,
+                  timeout: int = 15,
+                  cert_serial: str = "",
+                  valid_days: int = 180,
+                  reboot_on_https_failure: bool = True,
+                  reboot_wait_seconds: int = 8,
+                  ca_key_path: str = "",
+                  ca_cert_path: str = "") -> dict:
+    # Ensure default local CA exists when caller does not provide explicit CA paths.
+    if not (ca_key_path or "").strip() and not (ca_cert_path or "").strip():
+        tls_ca_init()
+
+    issue = tls_cert_issue_and_install(
+        host=host,
+        port=int(http_port),
+        timeout=int(timeout),
+        admin_key_path=admin_key_path,
+        cert_serial=cert_serial,
+        valid_days=int(valid_days),
+        scheme="http",
+        ca_key_path=ca_key_path,
+        ca_cert_path=ca_cert_path,
+    )
+
+    https_state = None
+    https_error = ""
+    https_url = f"{base_url(host=host, port=int(https_port), scheme='https')}/api/v0/config/state"
+    try:
+        https_state = get_json(https_url, timeout=int(timeout))
+    except Exception as e:
+        https_error = str(e)
+
+    reboot_attempted = False
+    reboot_response = None
+
+    if not (isinstance(https_state, dict) and https_state.get("ok")) and reboot_on_https_failure:
+        reboot_attempted = True
+
+        admin_fp = ed25519_fp_hex_from_private_key(Path(admin_key_path))
+        admin_priv = serialization.load_pem_private_key(Path(admin_key_path).read_bytes(), password=None)
+        if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
+            raise RuntimeError("admin key must be Ed25519 private key")
+
+        http_base = base_url(host=host, port=int(http_port), scheme="http")
+        ch = get_json(f"{http_base}/api/v0/device/reboot/challenge", timeout=int(timeout))
+        if ch.get("ok"):
+            nonce = str(ch.get("nonce") or "")
+            if nonce:
+                msg = f"reboot:{nonce}".encode("utf-8")
+                sig_b64 = base64.b64encode(admin_priv.sign(msg)).decode("ascii")
+                reboot_req = {
+                    "nonce": nonce,
+                    "signature_algorithm": "ed25519",
+                    "signature_b64": sig_b64,
+                    "signer_fingerprint_hex": admin_fp,
+                }
+                reboot_response = http_json("POST", f"{http_base}/api/v0/device/reboot", reboot_req, timeout=int(timeout))
+
+        import time
+        time.sleep(max(1, int(reboot_wait_seconds)))
+        https_error = ""
+        try:
+            https_state = get_json(https_url, timeout=int(timeout))
+        except Exception as e:
+            https_error = str(e)
+
+    https_ok = bool(isinstance(https_state, dict) and https_state.get("ok"))
+
+    return {
+        "host": host,
+        "http_port": int(http_port),
+        "https_port": int(https_port),
+        "issue": issue,
+        "https_verify": {
+            "ok": https_ok,
+            "response": https_state,
+            "error": https_error,
+        },
+        "reboot": {
+            "attempted": reboot_attempted,
+            "response": reboot_response,
+        },
+        "next_steps": [
+            f"python3 client/tools/azt_tool.py state-get --host {host} --port {int(https_port)}",
+            f"python3 client/tools/azt_tool.py stream-read --host {host} --port 8081 --seconds 1",
+        ],
     }

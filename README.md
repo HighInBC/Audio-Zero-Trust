@@ -283,7 +283,7 @@ python3 client/tools/azt_tool.py create-signing-credentials --identity admin-mai
 python3 client/tools/azt_tool.py create-decoding-credentials --identity recorder-main
 ```
 
-### 8) Configure device
+### 8) Configure device (TLS bootstrap included by default)
 
 ```bash
 python3 client/tools/azt_tool.py configure-device \
@@ -298,56 +298,46 @@ python3 client/tools/azt_tool.py configure-device \
   --allow-serial-bootstrap
 ```
 
-### 9) TLS bootstrap (minimal local CA model)
+By default, `configure-device` now auto-runs TLS bootstrap **only when TLS is not already configured** on the device.
 
-Initialize local CA material on deployment-capable client:
+Optional controls:
+- `--no-tls-bootstrap` to disable auto TLS bootstrap
+- `--tls-valid-days <days>` to set issued cert validity
+- `--tls-reboot-wait-seconds <seconds>` to control post-reboot verification wait
+
+### 9) Manual one-command TLS bootstrap (when needed)
+
+If you want to run TLS setup explicitly (outside `configure-device`):
 
 ```bash
-python3 client/tools/azt_tool.py tls-ca-init
-python3 client/tools/azt_tool.py tls-ca-status
-```
-
-Issue/install device TLS certificate (admin-signed install payload):
-
-```bash
-python3 client/tools/azt_tool.py tls-cert-issue \
+python3 client/tools/azt_tool.py tls-bootstrap \
   --host azt-mic.local \
   --key client/tools/provisioned/admin-main/private_key.pem
 ```
 
-`--cert-serial` is optional; if omitted it is auto-generated.
+What `tls-bootstrap` does:
+- creates local CA material if missing (or uses provided `--ca-key/--ca-cert`)
+- issues + installs device TLS cert over HTTP bootstrap path
+- verifies HTTPS on `8443`
+- reboots and re-checks only if HTTPS is not initially reachable
 
-Export CA public cert for verifier-only clients:
+Export/import CA public cert for verifier-only clients:
 
 ```bash
 python3 client/tools/azt_tool.py tls-ca-export --out ca_public.pem
-```
-
-On another client, import CA public cert:
-
-```bash
+# on another client:
 python3 client/tools/azt_tool.py tls-ca-import --in ca_public.pem
 ```
 
-Use HTTPS transport in CLI/SDK:
-
-```bash
-# optional: AZT_SCHEME defaults to auto and prefers HTTPS when local TLS CA trust is present
-export AZT_SCHEME=https
-# optional override path; otherwise defaults to client/tools/pki/trusted_ca_cert.pem or ca_cert.pem
-export AZT_TLS_CA_CERT=client/tools/pki/trusted_ca_cert.pem
-```
-
 Port behavior:
-- API/control plaintext HTTP: `8080` (legacy/bootstrap)
-- API/control HTTPS: `8443` (after TLS cert install)
+- API/control plaintext HTTP: `8080` (bootstrap/fallback)
+- API/control HTTPS: `8443` (primary after TLS bootstrap)
 - Stream endpoint remains plain HTTP: `8081`
 
 ### 10) Quick validation
 
 ```bash
-# API/control over HTTPS
-AZT_SCHEME=https AZT_TLS_CA_CERT=client/tools/pki/ca_cert.pem \
+# API/control over HTTPS (CA is auto-discovered from client/tools/pki by default)
 python3 client/tools/azt_tool.py state-get --host azt-mic.local --port 8443
 
 # stream remains plain HTTP
@@ -392,11 +382,12 @@ Major command groups:
   - `certificate-post`
   - `reboot-device`
 - **TLS (minimal CA workflow)**
+  - `tls-bootstrap` (preferred one-command flow)
   - `tls-ca-init`
   - `tls-ca-status`
   - `tls-ca-export`
   - `tls-ca-import`
-  - `tls-cert-issue`
+  - `tls-cert-issue` (advanced/manual)
   - `tls-status`
 - **OTA**
   - `ota-bundle-create`

@@ -244,6 +244,10 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sconf.add_argument("--ota-min-version-code-clear", action="store_true", help="Clear OTA rollback floor to 0. Serial-configurable only")
     sconf.add_argument("--ota-signer-public-key-pem", default="", help="Override OTA signer public key PEM from file path (serial-configurable only)")
     sconf.add_argument("--ota-signer-clear", action="store_true", help="Clear OTA signer override (serial-configurable only)")
+    sconf.add_argument("--tls-bootstrap", dest="tls_bootstrap", action="store_true", default=True, help="After config, auto-bootstrap TLS if not already configured (default: on)")
+    sconf.add_argument("--no-tls-bootstrap", dest="tls_bootstrap", action="store_false", help="Disable automatic TLS bootstrap during configure-device")
+    sconf.add_argument("--tls-valid-days", type=int, default=180, help="TLS certificate validity for auto-bootstrap path")
+    sconf.add_argument("--tls-reboot-wait-seconds", type=int, default=8, help="Seconds to wait after TLS bootstrap reboot before HTTPS re-check")
     sconf.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sconf.set_defaults(func=handlers.cmd_configure_device)
 
@@ -393,6 +397,21 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     stls_state.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
     stls_state.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     stls_state.set_defaults(func=handlers.cmd_tls_status)
+
+    stls_boot = sub.add_parser("tls-bootstrap", help="One-command TLS bootstrap (CA + issue + install + HTTPS verify)")
+    stls_boot.add_argument("--host", required=True, help="Device host/IP")
+    stls_boot.add_argument("--key", dest="key_path", required=True, help="Admin Ed25519 private key PEM")
+    stls_boot.add_argument("--cert-serial", default="", help="TLS certificate serial (optional; auto-generated if omitted)")
+    stls_boot.add_argument("--valid-days", type=int, default=180, help="Issued TLS certificate validity in days")
+    stls_boot.add_argument("--port", type=int, default=8080, help="Device bootstrap API port (HTTP)")
+    stls_boot.add_argument("--https-port", type=int, default=8443, help="Device TLS API port")
+    stls_boot.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
+    stls_boot.add_argument("--ca-key", dest="ca_key_path", default="", help="Optional CA private key PEM (defaults to local client/tools/pki/ca_private_key.pem)")
+    stls_boot.add_argument("--ca-cert", dest="ca_cert_path", default="", help="Optional CA cert PEM (defaults to local client/tools/pki/ca_cert.pem)")
+    stls_boot.add_argument("--no-reboot", action="store_true", help="Do not attempt reboot if HTTPS verification initially fails")
+    stls_boot.add_argument("--reboot-wait-seconds", type=int, default=8, help="Seconds to wait after reboot before HTTPS re-check")
+    stls_boot.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_boot.set_defaults(func=handlers.cmd_tls_bootstrap)
 
     _sort_subcommands_alpha(sub)
     return p
