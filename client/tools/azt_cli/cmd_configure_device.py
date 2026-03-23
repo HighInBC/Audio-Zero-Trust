@@ -10,6 +10,20 @@ from tools.azt_sdk.services.provisioning_service import configure_device
 from tools.azt_sdk.services.tls_service import tls_bootstrap
 
 
+def _wait_http_ready(http_base: str, *, max_wait_s: int = 30) -> tuple[bool, str | None]:
+    end_at = time.time() + max(1, int(max_wait_s))
+    last_err = None
+    while time.time() < end_at:
+        try:
+            probe = http_json("GET", f"{http_base}/api/v0/config/state", timeout=3)
+            if isinstance(probe, dict) and probe.get("ok"):
+                return True, None
+        except Exception as e:
+            last_err = str(e)
+        time.sleep(1.0)
+    return False, last_err
+
+
 def run(args: argparse.Namespace) -> int:
     try:
         admin_dir = args.admin_creds_dir
@@ -74,16 +88,10 @@ def run(args: argparse.Namespace) -> int:
                 tls_state_error = None
                 http_base = base_url(host=device_ip, port=8080, scheme="http")
 
-                # Device often reports IP before HTTP API is fully ready; wait briefly.
-                wait_attempts = 10
-                for _ in range(wait_attempts):
-                    try:
-                        probe = http_json("GET", f"{http_base}/api/v0/config/state", timeout=3)
-                        if isinstance(probe, dict) and probe.get("ok"):
-                            break
-                    except Exception:
-                        pass
-                    time.sleep(1.0)
+                # Device often reports IP before HTTP API is fully ready; wait for readiness.
+                ready, ready_err = _wait_http_ready(http_base, max_wait_s=45)
+                if not ready:
+                    tls_state_error = ready_err or "HTTP API not ready after wait"
 
                 try:
                     tls_state = http_json("GET", f"{http_base}/api/v0/tls/state", timeout=15)
@@ -123,7 +131,9 @@ def run(args: argparse.Namespace) -> int:
 
                     tls_result = None
                     tls_bootstrap_error = None
-                    for _ in range(3):
+                    for _ in range(8):
+                        # Re-check readiness each attempt to handle AP/STA transitions after config apply.
+                        _wait_http_ready(http_base, max_wait_s=6)
                         try:
                             tls_result = tls_bootstrap(
                                 host=device_ip,
@@ -141,7 +151,7 @@ def run(args: argparse.Namespace) -> int:
                             break
                         except Exception as e:
                             tls_bootstrap_error = str(e)
-                            time.sleep(1.0)
+                            time.sleep(2.0)
 
                     if tls_result is None:
                         raise RuntimeError(tls_bootstrap_error or "TLS bootstrap failed")
