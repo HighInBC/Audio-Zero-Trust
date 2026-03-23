@@ -336,10 +336,19 @@ export AZT_SCHEME=https
 export AZT_TLS_CA_CERT=client/tools/pki/trusted_ca_cert.pem
 ```
 
+Port behavior:
+- API/control plaintext HTTP: `8080` (legacy/bootstrap)
+- API/control HTTPS: `8443` (after TLS cert install)
+- Stream endpoint remains plain HTTP: `8081`
+
 ### 10) Quick validation
 
 ```bash
-python3 client/tools/azt_tool.py state-get --host azt-mic.local
+# API/control over HTTPS
+AZT_SCHEME=https AZT_TLS_CA_CERT=client/tools/pki/ca_cert.pem \
+python3 client/tools/azt_tool.py state-get --host azt-mic.local --port 8443
+
+# stream remains plain HTTP
 python3 client/tools/azt_tool.py stream-read --host azt-mic.local --seconds 2
 ```
 
@@ -386,6 +395,7 @@ Major command groups:
   - `tls-ca-export`
   - `tls-ca-import`
   - `tls-cert-issue`
+  - `tls-status`
 - **OTA**
   - `ota-bundle-create`
   - `ota-bundle-post`

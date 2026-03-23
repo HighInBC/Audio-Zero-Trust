@@ -234,4 +234,11 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         "tls_state": tls_state,
         "ca_cert_path": str(CA_CERT),
         "ca_fingerprint_hex": _fingerprint_hex(CA_CERT.read_bytes()),
+        "https_usage_hint": {
+            "scheme_env": "AZT_SCHEME=https",
+            "ca_env": f"AZT_TLS_CA_CERT={CA_CERT}",
+            "api_https_port": 8443,
+            "api_http_port": 8080,
+            "stream_http_port": 8081,
+        },
     }
