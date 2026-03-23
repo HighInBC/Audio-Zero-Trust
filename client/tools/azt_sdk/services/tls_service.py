@@ -7,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import base64
 import json
+import ipaddress
 
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import NameOID
 
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
@@ -41,7 +42,7 @@ def tls_ca_init(*, common_name: str = "Audio-Zero-Trust Local CA", force: bool =
             "ca_fingerprint_hex": _fingerprint_hex(cert_pem),
         }
 
-    key = ed25519.Ed25519PrivateKey.generate()
+    key = ec.generate_private_key(ec.SECP256R1())
 
     now = datetime.now(timezone.utc)
     subject = issuer = x509.Name([
@@ -59,7 +60,7 @@ def tls_ca_init(*, common_name: str = "Audio-Zero-Trust Local CA", force: bool =
         .add_extension(x509.KeyUsage(digital_signature=True, key_encipherment=False, content_commitment=False,
                                      data_encipherment=False, key_agreement=False, key_cert_sign=True,
                                      crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
-        .sign(private_key=key, algorithm=None)
+        .sign(private_key=key, algorithm=hashes.SHA256())
     )
 
     key_pem = key.private_bytes(
@@ -140,12 +141,12 @@ def tls_ca_status() -> dict:
     return payload
 
 
-def _load_ca_signer() -> tuple[ed25519.Ed25519PrivateKey, x509.Certificate]:
+def _load_ca_signer() -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
     if not (CA_KEY.exists() and CA_CERT.exists()):
         tls_ca_init()
     key = serialization.load_pem_private_key(CA_KEY.read_bytes(), password=None)
-    if not isinstance(key, ed25519.Ed25519PrivateKey):
-        raise RuntimeError("local CA private key is not Ed25519")
+    if not isinstance(key, ec.EllipticCurvePrivateKey):
+        raise RuntimeError("local CA private key is not EC")
     cert = x509.load_pem_x509_certificate(CA_CERT.read_bytes())
     return key, cert
 
@@ -164,10 +165,20 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
     if not public_key_pem or not dev_fp or not chip_id:
         raise RuntimeError("tls csr response missing required fields")
 
-    pub = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+    # Generate dedicated TLS server keypair (P-256). Device stores this private key.
+    tls_key = ec.generate_private_key(ec.SECP256R1())
+    pub = tls_key.public_key()
 
     now = datetime.now(timezone.utc)
-    cert = (
+    san_entries: list[x509.GeneralName] = []
+    h = (host or "").strip()
+    try:
+        san_entries.append(x509.IPAddress(ipaddress.ip_address(h)))
+    except Exception:
+        if h:
+            san_entries.append(x509.DNSName(h))
+
+    builder = (
         x509.CertificateBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"azt-device-{chip_id}")]))
         .issuer_name(ca_cert.subject)
@@ -176,10 +187,18 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(days=max(1, int(valid_days))))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-        .sign(private_key=ca_key, algorithm=None)
     )
+    if san_entries:
+        builder = builder.add_extension(x509.SubjectAlternativeName(san_entries), critical=False)
+
+    cert = builder.sign(private_key=ca_key, algorithm=hashes.SHA256())
 
     server_cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    server_key_pem = tls_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
+    ).decode("utf-8")
     ca_cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
     admin_fp = ed25519_fp_hex_from_private_key(Path(admin_key_path))
@@ -193,6 +212,7 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         "admin_signer_fingerprint_hex": admin_fp,
         "tls_certificate_serial": cert_serial,
         "tls_server_certificate_pem": server_cert_pem,
+        "tls_server_private_key_pem": server_key_pem,
         "tls_ca_certificate_pem": ca_cert_pem,
     }
     payload_raw = json.dumps(payload_obj, separators=(",", ":")).encode("utf-8")

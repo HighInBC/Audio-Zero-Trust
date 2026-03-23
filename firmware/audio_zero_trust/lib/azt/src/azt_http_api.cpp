@@ -1158,6 +1158,7 @@ HttpDispatchResult dispatch_request(const String& method,
   if (method == "GET" && path == "/api/v0/tls/state") {
     r.code = 200;
     r.body = "{\"ok\":true,\"tls_server_cert_configured\":" + String(state.tls_server_cert_configured ? "true" : "false") +
+             ",\"tls_server_key_configured\":" + String(state.tls_server_key_configured ? "true" : "false") +
              ",\"tls_ca_cert_configured\":" + String(state.tls_ca_cert_configured ? "true" : "false") +
              ",\"tls_certificate_serial\":" + json_quote(state.tls_certificate_serial) + "}";
     r.content_type = "application/json";
@@ -1212,6 +1213,7 @@ HttpDispatchResult dispatch_request(const String& method,
     String admin_fp = String((const char*)(payload_doc["admin_signer_fingerprint_hex"] | ""));
     String cert_serial = String((const char*)(payload_doc["tls_certificate_serial"] | ""));
     String tls_srv_cert = String((const char*)(payload_doc["tls_server_certificate_pem"] | ""));
+    String tls_srv_key = String((const char*)(payload_doc["tls_server_private_key_pem"] | ""));
     String tls_ca_cert = String((const char*)(payload_doc["tls_ca_certificate_pem"] | ""));
 
     if (dev_fp != state.device_sign_fingerprint_hex || chip_id != state.device_chip_id_hex || admin_fp != state.admin_fingerprint_hex) {
@@ -1220,9 +1222,9 @@ HttpDispatchResult dispatch_request(const String& method,
       r.content_type = "application/json";
       return r;
     }
-    if (cert_serial.length() == 0 || tls_srv_cert.length() == 0) {
+    if (cert_serial.length() == 0 || tls_srv_cert.length() == 0 || tls_srv_key.length() == 0) {
       r.code = 400;
-      r.body = "{\"ok\":false,\"error\":\"ERR_TLS_SCHEMA\",\"detail\":\"missing tls cert serial/server certificate\"}";
+      r.body = "{\"ok\":false,\"error\":\"ERR_TLS_SCHEMA\",\"detail\":\"missing tls cert serial/server certificate/private key\"}";
       r.content_type = "application/json";
       return r;
     }
@@ -1242,6 +1244,7 @@ HttpDispatchResult dispatch_request(const String& method,
       return r;
     }
     bool ok_put = true;
+    ok_put = ok_put && p.putString("tls_srv_key", tls_srv_key) > 0;
     ok_put = ok_put && p.putString("tls_srv_cert", tls_srv_cert) > 0;
     if (tls_ca_cert.length() > 0) {
       ok_put = ok_put && p.putString("tls_ca_cert", tls_ca_cert) > 0;
@@ -1256,6 +1259,7 @@ HttpDispatchResult dispatch_request(const String& method,
       return r;
     }
 
+    state.tls_server_key_configured = true;
     state.tls_server_cert_configured = true;
     state.tls_ca_cert_configured = tls_ca_cert.length() > 0;
     state.tls_certificate_serial = cert_serial;
@@ -1313,6 +1317,7 @@ HttpDispatchResult dispatch_request(const String& method,
              "\",\"time_servers_csv\":\"" + state.time_servers_csv +
              "\",\"device_certificate_serial\":\"" + state.device_certificate_serial +
              "\",\"tls_server_cert_configured\":" + String(state.tls_server_cert_configured ? "true" : "false") +
+             ",\"tls_server_key_configured\":" + String(state.tls_server_key_configured ? "true" : "false") +
              ",\"tls_ca_cert_configured\":" + String(state.tls_ca_cert_configured ? "true" : "false") +
              ",\"tls_certificate_serial\":\"" + state.tls_certificate_serial +
              "\",\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex +
