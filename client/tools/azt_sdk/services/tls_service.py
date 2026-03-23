@@ -266,12 +266,16 @@ def tls_bootstrap(*,
     if not (ca_key_path or "").strip() and not (ca_cert_path or "").strip():
         tls_ca_init()
 
+    serial_value = (cert_serial or "").strip()
+    if not serial_value:
+        serial_value = "tls-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
     issue = tls_cert_issue_and_install(
         host=host,
         port=int(http_port),
         timeout=int(timeout),
         admin_key_path=admin_key_path,
-        cert_serial=cert_serial,
+        cert_serial=serial_value,
         valid_days=int(valid_days),
         scheme="http",
         ca_key_path=ca_key_path,
