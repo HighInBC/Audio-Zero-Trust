@@ -24,6 +24,7 @@ struct AppState {
 
   // TLS server certificate state (certificate material is stored in prefs).
   String tls_certificate_serial;
+  String tls_san_hosts_csv;
   bool tls_server_cert_configured = false;
   bool tls_server_key_configured = false;
   bool tls_ca_cert_configured = false;

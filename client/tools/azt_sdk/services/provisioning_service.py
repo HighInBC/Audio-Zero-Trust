@@ -150,6 +150,7 @@ def configure_device(
             "tls_server_certificate_pem": tls_material["tls_server_certificate_pem"],
             "tls_server_private_key_pem": tls_material["tls_server_private_key_pem"],
             "tls_ca_certificate_pem": tls_material["tls_ca_certificate_pem"],
+            "tls_san_hosts": tls_material.get("san_hosts") or [],
         }
 
     if ota_version_code is not None:
@@ -204,6 +205,7 @@ def configure_device(
     if tls_material:
         common["tls_certificate_serial"] = tls_material.get("tls_certificate_serial")
         common["tls_ca_fingerprint_hex"] = tls_material.get("ca_fingerprint_hex")
+        common["tls_san_hosts"] = tls_material.get("san_hosts") or []
     if detected_ip:
         common["ip_detected"] = detected_ip
     if state0_err:

@@ -141,6 +141,7 @@ static bool ensure_device_keypair(AppState& state) {
   state.device_certificate_json = "";
   state.discovery_announcement_json = "";
   state.tls_certificate_serial = "";
+  state.tls_san_hosts_csv = "";
   state.tls_server_cert_configured = false;
   state.tls_server_key_configured = false;
   state.tls_ca_cert_configured = false;
@@ -218,6 +219,7 @@ void load_config_state(AppState& state) {
   state.device_certificate_json = "";
   state.discovery_announcement_json = g_prefs.getString("disc_json", "");
   state.tls_certificate_serial = g_prefs.getString("tls_cert_sn", "");
+  state.tls_san_hosts_csv = g_prefs.getString("tls_san_csv", "");
   state.tls_server_cert_configured = g_prefs.getString("tls_srv_cert", "").length() > 0;
   state.tls_server_key_configured = g_prefs.getString("tls_srv_key", "").length() > 0;
   state.tls_ca_cert_configured = g_prefs.getString("tls_ca_cert", "").length() > 0;
@@ -396,6 +398,7 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   g_prefs.remove("tls_srv_cert");
   g_prefs.remove("tls_ca_cert");
   g_prefs.remove("tls_cert_sn");
+  g_prefs.remove("tls_san_csv");
   g_prefs.remove("cfg_rev");
   g_prefs.end();
 
@@ -416,6 +419,7 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.device_certificate_json = "";
   state.discovery_announcement_json = "";
   state.tls_certificate_serial = "";
+  state.tls_san_hosts_csv = "";
   state.tls_server_cert_configured = false;
   state.tls_server_key_configured = false;
   state.tls_ca_cert_configured = false;

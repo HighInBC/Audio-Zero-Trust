@@ -447,6 +447,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
   String tls_srv_cert = "";
   String tls_srv_key = "";
   String tls_ca_cert = "";
+  String tls_san_csv = "";
   JsonVariant tls = doc["tls"];
   if (!tls.isNull()) {
     if (!tls.is<JsonObject>()) {
@@ -459,6 +460,23 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     tls_srv_cert = String((const char*)(tls["tls_server_certificate_pem"] | ""));
     tls_srv_key = String((const char*)(tls["tls_server_private_key_pem"] | ""));
     tls_ca_cert = String((const char*)(tls["tls_ca_certificate_pem"] | ""));
+    JsonVariant tls_san_hosts = tls["tls_san_hosts"];
+    if (!tls_san_hosts.isNull()) {
+      if (!tls_san_hosts.is<JsonArray>()) {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"tls_san_hosts must be array\"}";
+        return r;
+      }
+      bool first = true;
+      for (JsonVariant v : tls_san_hosts.as<JsonArray>()) {
+        String h = String((const char*)(v | ""));
+        h.trim();
+        if (h.length() == 0) continue;
+        if (!first) tls_san_csv += ",";
+        tls_san_csv += h;
+        first = false;
+      }
+    }
     tls_cert_serial.trim();
     tls_srv_cert.trim();
     tls_srv_key.trim();
@@ -567,6 +585,11 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
           ok_put = ok_put && tp.putString("tls_ca_cert", tls_ca_cert) > 0;
         }
         ok_put = ok_put && tp.putString("tls_cert_sn", tls_cert_serial) > 0;
+        if (tls_san_csv.length() > 0) {
+          ok_put = ok_put && tp.putString("tls_san_csv", tls_san_csv) > 0;
+        } else {
+          tp.remove("tls_san_csv");
+        }
         tp.end();
         if (!ok_put) {
           r.code = 500;
@@ -578,6 +601,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       state.tls_server_cert_configured = true;
       state.tls_ca_cert_configured = tls_ca_cert.length() > 0;
       state.tls_certificate_serial = tls_cert_serial;
+      state.tls_san_hosts_csv = tls_san_csv;
     }
 
     if (allow_ota_signer_override && (ota_signer_pem.length() > 0 || ota_signer_clear || ota_version_set || ota_floor_set || ota_floor_clear)) {
@@ -668,6 +692,11 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
         ok_put = ok_put && tp.putString("tls_ca_cert", tls_ca_cert) > 0;
       }
       ok_put = ok_put && tp.putString("tls_cert_sn", tls_cert_serial) > 0;
+      if (tls_san_csv.length() > 0) {
+        ok_put = ok_put && tp.putString("tls_san_csv", tls_san_csv) > 0;
+      } else {
+        tp.remove("tls_san_csv");
+      }
       tp.end();
       if (!ok_put) {
         r.code = 500;
@@ -679,6 +708,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     state.tls_server_cert_configured = true;
     state.tls_ca_cert_configured = tls_ca_cert.length() > 0;
     state.tls_certificate_serial = tls_cert_serial;
+    state.tls_san_hosts_csv = tls_san_csv;
   }
 
   if (allow_ota_signer_override && (ota_signer_pem.length() > 0 || ota_signer_clear || ota_version_set || ota_floor_set || ota_floor_clear)) {
@@ -1241,7 +1271,8 @@ HttpDispatchResult dispatch_request(const String& method,
     r.body = "{\"ok\":true,\"tls_server_cert_configured\":" + String(state.tls_server_cert_configured ? "true" : "false") +
              ",\"tls_server_key_configured\":" + String(state.tls_server_key_configured ? "true" : "false") +
              ",\"tls_ca_cert_configured\":" + String(state.tls_ca_cert_configured ? "true" : "false") +
-             ",\"tls_certificate_serial\":" + json_quote(state.tls_certificate_serial) + "}";
+             ",\"tls_certificate_serial\":" + json_quote(state.tls_certificate_serial) +
+             ",\"tls_san_hosts_csv\":" + json_quote(state.tls_san_hosts_csv) + "}";
     r.content_type = "application/json";
     return r;
   }
@@ -1401,7 +1432,8 @@ HttpDispatchResult dispatch_request(const String& method,
              ",\"tls_server_key_configured\":" + String(state.tls_server_key_configured ? "true" : "false") +
              ",\"tls_ca_cert_configured\":" + String(state.tls_ca_cert_configured ? "true" : "false") +
              ",\"tls_certificate_serial\":\"" + state.tls_certificate_serial +
-             "\",\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex +
+             "\",\"tls_san_hosts_csv\":" + json_quote(state.tls_san_hosts_csv) +
+             ",\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex +
              "\",\"recording_key_configured\":" + String(recording_key_cfg ? "true" : "false") +
              ",\"recording_fingerprint_hex\":\"" + state.recording_fingerprint_hex +
              "\",\"recording_key_alg\":\"rsa-oaep-sha256\"" +
