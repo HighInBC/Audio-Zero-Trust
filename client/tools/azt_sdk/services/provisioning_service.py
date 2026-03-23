@@ -94,6 +94,15 @@ def configure_device(
         except Exception:
             return 11, False, "INVALID_AUTHORIZED_LISTENER_IP", {"detail": listener_ip}
 
+    device_ip = ip or None
+    detected_ip = None
+
+    # Try to learn device IP before generating TLS cert so SAN can include IP.
+    if allow_serial_bootstrap and (not no_auto_ip) and (not device_ip):
+        detected_ip = detect_device_ip_from_serial(port, baud=baud, timeout_s=ip_timeout)
+        if detected_ip:
+            device_ip = detected_ip
+
     unsigned_cfg = make_bootstrap(identity, admin_pub_b64, fp, wifi_ssid, wifi_password)
     if authorized_listener_ips:
         unsigned_cfg["authorized_listener_ips"] = authorized_listener_ips
@@ -124,6 +133,9 @@ def configure_device(
     tls_material = None
     if bool(tls_bootstrap):
         san_hosts: list[str] = []
+        # Prefer including concrete device IP in SAN when available.
+        if ip and str(ip).strip():
+            san_hosts.append(str(ip).strip())
         if mdns_hostname:
             san_hosts.append(mdns_hostname)
             if not mdns_hostname.endswith(".local"):
@@ -154,16 +166,6 @@ def configure_device(
     signed = make_signed_config(unsigned_cfg, priv_pem, fp)
     (admin_dir / "config_bootstrap.json").write_text(json.dumps(unsigned_cfg, indent=2))
     (admin_dir / "config_signed.json").write_text(json.dumps(signed, indent=2))
-
-    device_ip = ip or None
-    detected_ip = None
-
-    # Serial access is privileged: never touch serial unless explicitly allowed.
-    # If caller provides --ip, prefer pure HTTP path by default.
-    if allow_serial_bootstrap and (not no_auto_ip) and (not device_ip):
-        detected_ip = detect_device_ip_from_serial(port, baud=baud, timeout_s=ip_timeout)
-        if detected_ip:
-            device_ip = detected_ip
 
     state0 = None
     state0_err = None
