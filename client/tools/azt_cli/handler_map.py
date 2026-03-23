@@ -25,6 +25,12 @@ from tools.azt_cli import (
     cmd_stream_redirect_check,
     cmd_stream_validate,
     cmd_stream_decode,
+    cmd_tls_ca_init,
+    cmd_tls_ca_export,
+    cmd_tls_ca_import,
+    cmd_tls_ca_status,
+    cmd_tls_cert_issue,
+    cmd_tls_status,
 )
 
 
@@ -71,5 +77,11 @@ def build_handler_namespace(
         cmd_signing_key_check=cmd_signing_key_check.run,
         cmd_stream_redirect_check=cmd_stream_redirect_check.run,
         cmd_stream_probe=cmd_stream_probe.run,
+        cmd_tls_ca_init=cmd_tls_ca_init.run,
+        cmd_tls_ca_export=cmd_tls_ca_export.run,
+        cmd_tls_ca_import=cmd_tls_ca_import.run,
+        cmd_tls_ca_status=cmd_tls_ca_status.run,
+        cmd_tls_cert_issue=cmd_tls_cert_issue.run,
+        cmd_tls_status=cmd_tls_status.run,
         cmd_provision_unit=cli_commands.cmd_provision_unit,
     )

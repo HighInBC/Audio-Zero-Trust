@@ -11,16 +11,23 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
+import os
+
 from tools.azt_client.http import get_json, http_json
 from tools.provision_unit import detect_device_ip_from_serial
+from tools.azt_sdk.services.url_service import base_url
 
 
 def _state_get_v0(*, host: str, port: int, timeout: int) -> dict:
-    return get_json(f"http://{host}:{port}/api/v0/config/state", timeout=timeout)
+    scheme = os.getenv("AZT_SCHEME", "auto")
+    b = base_url(host=host, port=port, scheme=scheme)
+    return get_json(f"{b}/api/v0/config/state", timeout=timeout)
 
 
 def _state_get_v1_legacy(*, host: str, port: int, timeout: int) -> dict:
-    return get_json(f"http://{host}:{port}/api/v1/config/state", timeout=timeout)
+    scheme = os.getenv("AZT_SCHEME", "auto")
+    b = base_url(host=host, port=port, scheme=scheme)
+    return get_json(f"{b}/api/v1/config/state", timeout=timeout)
 
 
 def state_get(*, host: str, port: int, timeout: int) -> dict:
@@ -48,22 +55,26 @@ def state_get(*, host: str, port: int, timeout: int) -> dict:
 
 
 def attestation_get(*, host: str, port: int, timeout: int, nonce: str) -> dict:
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     return get_json(
-        f"http://{host}:{port}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
+        f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
         timeout=timeout,
     )
 
 
 def certificate_get(*, host: str, port: int, timeout: int) -> dict:
-    return get_json(f"http://{host}:{port}/api/v0/device/certificate", timeout=timeout)
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    return get_json(f"{b}/api/v0/device/certificate", timeout=timeout)
 
 
 def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> dict:
-    return http_json("POST", f"http://{host}:{port}/api/v0/device/certificate", payload, timeout=timeout)
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    return http_json("POST", f"{b}/api/v0/device/certificate", payload, timeout=timeout)
 
 
 def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
-    ch = get_json(f"http://{host}:{port}/api/v0/device/reboot/challenge", timeout=timeout)
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    ch = get_json(f"{b}/api/v0/device/reboot/challenge", timeout=timeout)
     if not ch.get("ok"):
         return {
             "ok": False,
@@ -90,14 +101,15 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
         "signature_b64": sig_b64,
         "signer_fingerprint_hex": signer_fp,
     }
-    return http_json("POST", f"http://{host}:{port}/api/v0/device/reboot", payload, timeout=timeout)
+    return http_json("POST", f"{b}/api/v0/device/reboot", payload, timeout=timeout)
 
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:
-    with urlopen(f"http://{host}:{port}/api/v0/device/signing-public-key.pem", timeout=timeout) as r:
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    with urlopen(f"{b}/api/v0/device/signing-public-key.pem", timeout=timeout) as r:
         pem_body = r.read().decode("utf-8", errors="replace")
         pem_ct = r.headers.get("Content-Type", "")
-    with urlopen(f"http://{host}:{port}/api/v0/device/signing-public-key", timeout=timeout) as r:
+    with urlopen(f"{b}/api/v0/device/signing-public-key", timeout=timeout) as r:
         pem_alias = r.read().decode("utf-8", errors="replace")
 
     has_pem = "BEGIN PUBLIC KEY" in pem_body
@@ -111,7 +123,8 @@ def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict
 
 
 def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: int, timeout: int) -> tuple[bool, dict]:
-    req_url = f"http://{host}:{port}/stream?seconds={seconds}"
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    req_url = f"{b}/stream?seconds={seconds}"
     r = requests.get(req_url, allow_redirects=False, timeout=timeout)
     status = int(r.status_code)
     location = r.headers.get("Location")
@@ -120,7 +133,8 @@ def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: in
 
 
 def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -> tuple[bool, dict]:
-    url = f"http://{host}:{port}/stream"
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    url = f"{b}/stream"
     total = 0
     r = requests.get(url, stream=True, timeout=timeout)
     try:

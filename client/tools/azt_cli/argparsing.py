@@ -357,5 +357,42 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sprobe.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sprobe.set_defaults(func=handlers.cmd_stream_probe, command_name="stream-read")
 
+    stls_init = sub.add_parser("tls-ca-init", help="Initialize local TLS CA (auto-generates if missing)")
+    stls_init.add_argument("--common-name", default="Audio-Zero-Trust Local CA", help="CA certificate common name")
+    stls_init.add_argument("--force", action="store_true", help="Regenerate CA even if one already exists")
+    stls_init.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_init.set_defaults(func=handlers.cmd_tls_ca_init)
+
+    stls_export = sub.add_parser("tls-ca-export", help="Export active TLS CA public certificate")
+    stls_export.add_argument("--out", dest="out_path", required=True, help="Output PEM path")
+    stls_export.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_export.set_defaults(func=handlers.cmd_tls_ca_export)
+
+    stls_import = sub.add_parser("tls-ca-import", help="Import trusted TLS CA public certificate (verify-only mode)")
+    stls_import.add_argument("--in", dest="in_path", required=True, help="Input PEM path")
+    stls_import.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_import.set_defaults(func=handlers.cmd_tls_ca_import)
+
+    stls_status = sub.add_parser("tls-ca-status", help="Show local TLS CA material status")
+    stls_status.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_status.set_defaults(func=handlers.cmd_tls_ca_status)
+
+    stls_issue = sub.add_parser("tls-cert-issue", help="Issue/install device TLS server certificate from local CA")
+    stls_issue.add_argument("--host", required=True, help="Device host/IP")
+    stls_issue.add_argument("--key", dest="key_path", required=True, help="Admin Ed25519 private key PEM")
+    stls_issue.add_argument("--cert-serial", default="", help="TLS certificate serial (optional; auto-generated if omitted)")
+    stls_issue.add_argument("--valid-days", type=int, default=180, help="Issued TLS certificate validity in days")
+    stls_issue.add_argument("--port", type=int, default=8080, help="Device API port")
+    stls_issue.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
+    stls_issue.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_issue.set_defaults(func=handlers.cmd_tls_cert_issue)
+
+    stls_state = sub.add_parser("tls-status", help="Fetch device TLS enrollment status")
+    stls_state.add_argument("--host", required=True, help="Device host/IP")
+    stls_state.add_argument("--port", type=int, default=8080, help="Device API port")
+    stls_state.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
+    stls_state.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    stls_state.set_defaults(func=handlers.cmd_tls_status)
+
     _sort_subcommands_alpha(sub)
     return p

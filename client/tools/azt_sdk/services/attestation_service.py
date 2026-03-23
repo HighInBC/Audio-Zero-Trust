@@ -4,16 +4,19 @@ import base64
 import json
 import time
 from urllib.parse import quote
+import os
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_client.http import get_json
+from tools.azt_sdk.services.url_service import base_url
 
 
 def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tuple[bool, dict]:
-    state = get_json(f"http://{host}:{port}/api/v0/config/state", timeout=timeout)
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
     att = get_json(
-        f"http://{host}:{port}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
+        f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
         timeout=timeout,
     )
 

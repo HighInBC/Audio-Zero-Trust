@@ -298,10 +298,59 @@ python3 client/tools/azt_tool.py configure-device \
   --allow-serial-bootstrap
 ```
 
-### 9) Quick validation
+### 9) TLS bootstrap (minimal local CA model)
+
+Initialize local CA material on deployment-capable client:
 
 ```bash
-python3 client/tools/azt_tool.py state-get --host azt-mic.local
+python3 client/tools/azt_tool.py tls-ca-init
+python3 client/tools/azt_tool.py tls-ca-status
+```
+
+Issue/install device TLS certificate (admin-signed install payload):
+
+```bash
+python3 client/tools/azt_tool.py tls-cert-issue \
+  --host azt-mic.local \
+  --key client/tools/provisioned/admin-main/private_key.pem
+```
+
+`--cert-serial` is optional; if omitted it is auto-generated.
+
+Export CA public cert for verifier-only clients:
+
+```bash
+python3 client/tools/azt_tool.py tls-ca-export --out ca_public.pem
+```
+
+On another client, import CA public cert:
+
+```bash
+python3 client/tools/azt_tool.py tls-ca-import --in ca_public.pem
+```
+
+Use HTTPS transport in CLI/SDK:
+
+```bash
+# optional: AZT_SCHEME defaults to auto and prefers HTTPS when local TLS CA trust is present
+export AZT_SCHEME=https
+# optional override path; otherwise defaults to client/tools/pki/trusted_ca_cert.pem or ca_cert.pem
+export AZT_TLS_CA_CERT=client/tools/pki/trusted_ca_cert.pem
+```
+
+Port behavior:
+- API/control plaintext HTTP: `8080` (legacy/bootstrap)
+- API/control HTTPS: `8443` (after TLS cert install)
+- Stream endpoint remains plain HTTP: `8081`
+
+### 10) Quick validation
+
+```bash
+# API/control over HTTPS
+AZT_SCHEME=https AZT_TLS_CA_CERT=client/tools/pki/ca_cert.pem \
+python3 client/tools/azt_tool.py state-get --host azt-mic.local --port 8443
+
+# stream remains plain HTTP
 python3 client/tools/azt_tool.py stream-read --host azt-mic.local --seconds 2
 ```
 
@@ -342,6 +391,13 @@ Major command groups:
   - `certificate-issue`
   - `certificate-post`
   - `reboot-device`
+- **TLS (minimal CA workflow)**
+  - `tls-ca-init`
+  - `tls-ca-status`
+  - `tls-ca-export`
+  - `tls-ca-import`
+  - `tls-cert-issue`
+  - `tls-status`
 - **OTA**
   - `ota-bundle-create`
   - `ota-bundle-post`

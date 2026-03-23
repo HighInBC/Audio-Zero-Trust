@@ -9,10 +9,12 @@
 #include "azt_discovery.h"
 #include "azt_http_api.h"
 #include "azt_serial_control.h"
+#include "azt_https_server.h"
 
 namespace {
 
 static constexpr uint16_t kStreamPort = 8081;
+static constexpr uint16_t kApiTlsPort = 8443;
 
 azt::AppState g_state;
 WiFiServer g_api_server(azt::kHttpPort);
@@ -62,6 +64,7 @@ void setup() {
 
   g_api_server.begin();
   g_stream_server.begin();
+  bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, kApiTlsPort);
 
   xTaskCreatePinnedToCore(stream_server_task,
                           "azt_stream_server",
@@ -72,6 +75,11 @@ void setup() {
                           0);
 
   Serial.printf("AZT_HTTP api_port=%u stream_port=%u\n", azt::kHttpPort, kStreamPort);
+  if (https_ok) {
+    Serial.printf("AZT_HTTPS api_tls_port=%u\n", kApiTlsPort);
+  } else {
+    Serial.println("AZT_HTTPS disabled (no tls cert/key configured)");
+  }
 }
 
 void loop() {
