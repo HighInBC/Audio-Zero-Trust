@@ -154,7 +154,28 @@ def run(args: argparse.Namespace) -> int:
                             time.sleep(2.0)
 
                     if tls_result is None:
-                        raise RuntimeError(tls_bootstrap_error or "TLS bootstrap failed")
+                        err_text = str(tls_bootstrap_error or "TLS bootstrap failed")
+                        if "Connection refused" in err_text or "Errno 111" in err_text:
+                            verify_host_value = (f"{mdns_name}.local" if mdns_name else device_ip)
+                            https_base = base_url(host=verify_host_value, port=8443, scheme="https")
+                            http_targets = [
+                                f"{http_base}/api/v0/config/state",
+                                f"{http_base}/api/v0/tls/state",
+                                f"{http_base}/api/v0/tls/csr",
+                                f"{http_base}/api/v0/tls/cert",
+                            ]
+                            detail_lines = [
+                                "TLS bootstrap connection refused.",
+                                f"device_ip={device_ip}",
+                                f"verify_host={verify_host_value}",
+                                "http_targets=" + ", ".join(http_targets),
+                                f"https_verify_target={https_base}/api/v0/config/state",
+                            ]
+                            if tls_state_error:
+                                detail_lines.append(f"precheck_error={tls_state_error}")
+                            detail_lines.append(f"last_error={err_text}")
+                            raise RuntimeError(" | ".join(detail_lines))
+                        raise RuntimeError(err_text)
 
                     out_payload["tls_bootstrap"] = {
                         "attempted": True,
