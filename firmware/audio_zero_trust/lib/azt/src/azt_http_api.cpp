@@ -657,7 +657,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
     r.code = 200;
     r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
-    if (tls_set && !tls_was_configured) {
+    if (tls_set) {
       r.reboot_after_response = true;
     }
     return r;
@@ -757,7 +757,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   r.code = 200;
   r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
-  if (tls_set && !tls_was_configured) {
+  if (tls_set) {
     r.reboot_after_response = true;
   }
   return r;

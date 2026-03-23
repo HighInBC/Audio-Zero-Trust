@@ -131,27 +131,32 @@ def configure_device(
         }
 
     tls_material = None
+    tls_deferred_until_ip = False
     if bool(tls_bootstrap):
         san_hosts: list[str] = []
-        # Prefer including concrete device IP in SAN when available.
-        if ip and str(ip).strip():
-            san_hosts.append(str(ip).strip())
+        # Include IP SAN when known; otherwise defer TLS apply to phase-2 after IP discovery.
+        if device_ip and str(device_ip).strip():
+            san_hosts.append(str(device_ip).strip())
         if mdns_hostname:
             san_hosts.append(mdns_hostname)
             if not mdns_hostname.endswith(".local"):
                 san_hosts.append(f"{mdns_hostname}.local")
-        tls_material = tls_material_generate(
-            cert_serial="",
-            valid_days=int(max(1, tls_valid_days)),
-            san_hosts=san_hosts,
-        )
-        unsigned_cfg["tls"] = {
-            "tls_certificate_serial": tls_material["tls_certificate_serial"],
-            "tls_server_certificate_pem": tls_material["tls_server_certificate_pem"],
-            "tls_server_private_key_pem": tls_material["tls_server_private_key_pem"],
-            "tls_ca_certificate_pem": tls_material["tls_ca_certificate_pem"],
-            "tls_san_hosts": tls_material.get("san_hosts") or [],
-        }
+
+        if not san_hosts or (device_ip is None):
+            tls_deferred_until_ip = True
+        else:
+            tls_material = tls_material_generate(
+                cert_serial="",
+                valid_days=int(max(1, tls_valid_days)),
+                san_hosts=san_hosts,
+            )
+            unsigned_cfg["tls"] = {
+                "tls_certificate_serial": tls_material["tls_certificate_serial"],
+                "tls_server_certificate_pem": tls_material["tls_server_certificate_pem"],
+                "tls_server_private_key_pem": tls_material["tls_server_private_key_pem"],
+                "tls_ca_certificate_pem": tls_material["tls_ca_certificate_pem"],
+                "tls_san_hosts": tls_material.get("san_hosts") or [],
+            }
 
     if ota_version_code is not None:
         unsigned_cfg["ota_version_code"] = int(ota_version_code)
@@ -201,6 +206,7 @@ def configure_device(
         "mdns_enabled": bool(mdns_enabled),
         "mdns_hostname": mdns_hostname,
         "tls_bootstrap_requested": bool(tls_bootstrap),
+        "tls_deferred_until_ip": bool(tls_deferred_until_ip),
     }
     if tls_material:
         common["tls_certificate_serial"] = tls_material.get("tls_certificate_serial")
@@ -242,6 +248,43 @@ def configure_device(
                 "postcheck_error": "IP_NOT_DETECTED_AFTER_SERIAL_BOOTSTRAP",
                 "detail": "device IP not detected from serial output; provide --ip for deterministic postcheck",
             }
+
+        # Phase 2: if TLS was deferred until IP was known, issue TLS material now and apply signed config again.
+        if bool(tls_bootstrap) and tls_deferred_until_ip:
+            san_hosts: list[str] = [str(device_ip)]
+            if mdns_hostname:
+                san_hosts.append(mdns_hostname)
+                if not mdns_hostname.endswith(".local"):
+                    san_hosts.append(f"{mdns_hostname}.local")
+            tls_material = tls_material_generate(
+                cert_serial="",
+                valid_days=int(max(1, tls_valid_days)),
+                san_hosts=san_hosts,
+            )
+            unsigned_cfg["tls"] = {
+                "tls_certificate_serial": tls_material["tls_certificate_serial"],
+                "tls_server_certificate_pem": tls_material["tls_server_certificate_pem"],
+                "tls_server_private_key_pem": tls_material["tls_server_private_key_pem"],
+                "tls_ca_certificate_pem": tls_material["tls_ca_certificate_pem"],
+                "tls_san_hosts": tls_material.get("san_hosts") or [],
+            }
+            signed_phase2 = make_signed_config(unsigned_cfg, priv_pem, fp)
+            (admin_dir / "config_signed.json").write_text(json.dumps(signed_phase2, indent=2))
+            ok_phase2, ip_phase2 = serial_apply_signed_config(
+                port,
+                signed_phase2,
+                baud=baud,
+                timeout_s=max(20, int(ip_timeout)),
+            )
+            if not ok_phase2:
+                return 10, False, "SERIAL_TLS_PHASE2_FAILED", {**common, "ip": device_ip}
+            if ip_phase2:
+                device_ip = ip_phase2
+                common["ip"] = device_ip
+                common["ip_detected"] = ip_phase2
+            common["tls_certificate_serial"] = tls_material.get("tls_certificate_serial")
+            common["tls_ca_fingerprint_hex"] = tls_material.get("ca_fingerprint_hex")
+            common["tls_san_hosts"] = tls_material.get("san_hosts") or []
 
         time.sleep(1.0)
         # Post-serial liveness check should not depend on AZT_SCHEME auto-selection.
