@@ -111,6 +111,20 @@ static String parse_query_param(const String& path, const char* key) {
   return v;
 }
 
+static bool is_valid_attestation_nonce(const String& nonce) {
+  if (nonce.length() < 8 || nonce.length() > 128) return false;
+  for (size_t i = 0; i < nonce.length(); ++i) {
+    char c = nonce[i];
+    bool ok =
+        (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') ||
+        c == '-' || c == '_' || c == '.';
+    if (!ok) return false;
+  }
+  return true;
+}
+
 
 static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETKEYBYTES]) {
   Preferences p;
@@ -1071,9 +1085,9 @@ HttpDispatchResult dispatch_request(const String& method,
 
   if (method == "GET" && path.startsWith("/api/v0/device/attestation")) {
     String nonce = parse_query_param(path, "nonce");
-    if (nonce.length() < 8 || nonce.length() > 256) {
+    if (!is_valid_attestation_nonce(nonce)) {
       r.code = 400;
-      r.body = "{\"ok\":false,\"error\":\"ERR_ATTEST_NONCE\",\"detail\":\"nonce required (8..256 chars)\"}";
+      r.body = "{\"ok\":false,\"error\":\"ERR_ATTEST_NONCE\",\"detail\":\"nonce required (8..128 chars, [A-Za-z0-9._-])\"}";
       r.content_type = "application/json";
       return r;
     }
