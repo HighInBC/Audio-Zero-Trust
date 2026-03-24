@@ -134,23 +134,45 @@ def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: in
     return ok, {"status": status, "location": location}
 
 
-def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -> tuple[bool, dict]:
+def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{b}/stream"
     total = 0
     import time
+    from pathlib import Path
+
+    out_file = None
+    resolved_out = ""
+    if not probe and out_path:
+      p = Path(out_path)
+      p.parent.mkdir(parents=True, exist_ok=True)
+      out_file = p.open("wb")
+      resolved_out = str(p)
+
     r = requests.get(url, stream=True, timeout=timeout, verify=requests_verify_for_url(url))
     try:
         start = time.time()
         for chunk in r.iter_content(chunk_size=4096):
             if chunk:
                 total += len(chunk)
+                if out_file is not None:
+                    out_file.write(chunk)
             if seconds is not None and (time.time() - start >= seconds):
                 break
     finally:
         r.close()
+        if out_file is not None:
+            out_file.close()
     elapsed = time.time() - start
-    return total > 0, {"bytes": total, "seconds": elapsed, "requested_seconds": seconds}
+    payload = {"bytes": total, "seconds": elapsed, "requested_seconds": seconds}
+    if resolved_out:
+        payload["out"] = resolved_out
+    return total > 0, payload
+
+
+def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -> tuple[bool, dict]:
+    # Back-compat wrapper for older callers.
+    return stream_read(host=host, port=port, seconds=seconds, timeout=timeout, out_path=None, probe=True)
 
 
 def mdns_fqdn_get(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:

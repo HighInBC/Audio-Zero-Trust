@@ -356,11 +356,13 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
 
     sprobe = sub.add_parser(
         "stream-read",
-        help="Read stream data and report bytes (omit --seconds to run continuously)",
+        help="Read stream data; require either --out (save AZT file) or --probe (bytes-only)",
     )
     sprobe.add_argument("--host", required=True, help="Device host/IP")
     sprobe.add_argument("--port", type=int, default=8080, help="Device API port")
     sprobe.add_argument("--seconds", type=float, default=None, help="Optional read duration seconds; omit to run indefinitely")
+    sprobe.add_argument("--out", dest="out_path", default="", help="Output AZT file path")
+    sprobe.add_argument("--probe", action="store_true", help="Probe mode: do not save file, only report bytes")
     sprobe.add_argument("--timeout", type=int, default=10, help="HTTP timeout seconds")
     sprobe.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sprobe.set_defaults(func=handlers.cmd_stream_probe, command_name="stream-read")
