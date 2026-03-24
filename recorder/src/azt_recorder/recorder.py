@@ -297,16 +297,27 @@ class RecordingSession:
         print(f"[record] ROLLOVER device={self.ad.device_name} file={out_path}")
 
     def _stream_to_file(self, req: urllib.request.Request, out_path: Path, deadline_monotonic: float) -> None:
-        with urllib.request.urlopen(req, timeout=30) as resp, open(out_path, "wb") as f:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             # Enforce authorization at stream start by verifying outer-header signature
             # and binding to the already authorized device signing fingerprint.
             prefix = _preflight_stream_header(resp, self.ad.device_key_fingerprint_hex)
-            f.write(prefix)
 
-            while True:
-                if time.monotonic() >= deadline_monotonic:
-                    return
-                chunk = resp.read(4096)
-                if not chunk:
-                    return
-                f.write(chunk)
+            # RAM-gate file creation: do not create a recording file until we know
+            # the stream has produced at least one payload chunk to keep.
+            if time.monotonic() >= deadline_monotonic:
+                return
+            first_chunk = resp.read(4096)
+            if not first_chunk:
+                return
+
+            with open(out_path, "wb") as f:
+                f.write(prefix)
+                f.write(first_chunk)
+
+                while True:
+                    if time.monotonic() >= deadline_monotonic:
+                        return
+                    chunk = resp.read(4096)
+                    if not chunk:
+                        return
+                    f.write(chunk)
