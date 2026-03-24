@@ -10,6 +10,9 @@ constexpr int kSampleRate = 16000;
 constexpr int kSeconds = 1;
 constexpr size_t kBytesTarget = static_cast<size_t>(kSampleRate * kSeconds * 2);
 
+uint8_t g_mic_gain = 1;   // ES8311 mic gain enum-ish register value
+uint8_t g_adc_gain = 255; // ES8311 ADC gain register
+
 bool i2c_ping(uint8_t addr) {
   Wire.beginTransmission(addr);
   return Wire.endTransmission() == 0;
@@ -20,6 +23,11 @@ bool i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t val) {
   Wire.write(reg);
   Wire.write(val);
   return Wire.endTransmission() == 0;
+}
+
+void es8311_apply_gains() {
+  i2c_write_reg(kEs8311Addr, 0x16, g_mic_gain);
+  i2c_write_reg(kEs8311Addr, 0x17, g_adc_gain);
 }
 
 void es8311_init_minimal() {
@@ -46,8 +54,7 @@ void es8311_init_minimal() {
 
   // Analog mic path + gains
   i2c_write_reg(kEs8311Addr, 0x14, 0x1A);  // analog mic, max PGA
-  i2c_write_reg(kEs8311Addr, 0x16, 0x01);  // 6dB mic gain enum value
-  i2c_write_reg(kEs8311Addr, 0x17, 0xFF);  // ADC gain
+  es8311_apply_gains();
 
   i2c_write_reg(kEs8311Addr, 0x0D, 0x01);
   i2c_write_reg(kEs8311Addr, 0x0E, 0x02);
@@ -158,12 +165,41 @@ void setup() {
 }
 
 void loop() {
-  static uint32_t last_ms = 0;
-  const uint32_t now = millis();
-  if (now - last_ms < 8000) {
-    delay(50);
-    return;
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    cmd.toUpperCase();
+
+    if (cmd == "CAPTURE") {
+      stream_pcm_capture(g_use_echo_base ? "echo_base" : "internal_pdm");
+      return;
+    }
+
+    if (g_use_echo_base && cmd.startsWith("MICGAIN ")) {
+      int v = cmd.substring(8).toInt();
+      if (v < 0) v = 0;
+      if (v > 255) v = 255;
+      g_mic_gain = static_cast<uint8_t>(v);
+      es8311_apply_gains();
+      Serial.printf("PCM_CFG micgain=%u adcgain=%u\n", g_mic_gain, g_adc_gain);
+      return;
+    }
+
+    if (g_use_echo_base && cmd.startsWith("ADCGAIN ")) {
+      int v = cmd.substring(8).toInt();
+      if (v < 0) v = 0;
+      if (v > 255) v = 255;
+      g_adc_gain = static_cast<uint8_t>(v);
+      es8311_apply_gains();
+      Serial.printf("PCM_CFG micgain=%u adcgain=%u\n", g_mic_gain, g_adc_gain);
+      return;
+    }
+
+    if (cmd == "STATUS") {
+      Serial.printf("PCM_STATUS source=%s micgain=%u adcgain=%u\n", g_use_echo_base ? "echo_base" : "internal_pdm", g_mic_gain, g_adc_gain);
+      return;
+    }
   }
-  last_ms = now;
-  stream_pcm_capture(g_use_echo_base ? "echo_base" : "internal_pdm");
+
+  delay(20);
 }

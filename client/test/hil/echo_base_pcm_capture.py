@@ -82,6 +82,8 @@ def main() -> int:
     ap.add_argument("--port", default="/dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--out", default="/tmp/echo_base_probe.wav")
+    ap.add_argument("--micgain", type=int, default=None)
+    ap.add_argument("--adcgain", type=int, default=None)
     args = ap.parse_args()
 
     out_path = Path(args.out)
@@ -96,6 +98,15 @@ def main() -> int:
     ser = serial.Serial(args.port, args.baud, timeout=0.3)
     ser.reset_input_buffer()
     try:
+        if args.micgain is not None:
+            ser.write(f"MICGAIN {args.micgain}\n".encode())
+            time.sleep(0.05)
+        if args.adcgain is not None:
+            ser.write(f"ADCGAIN {args.adcgain}\n".encode())
+            time.sleep(0.05)
+
+        ser.write(b"CAPTURE\n")
+
         deadline = time.time() + 40.0
         while time.time() < deadline:
             line = read_line(ser, timeout_s=5.0)
