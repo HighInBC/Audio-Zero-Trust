@@ -60,7 +60,7 @@ void setup() {
   azt::setup_time_sync(g_state);
   xSemaphoreGive(g_state_mu);
 
-  azt::setup_i2s_pdm_mic();
+  azt::setup_audio_input(g_state);
 
   g_api_server.begin();
   g_stream_server.begin();

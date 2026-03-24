@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <Wire.h>
 #include <time.h>
 #include <esp_sntp.h>
 #include <ESPmDNS.h>
@@ -98,7 +99,46 @@ SntpStartAction choose_sntp_start_action(bool already_enabled) {
   return already_enabled ? SntpStartAction::kRestart : SntpStartAction::kInit;
 }
 
-void setup_i2s_pdm_mic() {
+static bool i2c_ping_addr(uint8_t addr) {
+  Wire.beginTransmission(addr);
+  return Wire.endTransmission() == 0;
+}
+
+static bool i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  Wire.write(val);
+  return Wire.endTransmission() == 0;
+}
+
+static void setup_i2s_echo_base_std() {
+  i2s_config_t cfg{};
+  cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX);
+  cfg.sample_rate = 16000;
+  cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+  cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+  cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+  cfg.dma_buf_count = 8;
+  cfg.dma_buf_len = 256;
+  cfg.use_apll = false;
+  cfg.tx_desc_auto_clear = false;
+  cfg.fixed_mclk = 0;
+
+  i2s_pin_config_t pins{};
+  // Atom Echo mapping from M5 Echo Base reference
+  pins.bck_io_num = GPIO_NUM_33;
+  pins.ws_io_num = GPIO_NUM_19;
+  pins.data_out_num = GPIO_NUM_22;
+  pins.data_in_num = GPIO_NUM_23;
+
+  i2s_driver_install(kI2SPort, &cfg, 0, nullptr);
+  i2s_set_pin(kI2SPort, &pins);
+  i2s_zero_dma_buffer(kI2SPort);
+  i2s_start(kI2SPort);
+}
+
+static void setup_i2s_internal_pdm() {
   i2s_config_t cfg{};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM);
   cfg.sample_rate = 16000;
@@ -121,6 +161,58 @@ void setup_i2s_pdm_mic() {
   i2s_driver_install(kI2SPort, &cfg, 0, nullptr);
   i2s_set_pin(kI2SPort, &pins);
   i2s_zero_dma_buffer(kI2SPort);
+}
+
+static void es8311_init_for_echo_base(const AppState& state) {
+  const uint8_t a = 0x18;
+  i2c_write_reg(a, 0x00, 0x1F);
+  delay(20);
+  i2c_write_reg(a, 0x00, 0x00);
+  i2c_write_reg(a, 0x00, 0x80);
+  i2c_write_reg(a, 0x01, 0xBF);
+  i2c_write_reg(a, 0x02, 0x10);
+  i2c_write_reg(a, 0x03, 0x10);
+  i2c_write_reg(a, 0x04, 0x10);
+  i2c_write_reg(a, 0x05, 0x00);
+  i2c_write_reg(a, 0x06, 0x03);
+  i2c_write_reg(a, 0x07, 0x00);
+  i2c_write_reg(a, 0x08, 0xFF);
+  i2c_write_reg(a, 0x09, 0x10);
+  i2c_write_reg(a, 0x0A, 0x10);
+  i2c_write_reg(a, 0x14, 0x1A);
+  i2c_write_reg(a, 0x16, state.audio_preamp_gain);
+  i2c_write_reg(a, 0x17, state.audio_adc_gain);
+  i2c_write_reg(a, 0x0D, 0x01);
+  i2c_write_reg(a, 0x0E, 0x02);
+  i2c_write_reg(a, 0x12, 0x00);
+  i2c_write_reg(a, 0x13, 0x10);
+  i2c_write_reg(a, 0x1C, 0x6A);
+  i2c_write_reg(a, 0x37, 0x08);
+}
+
+void setup_audio_input(AppState& state) {
+  // Probe Echo Base (ES8311 on Atom Echo I2C pins).
+  Wire.begin(25, 21, 100000U);
+  delay(10);
+  const bool has_echo = i2c_ping_addr(0x18);
+  state.audio_echo_base_detected = has_echo;
+
+  if (has_echo) {
+    es8311_init_for_echo_base(state);
+    setup_i2s_echo_base_std();
+    state.audio_input_source = "echo_base";
+    Serial.printf("AZT_AUDIO source=echo_base preamp=%u adc=%u\n", state.audio_preamp_gain, state.audio_adc_gain);
+    return;
+  }
+
+  setup_i2s_internal_pdm();
+  state.audio_input_source = "internal_pdm";
+  Serial.println("AZT_AUDIO source=internal_pdm");
+}
+
+void setup_i2s_pdm_mic() {
+  // Backward-compatible wrapper.
+  setup_i2s_internal_pdm();
 }
 
 static String sanitize_mdns_hostname(const String& in) {
