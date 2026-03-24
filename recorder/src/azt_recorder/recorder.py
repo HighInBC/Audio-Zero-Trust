@@ -5,7 +5,7 @@ import base64
 import json
 import hashlib
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import io
 import os
@@ -140,24 +140,47 @@ def is_file_in_use(file_path: Path) -> bool:
 
 
 def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 60) -> list[Path]:
-    # Scan the full recordings tree recursively from output_dir (YYYY/MM/DD/** included).
+    # Scale-aware scan:
+    # - scope to recent date partitions (today + yesterday), where new rollovers occur
+    # - pair files by basename in one pass (.azt vs .azt.timestamp.tar)
+    # - run expensive checks (stat/in-use) only on unresolved candidates
     if not output_dir.exists():
         return []
 
     now = time.time()
+    days = [datetime.now(UTC).date(), (datetime.now(UTC) - timedelta(days=1)).date()]
+
     out: list[Path] = []
-    for p in output_dir.rglob("*.azt"):
-        try:
-            st = p.stat()
-        except FileNotFoundError:
+    for day in days:
+        day_dir = output_dir / day.strftime("%Y") / day.strftime("%m") / day.strftime("%d")
+        if not day_dir.exists():
             continue
-        if (now - st.st_mtime) < older_than_seconds:
-            continue
-        if timestamp_tar_path(p).exists():
-            continue
-        if is_file_in_use(p):
-            continue
-        out.append(p)
+
+        azt_files: dict[str, Path] = {}
+        ts_done: set[str] = set()
+
+        for p in day_dir.rglob("*"):
+            if not p.is_file():
+                continue
+            name = p.name
+            if name.endswith(".azt"):
+                azt_files[name] = p
+            elif name.endswith(".azt.timestamp.tar"):
+                ts_done.add(name[: -len(".timestamp.tar")])
+
+        for name, p in azt_files.items():
+            if name in ts_done:
+                continue
+            try:
+                st = p.stat()
+            except FileNotFoundError:
+                continue
+            if (now - st.st_mtime) < older_than_seconds:
+                continue
+            if is_file_in_use(p):
+                continue
+            out.append(p)
+
     out.sort(key=lambda x: x.stat().st_mtime)
     return out
 
