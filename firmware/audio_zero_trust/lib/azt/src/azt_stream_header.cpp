@@ -30,9 +30,9 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"audio_tag_len\":16,";
   dec_header += "\"audio_aad_mode\":\"none\",";
   dec_header += "\"audio_format\":\"pcm_s16le\",";
-  dec_header += "\"sample_rate_hz\":16000,";
-  dec_header += "\"channels\":1,";
-  dec_header += "\"sample_width_bytes\":2,";
+  dec_header += "\"sample_rate_hz\":" + String(state.audio_sample_rate_hz) + ",";
+  dec_header += "\"channels\":" + String(state.audio_channels) + ",";
+  dec_header += "\"sample_width_bytes\":" + String(state.audio_sample_width_bytes) + ",";
   dec_header += "\"audio_input_source\":\"" + state.audio_input_source + "\",";
   if (state.audio_input_source == "echo_base") {
     dec_header += "\"audio_preamp_gain\":" + String(state.audio_preamp_gain) + ",";

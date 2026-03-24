@@ -113,10 +113,10 @@ static bool i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t val) {
 
 static void setup_i2s_echo_base_std() {
   i2s_config_t cfg{};
-  cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_RX);
+  cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX);
   cfg.sample_rate = 16000;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
-  cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+  cfg.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
   cfg.dma_buf_count = 8;
@@ -201,13 +201,19 @@ void setup_audio_input(AppState& state) {
     es8311_init_for_echo_base(state);
     setup_i2s_echo_base_std();
     state.audio_input_source = "echo_base";
-    Serial.printf("AZT_AUDIO source=echo_base preamp=%u adc=%u\n", state.audio_preamp_gain, state.audio_adc_gain);
+    state.audio_sample_rate_hz = 16000;
+    state.audio_channels = 1;
+    state.audio_sample_width_bytes = 2;
+    Serial.printf("AZT_AUDIO source=echo_base preamp=%u adc=%u rate=%lu ch=%u sw=%u\n", state.audio_preamp_gain, state.audio_adc_gain, static_cast<unsigned long>(state.audio_sample_rate_hz), static_cast<unsigned>(state.audio_channels), static_cast<unsigned>(state.audio_sample_width_bytes));
     return;
   }
 
   setup_i2s_internal_pdm();
   state.audio_input_source = "internal_pdm";
-  Serial.println("AZT_AUDIO source=internal_pdm");
+  state.audio_sample_rate_hz = 16000;
+  state.audio_channels = 1;
+  state.audio_sample_width_bytes = 2;
+  Serial.printf("AZT_AUDIO source=internal_pdm rate=%lu ch=%u sw=%u\n", static_cast<unsigned long>(state.audio_sample_rate_hz), static_cast<unsigned>(state.audio_channels), static_cast<unsigned>(state.audio_sample_width_bytes));
 }
 
 void setup_i2s_pdm_mic() {
