@@ -37,6 +37,15 @@ def run(args: argparse.Namespace) -> int:
         ota_signer_path = (getattr(args, "ota_signer_public_key_pem", "") or "").strip()
         if ota_signer_path:
             ota_signer_pem = Path(ota_signer_path).read_text(encoding="utf-8")
+        audio_preamp_gain = getattr(args, "audio_preamp_gain", None)
+        audio_adc_gain = getattr(args, "audio_adc_gain", None)
+        if audio_preamp_gain is not None and not (0 <= int(audio_preamp_gain) <= 255):
+            emit_envelope(command="configure-device", ok=False, error="INVALID_AUDIO_PREAMP_GAIN", payload={"detail": "--audio-preamp-gain must be 0..255"}, as_json=bool(getattr(args, "as_json", False)))
+            return 1
+        if audio_adc_gain is not None and not (0 <= int(audio_adc_gain) <= 255):
+            emit_envelope(command="configure-device", ok=False, error="INVALID_AUDIO_ADC_GAIN", payload={"detail": "--audio-adc-gain must be 0..255"}, as_json=bool(getattr(args, "as_json", False)))
+            return 1
+
         code, ok, err, payload = configure_device(
             admin_creds_dir=admin_dir,
             recorder_creds_dir=recorder_dir,
@@ -59,6 +68,8 @@ def run(args: argparse.Namespace) -> int:
             ota_signer_clear=bool(getattr(args, "ota_signer_clear", False)),
             mdns_enabled=bool(getattr(args, "mdns_enabled", False)),
             mdns_hostname=(getattr(args, "mdns_hostname", "") or ""),
+            audio_preamp_gain=(int(audio_preamp_gain) if audio_preamp_gain is not None else None),
+            audio_adc_gain=(int(audio_adc_gain) if audio_adc_gain is not None else None),
             tls_bootstrap=bool(getattr(args, "tls_bootstrap", True)),
             tls_valid_days=int(getattr(args, "tls_valid_days", 180)),
         )
