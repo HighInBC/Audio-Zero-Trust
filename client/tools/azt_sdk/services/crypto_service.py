@@ -14,10 +14,10 @@ from tools.azt_client.crypto import (
 CLIENT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def create_signing_credentials(*, identity: str | None, identity_prefix: str, password_protected: bool = False) -> dict:
+def create_signing_credentials(*, identity: str | None, identity_prefix: str, out_dir: str | None = None, password_protected: bool = False) -> dict:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     ident = identity or f"{identity_prefix}-{stamp}"
-    out_dir = CLIENT_ROOT / "tools" / "provisioned" / ident
+    out_dir = Path(out_dir) if out_dir else (CLIENT_ROOT / "tools" / "provisioned" / ident)
     _pub_b64, fp, key_path = gen_ed25519_keypair_with_fingerprint(out_dir, password_protected=password_protected)
     return {
         "identity": ident,
@@ -28,10 +28,10 @@ def create_signing_credentials(*, identity: str | None, identity_prefix: str, pa
     }
 
 
-def create_decoding_credentials(*, identity: str | None, identity_prefix: str, password_protected: bool = False) -> dict:
+def create_decoding_credentials(*, identity: str | None, identity_prefix: str, out_dir: str | None = None, password_protected: bool = False) -> dict:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     ident = identity or f"{identity_prefix}-{stamp}"
-    out_dir = CLIENT_ROOT / "tools" / "provisioned" / ident
+    out_dir = Path(out_dir) if out_dir else (CLIENT_ROOT / "tools" / "provisioned" / ident)
     _pub_pem, fp, key_path = gen_rsa_keypair_with_fingerprint(out_dir, password_protected=password_protected)
     return {
         "identity": ident,

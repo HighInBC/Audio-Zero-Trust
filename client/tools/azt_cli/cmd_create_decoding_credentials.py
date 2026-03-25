@@ -6,7 +6,7 @@ from tools.azt_sdk.services.crypto_service import create_decoding_credentials
 
 
 def run(args: argparse.Namespace) -> int:
-    payload = create_decoding_credentials(identity=args.identity, identity_prefix=args.identity_prefix, password_protected=bool(getattr(args, "password", False)))
+    payload = create_decoding_credentials(identity=args.identity, identity_prefix=args.identity_prefix, out_dir=(getattr(args, "out_dir", "") or "").strip() or None, password_protected=bool(getattr(args, "password", False)))
     emit_envelope(
         command="create-decoding-credentials",
         ok=True,
