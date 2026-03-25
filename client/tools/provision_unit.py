@@ -171,12 +171,12 @@ def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int =
     return None
 
 
-def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 115200, timeout_s: int = 75) -> tuple[bool, str | None]:
+def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 115200, timeout_s: int = 75) -> tuple[bool, str | None, str | None]:
     try:
         import serial  # type: ignore
     except Exception:
         print({'ok': False, 'error': 'PYSERIAL_MISSING', 'detail': 'install pyserial in venv'})
-        return False, None
+        return False, None, 'PYSERIAL_MISSING'
 
     blob = json.dumps(signed_payload, separators=(",", ":")).encode('utf-8')
     ip_re = re.compile(r'AZT_IP=(\d+\.\d+\.\d+\.\d+)')
@@ -210,12 +210,12 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
                     begin_ok = True
                     break
                 if line.startswith('AZT_CONFIG_BEGIN_LEN ERR'):
-                    return False, device_ip
+                    return False, device_ip, line
             if begin_ok:
                 break
 
         if not begin_ok:
-            return False, device_ip
+            return False, device_ip, 'AZT_CONFIG_BEGIN_LEN_TIMEOUT'
 
         step = 128
         for i in range(0, len(blob), step):
@@ -225,12 +225,15 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
         apply_ok = False
         saw_reboot = False
         saw_post_reboot_service_banner = False
+        last_apply_line: str | None = None
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             line = ser.readline().decode('utf-8', errors='replace').strip()
             if not line:
                 continue
             print({'serial': line})
+            if line.startswith('AZT_CONFIG_APPLY '):
+                last_apply_line = line
             if 'AZT_CONFIG_APPLY code=200' in line:
                 apply_ok = True
             if line.startswith('AZT_REBOOT '):
@@ -250,7 +253,9 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
                 if not saw_reboot or saw_post_reboot_service_banner:
                     break
 
-        return apply_ok, device_ip
+        if not apply_ok:
+            return False, device_ip, (last_apply_line or 'AZT_CONFIG_APPLY_TIMEOUT')
+        return True, device_ip, (last_apply_line or None)
 
 
 def main() -> int:
@@ -332,9 +337,9 @@ def main() -> int:
             return 9
 
         print({'info': 'attempting serial bootstrap via AZT_CONFIG_BEGIN_LEN'})
-        ok_serial, ip_from_serial = serial_apply_signed_config(args.port, signed, baud=args.baud)
+        ok_serial, ip_from_serial, serial_detail = serial_apply_signed_config(args.port, signed, baud=args.baud)
         if not ok_serial:
-            print({'ok': False, 'error': 'SERIAL_BOOTSTRAP_FAILED', 'detail': 'serial config apply did not complete'})
+            print({'ok': False, 'error': 'SERIAL_BOOTSTRAP_FAILED', 'detail': serial_detail or 'serial config apply did not complete'})
             return 7
         if ip_from_serial:
             device_ip = ip_from_serial

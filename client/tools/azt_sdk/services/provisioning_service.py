@@ -240,14 +240,14 @@ def configure_device(
                 "detail": ("serial bootstrap required for OTA floor controls" if serial_required else "HTTP state unreachable and serial bootstrap not allowed"),
             }
 
-        ok_serial, ip_from_serial = serial_apply_signed_config(
+        ok_serial, ip_from_serial, serial_detail = serial_apply_signed_config(
             port,
             signed,
             baud=baud,
             timeout_s=max(20, int(ip_timeout)),
         )
         if not ok_serial:
-            return 7, False, "SERIAL_BOOTSTRAP_FAILED", common
+            return 7, False, "SERIAL_BOOTSTRAP_FAILED", {**common, "serial_detail": serial_detail}
 
         if ip_from_serial:
             device_ip = ip_from_serial
@@ -288,9 +288,10 @@ def configure_device(
             (admin_dir / "config_signed.json").write_text(json.dumps(signed_phase2, indent=2))
             ok_phase2 = False
             ip_phase2 = None
+            phase2_detail = None
             phase2_attempts = 3
             for i in range(phase2_attempts):
-                ok_phase2, ip_phase2 = serial_apply_signed_config(
+                ok_phase2, ip_phase2, phase2_detail = serial_apply_signed_config(
                     port,
                     signed_phase2,
                     baud=baud,
@@ -306,6 +307,7 @@ def configure_device(
                     **common,
                     "ip": device_ip,
                     "phase2_attempts": phase2_attempts,
+                    "serial_detail": phase2_detail,
                 }
             if ip_phase2:
                 device_ip = ip_phase2
