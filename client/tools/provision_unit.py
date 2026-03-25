@@ -151,10 +151,8 @@ def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int =
 
     end = time.time() + timeout_s
     with serial.Serial(port, baudrate=baud, timeout=0.25) as ser:
-        # Nudge board; many ESP32 boards print boot/Wi-Fi lines after DTR reset.
-        ser.dtr = False
-        ser.rts = False
-        time.sleep(0.05)
+        # Avoid control-line reset pulses here; on Atom EchoS3R these can force
+        # ROM download mode via companion reset logic.
         ser.reset_input_buffer()
         while time.time() < end:
             line = ser.readline().decode('utf-8', errors='replace').strip()
@@ -185,35 +183,36 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
     wifi_ip_re = re.compile(r'AZT_WIFI_CONNECTED.*\bip=(\d+\.\d+\.\d+\.\d+)')
 
     with serial.Serial(port, baudrate=baud, timeout=0.25) as ser:
-        # Reset + settle.
-        ser.dtr = False
-        ser.rts = True
-        time.sleep(0.12)
-        ser.rts = False
-        time.sleep(0.6)
+        # Do not pulse RTS/DTR: EchoS3R can enter ROM downloader via reset logic.
         ser.reset_input_buffer()
 
         ser.write(f'AZT_CONFIG_BEGIN_LEN {len(blob)}\n'.encode('utf-8'))
 
         begin_ok = False
         device_ip: str | None = None
-        t_begin = time.time() + 5
-        while time.time() < t_begin:
-            line = ser.readline().decode('utf-8', errors='replace').strip()
-            if not line:
-                continue
-            print({'serial': line})
-            m = ip_re.search(line)
-            if m:
-                device_ip = m.group(1)
-            m2 = wifi_ip_re.search(line)
-            if m2:
-                device_ip = m2.group(1)
-            if line.startswith('AZT_CONFIG_BEGIN_LEN OK'):
-                begin_ok = True
+
+        for attempt in range(3):
+            if attempt > 0:
+                ser.write(f'AZT_CONFIG_BEGIN_LEN {len(blob)}\n'.encode('utf-8'))
+            t_begin = time.time() + 4
+            while time.time() < t_begin:
+                line = ser.readline().decode('utf-8', errors='replace').strip()
+                if not line:
+                    continue
+                print({'serial': line})
+                m = ip_re.search(line)
+                if m:
+                    device_ip = m.group(1)
+                m2 = wifi_ip_re.search(line)
+                if m2:
+                    device_ip = m2.group(1)
+                if line.startswith('AZT_CONFIG_BEGIN_LEN OK'):
+                    begin_ok = True
+                    break
+                if line.startswith('AZT_CONFIG_BEGIN_LEN ERR'):
+                    return False, device_ip
+            if begin_ok:
                 break
-            if line.startswith('AZT_CONFIG_BEGIN_LEN ERR'):
-                return False, device_ip
 
         if not begin_ok:
             return False, device_ip
