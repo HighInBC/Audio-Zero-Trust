@@ -1,13 +1,82 @@
 from __future__ import annotations
 
 import base64
+import getpass
 import hashlib
+import json
+import os
 from pathlib import Path
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ed25519
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
-def gen_rsa_keypair_with_fingerprint(out_dir: Path) -> tuple[str, str, Path]:
+def _prompt_password_twice() -> str:
+    p1 = getpass.getpass("Enter private key password: ")
+    p2 = getpass.getpass("Re-enter private key password: ")
+    if p1 != p2:
+        raise ValueError("passwords do not match")
+    if not p1:
+        raise ValueError("password must not be empty")
+    return p1
+
+
+def _derive_wrap_key(password: str, salt: bytes, iterations: int) -> bytes:
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=iterations)
+    return kdf.derive(password.encode("utf-8"))
+
+
+def wrap_private_key_pem(priv_pem: bytes, *, password: str) -> bytes:
+    salt = os.urandom(16)
+    nonce = os.urandom(12)
+    iterations = 200_000
+    key = _derive_wrap_key(password, salt, iterations)
+    ct = AESGCM(key).encrypt(nonce, priv_pem, None)
+    obj = {
+        "schema": "azt.private_key_wrap.v1",
+        "kdf": "pbkdf2-hmac-sha256",
+        "iterations": iterations,
+        "salt_b64": base64.b64encode(salt).decode("ascii"),
+        "cipher": "aes-256-gcm",
+        "nonce_b64": base64.b64encode(nonce).decode("ascii"),
+        "wrapped_key_b64": base64.b64encode(ct).decode("ascii"),
+        "key_format": "pem",
+    }
+    return (json.dumps(obj, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def _unwrap_if_wrapped(data: bytes, *, purpose: str = "private key") -> bytes:
+    try:
+        obj = json.loads(data.decode("utf-8"))
+    except Exception:
+        return data
+    if not isinstance(obj, dict) or obj.get("schema") != "azt.private_key_wrap.v1":
+        return data
+    salt = base64.b64decode(obj["salt_b64"])
+    nonce = base64.b64decode(obj["nonce_b64"])
+    ct = base64.b64decode(obj["wrapped_key_b64"])
+    iterations = int(obj.get("iterations", 200000))
+    pw = getpass.getpass(f"Password for {purpose}: ")
+    key = _derive_wrap_key(pw, salt, iterations)
+    try:
+        return AESGCM(key).decrypt(nonce, ct, None)
+    except Exception as e:
+        raise ValueError("invalid password or wrapped key data") from e
+
+
+def load_private_key_auto(source: Path | bytes, *, purpose: str = "private key"):
+    data = source.read_bytes() if isinstance(source, Path) else source
+    data = _unwrap_if_wrapped(data, purpose=purpose)
+    try:
+        return serialization.load_pem_private_key(data, password=None)
+    except TypeError:
+        # Encrypted PEM
+        pw = getpass.getpass(f"Password for {purpose}: ")
+        return serialization.load_pem_private_key(data, password=pw.encode("utf-8"))
+
+
+def gen_rsa_keypair_with_fingerprint(out_dir: Path, *, password_protected: bool = False) -> tuple[str, str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pub = priv.public_key()
@@ -29,12 +98,15 @@ def gen_rsa_keypair_with_fingerprint(out_dir: Path) -> tuple[str, str, Path]:
 
     priv_path = out_dir / "private_key.pem"
     (out_dir / "public_key.pem").write_bytes(pub_pem)
-    priv_path.write_bytes(priv_pem)
+    if password_protected:
+        priv_path.write_bytes(wrap_private_key_pem(priv_pem, password=_prompt_password_twice()))
+    else:
+        priv_path.write_bytes(priv_pem)
     (out_dir / "fingerprint.txt").write_text(fp + "\n")
     return pub_pem.decode("utf-8"), fp, priv_path
 
 
-def gen_ed25519_keypair_with_fingerprint(out_dir: Path) -> tuple[str, str, Path]:
+def gen_ed25519_keypair_with_fingerprint(out_dir: Path, *, password_protected: bool = False) -> tuple[str, str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     priv = ed25519.Ed25519PrivateKey.generate()
     pub = priv.public_key()
@@ -53,13 +125,16 @@ def gen_ed25519_keypair_with_fingerprint(out_dir: Path) -> tuple[str, str, Path]
 
     priv_path = out_dir / "private_key.pem"
     (out_dir / "public_key_b64.txt").write_text(pub_b64 + "\n")
-    priv_path.write_bytes(priv_pem)
+    if password_protected:
+        priv_path.write_bytes(wrap_private_key_pem(priv_pem, password=_prompt_password_twice()))
+    else:
+        priv_path.write_bytes(priv_pem)
     (out_dir / "fingerprint.txt").write_text(fp + "\n")
     return pub_b64, fp, priv_path
 
 
 def spki_fp_hex_from_private_key(priv_path: Path) -> str:
-    priv = serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
+    priv = load_private_key_auto(priv_path, purpose=str(priv_path))
     pub_der = priv.public_key().public_bytes(
         serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -68,7 +143,7 @@ def spki_fp_hex_from_private_key(priv_path: Path) -> str:
 
 
 def ed25519_fp_hex_from_private_key(priv_path: Path) -> str:
-    priv = serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
+    priv = load_private_key_auto(priv_path, purpose=str(priv_path))
     pub_raw = priv.public_key().public_bytes(
         serialization.Encoding.Raw,
         serialization.PublicFormat.Raw,
@@ -77,7 +152,7 @@ def ed25519_fp_hex_from_private_key(priv_path: Path) -> str:
 
 
 def ed25519_public_b64_from_private_key(priv_path: Path) -> str:
-    priv = serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
+    priv = load_private_key_auto(priv_path, purpose=str(priv_path))
     pub_raw = priv.public_key().public_bytes(
         serialization.Encoding.Raw,
         serialization.PublicFormat.Raw,

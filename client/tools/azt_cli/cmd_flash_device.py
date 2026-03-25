@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_cli.output import emit_envelope
+from tools.azt_client.crypto import load_private_key_auto
 from tools.azt_sdk.services import build_service
 
 # Must match firmware default in azt_http_api.cpp (kOtaSignerPublicKeyPem)
@@ -28,7 +29,7 @@ def _pubkey_raw_from_pem_or_raw_b64(path_or_b64: str) -> bytes:
     if p.exists():
         data = p.read_bytes()
         try:
-            priv = serialization.load_pem_private_key(data, password=None)
+            priv = load_private_key_auto(data, purpose=str(p))
             pub = priv.public_key()
         except Exception:
             pub = serialization.load_pem_public_key(data)

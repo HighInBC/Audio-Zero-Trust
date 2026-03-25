@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives import hashes, hmac, serialization
 import hashlib
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from tools.azt_client.crypto import load_private_key_auto
 
 
 def fetch_stream_sample(host: str, port: int, seconds: int, out_path: Path) -> dict:
@@ -26,7 +27,7 @@ def _b64d(s: str) -> bytes:
 
 
 def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None = None) -> dict:
-    priv = serialization.load_pem_private_key(admin_private_key_pem, password=None) if admin_private_key_pem else None
+    priv = load_private_key_auto(admin_private_key_pem, purpose="stream private key") if admin_private_key_pem else None
 
     if not data.startswith(b"AZT1\n"):
         raise ValueError("ERR_MAGIC")
@@ -366,7 +367,7 @@ def decode_azt1_stream_to_wav(
     gain: float | None = None,
 ) -> dict:
     # Full-chain validation + decode to WAV in one pass.
-    priv = serialization.load_pem_private_key(admin_private_key_pem, password=None) if admin_private_key_pem else None
+    priv = load_private_key_auto(admin_private_key_pem, purpose="stream private key") if admin_private_key_pem else None
 
     if not data.startswith(b"AZT1\n"):
         raise ValueError("ERR_MAGIC")

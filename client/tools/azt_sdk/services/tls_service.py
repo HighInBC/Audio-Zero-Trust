@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import NameOID
 
-from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
 from tools.azt_client.http import get_json, http_json
 from tools.azt_sdk.services.url_service import base_url
 
@@ -152,7 +152,7 @@ def _load_ca_signer(*, ca_key_path: str = "", ca_cert_path: str = "") -> tuple[e
     if not key_path.exists() or not cert_path.exists():
         raise FileNotFoundError(f"CA materials not found (key={key_path}, cert={cert_path})")
 
-    key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    key = load_private_key_auto(key_path, purpose=str(key_path))
     if not isinstance(key, ec.EllipticCurvePrivateKey):
         raise RuntimeError("CA private key is not EC")
     cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
@@ -217,7 +217,7 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
     ca_cert_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
     admin_fp = ed25519_fp_hex_from_private_key(Path(admin_key_path))
-    admin_priv = serialization.load_pem_private_key(Path(admin_key_path).read_bytes(), password=None)
+    admin_priv = load_private_key_auto(Path(admin_key_path), purpose=str(admin_key_path))
     if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
         raise RuntimeError("admin key must be Ed25519 private key")
 
@@ -375,7 +375,7 @@ def tls_bootstrap(*,
         reboot_attempted = True
 
         admin_fp = ed25519_fp_hex_from_private_key(Path(admin_key_path))
-        admin_priv = serialization.load_pem_private_key(Path(admin_key_path).read_bytes(), password=None)
+        admin_priv = load_private_key_auto(Path(admin_key_path), purpose=str(admin_key_path))
         if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
             raise RuntimeError("admin key must be Ed25519 private key")
 

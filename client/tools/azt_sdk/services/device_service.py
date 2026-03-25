@@ -10,7 +10,7 @@ import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
-from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
 import os
 
 from tools.azt_client.http import get_json, http_json, urlopen_with_tls, requests_verify_for_url
@@ -87,7 +87,7 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
     if not nonce:
         return {"ok": False, "error": "ERR_REBOOT_CHALLENGE", "detail": "missing nonce in challenge response"}
 
-    priv = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
+    priv = load_private_key_auto(Path(key_path), purpose=str(key_path))
     if not isinstance(priv, ed25519.Ed25519PrivateKey):
         return {"ok": False, "error": "ERR_REBOOT_KEY", "detail": "reboot key must be Ed25519 private key PEM"}
 

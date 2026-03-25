@@ -6,7 +6,7 @@ from tools.azt_sdk.services.crypto_service import create_signing_credentials
 
 
 def run(args: argparse.Namespace) -> int:
-    payload = create_signing_credentials(identity=args.identity, identity_prefix=args.identity_prefix)
+    payload = create_signing_credentials(identity=args.identity, identity_prefix=args.identity_prefix, password_protected=bool(getattr(args, "password", False)))
     emit_envelope(
         command="create-signing-credentials",
         ok=True,

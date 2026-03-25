@@ -7,7 +7,7 @@ from pathlib import Path
 import os
 
 from tools.azt_client.config import make_signed_config
-from tools.azt_client.crypto import ed25519_public_b64_from_private_key, ed25519_fp_hex_from_private_key
+from tools.azt_client.crypto import ed25519_public_b64_from_private_key, ed25519_fp_hex_from_private_key, load_private_key_auto
 from tools.azt_client.http import http_json
 from tools.azt_sdk.services.url_service import base_url
 from tools.azt_sdk.services.tls_service import tls_material_generate
@@ -67,7 +67,7 @@ def configure_device(
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
     try:
-        admin_priv = serialization.load_pem_private_key(priv_pem, password=None)
+        admin_priv = load_private_key_auto(priv_pem, purpose=str(priv_path))
         if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
             raise ValueError("admin signing key must be Ed25519")
     except Exception as e:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from cryptography.hazmat.primitives import serialization
+from tools.azt_client.crypto import load_private_key_auto
 
 
 def make_unsigned_config(identity: str, admin_pub_b64: str, admin_fp: str, wifi_ssid: str, wifi_password: str) -> dict:
@@ -23,7 +24,7 @@ def make_unsigned_config(identity: str, admin_pub_b64: str, admin_fp: str, wifi_
 
 def make_signed_config(unsigned_cfg: dict, priv_pem: bytes, fp: str) -> dict:
     payload = json.dumps(unsigned_cfg, separators=(",", ":")).encode("utf-8")
-    priv = serialization.load_pem_private_key(priv_pem, password=None)
+    priv = load_private_key_auto(priv_pem, purpose="config signing key")
     sig = priv.sign(payload)
     out = dict(unsigned_cfg)
     out["signature"] = {

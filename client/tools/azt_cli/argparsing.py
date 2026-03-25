@@ -215,12 +215,14 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     ssigncred = sub.add_parser("create-signing-credentials", help="Generate Ed25519 signing keypair artifacts")
     ssigncred.add_argument("--identity", default=None, help="Explicit identity label")
     ssigncred.add_argument("--identity-prefix", default="sign", help="Identity prefix when --identity is omitted")
+    ssigncred.add_argument("--password", action="store_true", help="Wrap generated private key with interactive password prompt")
     ssigncred.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     ssigncred.set_defaults(func=handlers.cmd_create_signing_credentials)
 
     sdeccred = sub.add_parser("create-decoding-credentials", help="Generate RSA decoding keypair artifacts")
     sdeccred.add_argument("--identity", default=None, help="Explicit identity label")
     sdeccred.add_argument("--identity-prefix", default="decode", help="Identity prefix when --identity is omitted")
+    sdeccred.add_argument("--password", action="store_true", help="Wrap generated private key with interactive password prompt")
     sdeccred.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sdeccred.set_defaults(func=handlers.cmd_create_decoding_credentials)
 

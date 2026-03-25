@@ -9,7 +9,7 @@ import os
 from cryptography.hazmat.primitives import serialization
 
 
-from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
 from tools.azt_client.http import get_json
 from tools.azt_sdk.services.attestation_service import verify_attestation
 from tools.azt_sdk.services.device_service import certificate_post
@@ -84,7 +84,7 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
         "signature_algorithm": "ed25519",
     }
     payload_raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    priv = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
+    priv = load_private_key_auto(Path(key_path), purpose=str(key_path))
     sig = priv.sign(payload_raw)
     cert_doc = {
         "certificate_payload_b64": base64.b64encode(payload_raw).decode("ascii"),

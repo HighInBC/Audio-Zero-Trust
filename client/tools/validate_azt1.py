@@ -16,6 +16,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from tools.azt_client.crypto import load_private_key_auto
 
 
 class SpecError(Exception):
@@ -66,7 +67,7 @@ def main() -> int:
 
     try:
         data = Path(args.infile).read_bytes()
-        priv = serialization.load_pem_private_key(Path(args.key).read_bytes(), password=None) if str(args.key).strip() else None
+        priv = load_private_key_auto(Path(args.key), purpose=str(args.key)) if str(args.key).strip() else None
 
         if not data.startswith(b"AZT1\n"):
             fail("ERR_MAGIC", "missing AZT1 magic")

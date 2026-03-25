@@ -16,7 +16,7 @@ if str(CLIENT_ROOT) not in sys.path:
     sys.path.insert(0, str(CLIENT_ROOT))
 
 from tools.azt_client.http import http_json
-from tools.azt_client.crypto import gen_rsa_keypair_with_fingerprint
+from tools.azt_client.crypto import gen_rsa_keypair_with_fingerprint, load_private_key_auto
 from cryptography.hazmat.primitives import serialization
 import hashlib
 from tools.azt_client.config import make_unsigned_config, make_signed_config
@@ -62,7 +62,7 @@ def _pub_and_fp_from_public_key_obj(pub) -> tuple[str, str]:
 
 
 def _pub_and_fp_from_private_key_path(priv_path: Path) -> tuple[str, str]:
-    priv = serialization.load_pem_private_key(priv_path.read_bytes(), password=None)
+    priv = load_private_key_auto(priv_path, purpose=str(priv_path))
     return _pub_and_fp_from_public_key_obj(priv.public_key())
 
 
@@ -75,7 +75,7 @@ def _pub_and_fp_from_key_file(key_path: Path) -> tuple[str, str]:
     data = key_path.read_bytes()
     # Try private key first (admin flow), then public key (recorder flow).
     try:
-        priv = serialization.load_pem_private_key(data, password=None)
+        priv = load_private_key_auto(data, purpose=str(key_path))
         return _pub_and_fp_from_public_key_obj(priv.public_key())
     except Exception:
         pub = serialization.load_pem_public_key(data)

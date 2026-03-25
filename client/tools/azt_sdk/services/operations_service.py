@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_client.config import make_signed_config
-from tools.azt_client.crypto import ed25519_fp_hex_from_private_key
+from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
 from tools.azt_client.http import http_json, get_json, urlopen_with_tls
 from tools.azt_sdk.services import build_service
 from tools.azt_sdk.services.url_service import base_url
@@ -33,13 +33,13 @@ def parse_meta(items: list[str]) -> dict:
 
 
 def sign_bytes(priv_pem: bytes, payload: bytes) -> bytes:
-    priv = serialization.load_pem_private_key(priv_pem, password=None)
+    priv = load_private_key_auto(priv_pem, purpose="signing key")
     return priv.sign(payload)
 
 
 def public_key_from_pem_bytes(pem: bytes):
     try:
-        priv = serialization.load_pem_private_key(pem, password=None)
+        priv = load_private_key_auto(pem, purpose="private key")
         return priv.public_key()
     except Exception:
         return serialization.load_pem_public_key(pem)
@@ -444,7 +444,7 @@ def decode_next_header(*, in_path: str, key_path: str, out_path: str, out_decode
         header_ct = base64.b64decode(ctb64, validate=True)
         input_mode = "request"
 
-    priv = serialization.load_pem_private_key(Path(key_path).read_bytes(), password=None)
+    priv = load_private_key_auto(Path(key_path), purpose=str(key_path))
     wrapped = base64.b64decode(str(plain["next_header_wrapped_key_b64"]), validate=True)
     header_key = priv.decrypt(wrapped, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
     header_nonce = base64.b64decode(str(plain["next_header_nonce_b64"]), validate=True)
