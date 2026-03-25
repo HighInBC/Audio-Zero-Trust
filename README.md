@@ -203,7 +203,7 @@ cd Audio-Zero-Trust
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip setuptools wheel
-python3 -m pip install platformio cryptography pyserial requests intelhex
+python3 -m pip install platformio cryptography pyserial requests intelhex argon2-cffi
 ```
 
 ### 5) Optional clean slate
