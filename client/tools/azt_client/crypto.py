@@ -11,6 +11,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa, ed25519
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+try:
+    from argon2.low_level import Type as Argon2Type, hash_secret_raw as argon2_hash_secret_raw
+except Exception:  # optional dependency for wrapped key KDF
+    Argon2Type = None
+    argon2_hash_secret_raw = None
+
 
 def _prompt_password_twice() -> str:
     p1 = getpass.getpass("Enter private key password: ")
@@ -22,21 +28,40 @@ def _prompt_password_twice() -> str:
     return p1
 
 
-def _derive_wrap_key(password: str, salt: bytes, iterations: int) -> bytes:
+def _derive_wrap_key_pbkdf2(password: str, salt: bytes, iterations: int) -> bytes:
     kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=iterations)
     return kdf.derive(password.encode("utf-8"))
+
+
+def _derive_wrap_key_argon2id(password: str, salt: bytes, *, memory_kib: int, time_cost: int, parallelism: int) -> bytes:
+    if argon2_hash_secret_raw is None or Argon2Type is None:
+        raise RuntimeError("argon2-cffi not installed; install with: pip install argon2-cffi")
+    return argon2_hash_secret_raw(
+        secret=password.encode("utf-8"),
+        salt=salt,
+        time_cost=time_cost,
+        memory_cost=memory_kib,
+        parallelism=parallelism,
+        hash_len=32,
+        type=Argon2Type.ID,
+    )
 
 
 def wrap_private_key_pem(priv_pem: bytes, *, password: str) -> bytes:
     salt = os.urandom(16)
     nonce = os.urandom(12)
-    iterations = 200_000
-    key = _derive_wrap_key(password, salt, iterations)
+    # OWASP-ish interactive profile; tune later if needed.
+    memory_kib = 65536
+    time_cost = 3
+    parallelism = 1
+    key = _derive_wrap_key_argon2id(password, salt, memory_kib=memory_kib, time_cost=time_cost, parallelism=parallelism)
     ct = AESGCM(key).encrypt(nonce, priv_pem, None)
     obj = {
         "schema": "azt.private_key_wrap.v1",
-        "kdf": "pbkdf2-hmac-sha256",
-        "iterations": iterations,
+        "kdf": "argon2id",
+        "argon2_memory_kib": memory_kib,
+        "argon2_time_cost": time_cost,
+        "argon2_parallelism": parallelism,
         "salt_b64": base64.b64encode(salt).decode("ascii"),
         "cipher": "aes-256-gcm",
         "nonce_b64": base64.b64encode(nonce).decode("ascii"),
@@ -56,9 +81,21 @@ def _unwrap_if_wrapped(data: bytes, *, purpose: str = "private key") -> bytes:
     salt = base64.b64decode(obj["salt_b64"])
     nonce = base64.b64decode(obj["nonce_b64"])
     ct = base64.b64decode(obj["wrapped_key_b64"])
-    iterations = int(obj.get("iterations", 200000))
+    kdf_name = str(obj.get("kdf") or "pbkdf2-hmac-sha256")
     pw = getpass.getpass(f"Password for {purpose}: ")
-    key = _derive_wrap_key(pw, salt, iterations)
+    if kdf_name == "argon2id":
+        key = _derive_wrap_key_argon2id(
+            pw,
+            salt,
+            memory_kib=int(obj.get("argon2_memory_kib", 65536)),
+            time_cost=int(obj.get("argon2_time_cost", 3)),
+            parallelism=int(obj.get("argon2_parallelism", 1)),
+        )
+    elif kdf_name == "pbkdf2-hmac-sha256":
+        iterations = int(obj.get("iterations", 200000))
+        key = _derive_wrap_key_pbkdf2(pw, salt, iterations)
+    else:
+        raise ValueError(f"unsupported wrapped key kdf: {kdf_name}")
     try:
         return AESGCM(key).decrypt(nonce, ct, None)
     except Exception as e:
