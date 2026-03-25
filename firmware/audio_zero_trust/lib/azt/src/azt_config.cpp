@@ -434,8 +434,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.config_revision = 0;
   state.audio_echo_base_detected = false;
   state.audio_input_source = "internal_pdm";
-  state.audio_preamp_gain = 1;
-  state.audio_adc_gain = 255;
+  state.audio_preamp_gain = 2;
+  state.audio_adc_gain = 248;
 
   return true;
 }

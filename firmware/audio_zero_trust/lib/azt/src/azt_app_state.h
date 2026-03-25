@@ -64,8 +64,8 @@ struct AppState {
   // Audio input runtime + config
   bool audio_echo_base_detected = false;
   String audio_input_source = "internal_pdm"; // internal_pdm | echo_base
-  uint8_t audio_preamp_gain = 1;  // ES8311 reg 0x16 (mic gain step)
-  uint8_t audio_adc_gain = 255;   // ES8311 reg 0x17 (ADC gain/volume)
+  uint8_t audio_preamp_gain = 2;  // ES8311 reg 0x16 (mic gain step)
+  uint8_t audio_adc_gain = 248;   // ES8311 reg 0x17 (ADC gain/volume)
   uint32_t audio_sample_rate_hz = 16000;
   uint8_t audio_channels = 1;
   uint8_t audio_sample_width_bytes = 2;
