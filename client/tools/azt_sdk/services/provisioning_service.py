@@ -286,14 +286,27 @@ def configure_device(
             }
             signed_phase2 = make_signed_config(unsigned_cfg, priv_pem, fp)
             (admin_dir / "config_signed.json").write_text(json.dumps(signed_phase2, indent=2))
-            ok_phase2, ip_phase2 = serial_apply_signed_config(
-                port,
-                signed_phase2,
-                baud=baud,
-                timeout_s=max(20, int(ip_timeout)),
-            )
+            ok_phase2 = False
+            ip_phase2 = None
+            phase2_attempts = 3
+            for i in range(phase2_attempts):
+                ok_phase2, ip_phase2 = serial_apply_signed_config(
+                    port,
+                    signed_phase2,
+                    baud=baud,
+                    timeout_s=max(30, int(ip_timeout)),
+                )
+                if ok_phase2:
+                    break
+                # Device may still be cycling Wi-Fi / services right after phase-1 apply.
+                time.sleep(2.0 + i)
+
             if not ok_phase2:
-                return 10, False, "SERIAL_TLS_PHASE2_FAILED", {**common, "ip": device_ip}
+                return 10, False, "SERIAL_TLS_PHASE2_FAILED", {
+                    **common,
+                    "ip": device_ip,
+                    "phase2_attempts": phase2_attempts,
+                }
             if ip_phase2:
                 device_ip = ip_phase2
                 common["ip"] = device_ip
