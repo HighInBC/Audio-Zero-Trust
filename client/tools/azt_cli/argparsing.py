@@ -195,7 +195,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
 
     serase = sub.add_parser("erase-device", help="Erase device flash (NVS/FS/app) for clean-room testing")
     serase.add_argument("--port", default="/dev/ttyUSB0", help="Serial port (e.g. /dev/ttyUSB0)")
-    serase.add_argument("--env", default="atom-echo", help="PlatformIO environment")
+    serase.add_argument("--target", required=True, choices=["atom-echo", "atom-echos3r"], help="Hardware target")
     serase.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     serase.set_defaults(func=handlers.cmd_erase_device)
 
