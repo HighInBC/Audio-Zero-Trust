@@ -44,7 +44,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     outer_sig_b64 = data[off:sig_nl].decode("utf-8")
     off = sig_nl + 1
 
-    if plain["version"] != 1:
+    if plain.get("version") not in (0, 1):
         raise ValueError("ERR_VERSION")
 
     next_fp_hex = plain.get("next_header_recipient_key_fingerprint_hex", plain.get("header_key_fingerprint_hex"))
@@ -384,7 +384,7 @@ def decode_azt1_stream_to_wav(
     outer_sig_b64 = data[off:sig_nl].decode("utf-8")
     off = sig_nl + 1
 
-    if plain["version"] != 1:
+    if plain.get("version") not in (0, 1):
         raise ValueError("ERR_VERSION")
 
     next_fp_hex = plain.get("next_header_recipient_key_fingerprint_hex", plain.get("header_key_fingerprint_hex"))
