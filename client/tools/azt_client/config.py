@@ -17,7 +17,7 @@ def make_unsigned_config(identity: str, admin_pub_b64: str, admin_fp: str, wifi_
         },
         "wifi": {"ssid": wifi_ssid, "password": wifi_password},
         "time": {"server": "pool.ntp.org"},
-        "audio": {"sample_rate_hz": 16000, "channels": 1, "sample_width_bytes": 2},
+        "audio": {"sample_rate_hz": 16000, "channels": 1, "sample_width_bytes": 2, "preamp_gain": 2, "adc_gain": 248},
     }
 
 

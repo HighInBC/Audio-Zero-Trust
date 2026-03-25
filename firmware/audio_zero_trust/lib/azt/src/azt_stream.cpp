@@ -277,8 +277,13 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       staleness_s = 0;
     }
   }
+  const uint32_t sample_rate_hz = state.audio_sample_rate_hz > 0 ? state.audio_sample_rate_hz : 16000U;
+  const uint32_t channels = state.audio_channels > 0 ? state.audio_channels : 1U;
+  const uint32_t sample_width_bytes = state.audio_sample_width_bytes > 0 ? state.audio_sample_width_bytes : 2U;
+  const uint32_t bytes_per_frame_sample = std::max<uint32_t>(1U, channels * sample_width_bytes);
+  const uint32_t frame_samples = std::max<uint32_t>(1U, static_cast<uint32_t>(kMicFrameBytes / bytes_per_frame_sample));
   const float audio_frame_duration_ms =
-      (1000.0f * static_cast<float>(kMicFrameBytes / 2)) / 16000.0f;  // 16-bit mono @16kHz
+      (1000.0f * static_cast<float>(frame_samples)) / static_cast<float>(sample_rate_hz);
 
   if (!build_header_prefix(sc,
                            state,
@@ -344,7 +349,6 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   uint32_t contiguous_drop_frames = 0;
   bool disconnected_for_stall = false;
 
-  const uint32_t frame_samples = (kMicFrameBytes / 2);  // s16 mono
   TelemetryAccumulator telem{};
   int drop_test_remaining = drop_test_frames;
   uint32_t sig_interval = kSigCheckpointMinInterval;
@@ -357,8 +361,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
 
     const uint64_t ingress_dropped = mic_ring_take_dropped_newest(*mic_ring);
     if (ingress_dropped > 0) {
-      bool stalled = apply_drop_and_check_stall(static_cast<uint32_t>(ingress_dropped), frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, 16000U);
-      StreamLoopDecision d = evaluate_stream_loop_branch(true, false, false, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, 16000U);
+      bool stalled = apply_drop_and_check_stall(static_cast<uint32_t>(ingress_dropped), frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, sample_rate_hz);
+      StreamLoopDecision d = evaluate_stream_loop_branch(true, false, false, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
         break;
@@ -375,8 +379,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
 
     if (drop_test_remaining > 0) {
       drop_test_remaining--;
-      bool stalled = apply_drop_and_check_stall(1, frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, 16000U);
-      StreamLoopDecision d = evaluate_stream_loop_branch(false, true, false, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, 16000U);
+      bool stalled = apply_drop_and_check_stall(1, frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, sample_rate_hz);
+      StreamLoopDecision d = evaluate_stream_loop_branch(false, true, false, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
         break;
@@ -396,8 +400,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
 
     int afw = client.availableForWrite();
     if (is_low_write_capacity(afw, 32)) {
-      bool stalled = apply_drop_and_check_stall(1, frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, 16000U);
-      StreamLoopDecision d = evaluate_stream_loop_branch(false, false, true, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, 16000U);
+      bool stalled = apply_drop_and_check_stall(1, frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, sample_rate_hz);
+      StreamLoopDecision d = evaluate_stream_loop_branch(false, false, true, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
         break;
@@ -433,8 +437,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     }
 
     if (!send_chunked(client, rec.data(), rec.size())) {
-      bool stalled = apply_drop_and_check_stall(1, frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, 16000U);
-      StreamLoopDecision d = evaluate_stream_loop_branch(false, false, false, true, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, 16000U);
+      bool stalled = apply_drop_and_check_stall(1, frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, sample_rate_hz);
+      StreamLoopDecision d = evaluate_stream_loop_branch(false, false, false, true, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
         break;

@@ -238,6 +238,8 @@ void load_config_state(AppState& state) {
     state.ota_min_allowed_version_code = g_prefs.getULong64("ota_min_ver_code", 0);
   }
   state.config_revision = g_prefs.getUInt("cfg_rev", 0);
+  state.audio_preamp_gain = static_cast<uint8_t>(g_prefs.getUChar("aud_micg", state.audio_preamp_gain));
+  state.audio_adc_gain = static_cast<uint8_t>(g_prefs.getUChar("aud_adcg", state.audio_adc_gain));
   state.last_reset_reason_code = g_prefs.getUInt("last_rst_reason", 0);
   state.last_reset_unexpected = g_prefs.getBool("last_rst_unexp", false);
   state.unexpected_reset_count = g_prefs.getUInt("unx_rst_cnt", 0);
@@ -323,6 +325,8 @@ bool save_config_state(AppState& state,
     g_prefs.remove("time_srv");
   }
   ok = ok && g_prefs.putBool("mdns_en", mdns_enabled);
+  ok = ok && g_prefs.putUChar("aud_micg", state.audio_preamp_gain);
+  ok = ok && g_prefs.putUChar("aud_adcg", state.audio_adc_gain);
   if (mdns_hostname.length() > 0) {
     ok = ok && g_prefs.putString("mdns_host", mdns_hostname) > 0;
   } else {
@@ -400,6 +404,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   g_prefs.remove("tls_cert_sn");
   g_prefs.remove("tls_san_csv");
   g_prefs.remove("cfg_rev");
+  g_prefs.remove("aud_micg");
+  g_prefs.remove("aud_adcg");
   g_prefs.end();
 
   state.managed = false;
@@ -426,6 +432,10 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.ota_signer_override_public_key_pem = "";
   state.ota_signer_override_fingerprint_hex = "";
   state.config_revision = 0;
+  state.audio_echo_base_detected = false;
+  state.audio_input_source = "internal_pdm";
+  state.audio_preamp_gain = 2;
+  state.audio_adc_gain = 248;
 
   return true;
 }

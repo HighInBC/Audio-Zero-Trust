@@ -452,6 +452,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   bool new_mdns_enabled = state.mdns_enabled;
   String new_mdns_hostname = state.mdns_hostname;
+  uint8_t new_audio_preamp_gain = state.audio_preamp_gain;
+  uint8_t new_audio_adc_gain = state.audio_adc_gain;
   JsonVariant mdns = doc["mdns"];
   if (!mdns.isNull()) {
     if (!mdns.is<JsonObject>()) {
@@ -462,6 +464,33 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     new_mdns_enabled = mdns["enabled"] | false;
     new_mdns_hostname = String((const char*)(mdns["hostname"] | ""));
     new_mdns_hostname.trim();
+  }
+
+  JsonVariant audio = doc["audio"];
+  if (!audio.isNull()) {
+    if (!audio.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid audio object\"}";
+      return r;
+    }
+    if (!audio["preamp_gain"].isNull()) {
+      int v = audio["preamp_gain"].as<int>();
+      if (v < 0 || v > 255) {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 0..255\"}";
+        return r;
+      }
+      new_audio_preamp_gain = static_cast<uint8_t>(v);
+    }
+    if (!audio["adc_gain"].isNull()) {
+      int v = audio["adc_gain"].as<int>();
+      if (v < 0 || v > 255) {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.adc_gain must be 0..255\"}";
+        return r;
+      }
+      new_audio_adc_gain = static_cast<uint8_t>(v);
+    }
   }
 
   bool tls_set = false;
@@ -586,6 +615,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       return r;
     }
 
+    state.audio_preamp_gain = new_audio_preamp_gain;
+    state.audio_adc_gain = new_audio_adc_gain;
     if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_ssid, new_wifi_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
       r.code = 500;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
@@ -692,6 +723,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     return r;
   }
 
+  state.audio_preamp_gain = new_audio_preamp_gain;
+  state.audio_adc_gain = new_audio_adc_gain;
   if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_ssid, new_wifi_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
     r.code = 500;
     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
@@ -847,6 +880,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   String time_servers_csv = state.time_servers_csv;
   bool new_mdns_enabled = state.mdns_enabled;
   String new_mdns_hostname = state.mdns_hostname;
+  uint8_t new_audio_preamp_gain = state.audio_preamp_gain;
+  uint8_t new_audio_adc_gain = state.audio_adc_gain;
 
   if (!patch["recording_key"].isNull()) {
     JsonDocument tmp;
@@ -885,9 +920,30 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   }
 
   if (!patch["audio"].isNull()) {
-    r.code = 403;
-    r.body = "{\"ok\":false,\"error\":\"ERR_PATCH_PATH_FORBIDDEN\",\"detail\":\"audio is static and not patchable\"}";
-    return r;
+    JsonVariant pa = patch["audio"];
+    if (!pa.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid audio object\"}";
+      return r;
+    }
+    if (!pa["preamp_gain"].isNull()) {
+      int v = pa["preamp_gain"].as<int>();
+      if (v < 0 || v > 255) {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 0..255\"}";
+        return r;
+      }
+      new_audio_preamp_gain = static_cast<uint8_t>(v);
+    }
+    if (!pa["adc_gain"].isNull()) {
+      int v = pa["adc_gain"].as<int>();
+      if (v < 0 || v > 255) {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.adc_gain must be 0..255\"}";
+        return r;
+      }
+      new_audio_adc_gain = static_cast<uint8_t>(v);
+    }
   }
 
   if (!patch["time"].isNull()) {
@@ -910,6 +966,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     new_mdns_hostname.trim();
   }
 
+  state.audio_preamp_gain = new_audio_preamp_gain;
+  state.audio_adc_gain = new_audio_adc_gain;
   if (!save_config_state(state,
                          state.admin_pubkey_pem,
                          state.admin_fingerprint_hex,
@@ -1448,6 +1506,10 @@ HttpDispatchResult dispatch_request(const String& method,
              ",\"wifi_ssid\":\"" + state.wifi_ssid +
              "\",\"wifi_last_connect_source\":\"" + state.wifi_last_connect_source +
              "\",\"wifi_last_status\":" + String(state.wifi_last_status) +
+             ",\"audio_input_source\":" + json_quote(state.audio_input_source) +
+             ",\"audio_echo_base_detected\":" + String(state.audio_echo_base_detected ? "true" : "false") +
+             ",\"audio_preamp_gain\":" + String(state.audio_preamp_gain) +
+             ",\"audio_adc_gain\":" + String(state.audio_adc_gain) +
              ",\"authorized_listener_ips_csv\":\"" + state.authorized_listener_ips_csv +
              "\",\"time_servers_csv\":\"" + state.time_servers_csv +
              "\",\"device_certificate_serial\":\"" + state.device_certificate_serial +

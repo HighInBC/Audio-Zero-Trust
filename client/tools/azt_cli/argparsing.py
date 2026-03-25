@@ -50,6 +50,8 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     spatch.add_argument("--authorized-listener-ip", dest="authorized_listener_ips", action="append", default=[], help="Append patch.authorized_listener_ips entry (repeatable)")
     spatch.add_argument("--time-server", dest="time_servers", action="append", default=[], help="Append patch.time server entry (repeatable)")
     spatch.add_argument("--recording-key-pem", default="", help="Set patch.recording_key.public_key_pem from PEM file path")
+    spatch.add_argument("--audio-preamp-gain", type=int, default=None, help="Set patch.audio.preamp_gain (0..255)")
+    spatch.add_argument("--audio-adc-gain", type=int, default=None, help="Set patch.audio.adc_gain (0..255)")
     spatch.add_argument("--mdns-enabled", action="store_true", help="Set patch.mdns.enabled=true")
     spatch.add_argument("--mdns-disabled", action="store_true", help="Set patch.mdns.enabled=false")
     spatch.add_argument("--mdns-hostname", default="", help="Set patch.mdns.hostname")
@@ -68,9 +70,9 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sv.set_defaults(func=handlers.cmd_stream_validate)
 
     sd = sub.add_parser("stream-decode", help="Fully validate AZT1 stream and decode PCM to WAV")
-    sd.add_argument("--in", dest="in_path", required=True, help="Input AZT1 file")
+    sd.add_argument("--in", dest="in_path", nargs="+", required=True, help="Input AZT1 file(s). Accepts multiple paths (e.g. *.azt)")
     sd.add_argument("--key", dest="key_path", required=True, help="Recorder private key PEM")
-    sd.add_argument("--out", dest="out_path", default="", help="Output WAV path (default: <in>.wav)")
+    sd.add_argument("--out", dest="out_path", default="", help="Output WAV path (single input only; default: <in>.wav)")
     sd.add_argument("--apply-gain", action="store_true", help="Apply recommended_decode_gain from stream header")
     sd.add_argument("--gain", type=float, default=None, help="Explicit decode gain multiplier (overrides --apply-gain)")
     sd.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
@@ -238,6 +240,8 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sconf.add_argument("--no-auto-ip", action="store_true", help="Disable serial IP autodetect")
     sconf.add_argument("--allow-serial-bootstrap", action="store_true", help="Allow privileged serial bootstrap if HTTP is unreachable")
     sconf.add_argument("--mdns-enabled", action="store_true", help="Enable mDNS advertisement")
+    sconf.add_argument("--audio-preamp-gain", type=int, default=None, help="Set audio.preamp_gain in bootstrap config (0..255)")
+    sconf.add_argument("--audio-adc-gain", type=int, default=None, help="Set audio.adc_gain in bootstrap config (0..255)")
     sconf.add_argument("--mdns-hostname", default="", help="mDNS hostname (without .local); defaults to device label")
     sconf.add_argument("--ota-version-code", default="", help="Current OTA version code for this image (uint64), or 'timestamp' for current UTC YYYYMMDDHHMMSS. Required when using --ota-min-version-code")
     sconf.add_argument("--ota-min-version-code", default="", help="Set OTA rollback floor (uint64) or 'same'. Serial-configurable only")
@@ -352,11 +356,13 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
 
     sprobe = sub.add_parser(
         "stream-read",
-        help="Read stream data and report bytes (omit --seconds to run continuously)",
+        help="Read stream data; require either --out (save AZT file) or --probe (bytes-only)",
     )
     sprobe.add_argument("--host", required=True, help="Device host/IP")
     sprobe.add_argument("--port", type=int, default=8080, help="Device API port")
     sprobe.add_argument("--seconds", type=float, default=None, help="Optional read duration seconds; omit to run indefinitely")
+    sprobe.add_argument("--out", dest="out_path", default="", help="Output AZT file path")
+    sprobe.add_argument("--probe", action="store_true", help="Probe mode: do not save file, only report bytes")
     sprobe.add_argument("--timeout", type=int, default=10, help="HTTP timeout seconds")
     sprobe.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sprobe.set_defaults(func=handlers.cmd_stream_probe, command_name="stream-read")

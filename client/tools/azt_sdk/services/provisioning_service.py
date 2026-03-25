@@ -42,6 +42,8 @@ def configure_device(
     ota_signer_clear: bool,
     mdns_enabled: bool,
     mdns_hostname: str,
+    audio_preamp_gain: int | None,
+    audio_adc_gain: int | None,
     tls_bootstrap: bool,
     tls_valid_days: int,
 ) -> tuple[int, bool, str | None, dict]:
@@ -87,6 +89,10 @@ def configure_device(
         return 13, False, "INVALID_OTA_MIN_VERSION_CODE_COMBINATION", {"detail": "cannot set and clear OTA floor together"}
     if ota_signer_public_key_pem and ota_signer_clear:
         return 14, False, "INVALID_OTA_SIGNER_COMBINATION", {"detail": "cannot set and clear OTA signer together"}
+    if audio_preamp_gain is not None and not (0 <= int(audio_preamp_gain) <= 255):
+        return 16, False, "INVALID_AUDIO_PREAMP_GAIN", {"detail": int(audio_preamp_gain)}
+    if audio_adc_gain is not None and not (0 <= int(audio_adc_gain) <= 255):
+        return 17, False, "INVALID_AUDIO_ADC_GAIN", {"detail": int(audio_adc_gain)}
 
     for listener_ip in authorized_listener_ips:
         try:
@@ -123,6 +129,14 @@ def configure_device(
         "fingerprint_alg": "sha256-spki-der",
         "fingerprint_hex": rec_fp,
     }
+
+    if audio_preamp_gain is not None or audio_adc_gain is not None:
+        audio_cfg = unsigned_cfg.get("audio") if isinstance(unsigned_cfg.get("audio"), dict) else {}
+        if audio_preamp_gain is not None:
+            audio_cfg["preamp_gain"] = int(audio_preamp_gain)
+        if audio_adc_gain is not None:
+            audio_cfg["adc_gain"] = int(audio_adc_gain)
+        unsigned_cfg["audio"] = audio_cfg
 
     if mdns_enabled or mdns_hostname:
         unsigned_cfg["mdns"] = {
@@ -205,6 +219,8 @@ def configure_device(
         "ota_signer_clear": bool(ota_signer_clear),
         "mdns_enabled": bool(mdns_enabled),
         "mdns_hostname": mdns_hostname,
+        "audio_preamp_gain": (int(audio_preamp_gain) if audio_preamp_gain is not None else None),
+        "audio_adc_gain": (int(audio_adc_gain) if audio_adc_gain is not None else None),
         "tls_bootstrap_requested": bool(tls_bootstrap),
         "tls_deferred_until_ip": bool(tls_deferred_until_ip),
     }
