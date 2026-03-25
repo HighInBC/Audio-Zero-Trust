@@ -46,6 +46,10 @@ def run(args: argparse.Namespace) -> int:
             emit_envelope(command="configure-device", ok=False, error="INVALID_AUDIO_ADC_GAIN", payload={"detail": "--audio-adc-gain must be 0..255"}, as_json=bool(getattr(args, "as_json", False)))
             return 1
 
+        host = (getattr(args, "host", "") or "").strip()
+        ip_alias = (getattr(args, "ip", "") or "").strip()
+        target_host = host or ip_alias or None
+
         code, ok, err, payload = configure_device(
             admin_creds_dir=admin_dir,
             recorder_creds_dir=recorder_dir,
@@ -56,7 +60,7 @@ def run(args: argparse.Namespace) -> int:
             time_servers=list(args.time_server or []),
             no_time=bool(args.no_time),
             port=args.port,
-            ip=(args.ip or None),
+            ip=target_host,
             baud=int(args.baud),
             ip_timeout=int(args.ip_timeout),
             no_auto_ip=bool(args.no_auto_ip),
