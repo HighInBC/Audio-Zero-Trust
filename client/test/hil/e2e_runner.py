@@ -561,7 +561,8 @@ def main() -> int:
         st0 = payload_state0.get("state") if isinstance(payload_state0, dict) and isinstance(payload_state0.get("state"), dict) else {}
         floor_before = int(st0.get("ota_min_allowed_version_code") or 0)
 
-        base_code = int(time.time())
+        # Use a base version code guaranteed to be above any existing rollback floor.
+        base_code = max(int(time.time()), floor_before + 100)
 
         # Explicitly verify invalid rollback floor (0) is rejected by CLI.
         out_floor_zero = out_dir / "e2e_ota_floor_zero_invalid.otabundle"
