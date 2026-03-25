@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.targets import env_for_target
 from tools.azt_client.crypto import load_private_key_auto
 from tools.azt_sdk.services import build_service
 
@@ -171,12 +172,14 @@ def run(args: argparse.Namespace) -> int:
             )
             return 1
 
+        env = env_for_target(getattr(args, "target", ""))
+
         if from_source:
-            code, payload, out = build_service.flash_device(env=args.env, port=args.port, stream=(not as_json))
+            code, payload, out = build_service.flash_device(env=env, port=args.port, stream=(not as_json))
             emit_envelope(
                 command="flash-device",
                 ok=(code == 0),
-                payload={**payload, "mode": "from-source"},
+                payload={**payload, "mode": "from-source", "target": args.target, "env": env},
                 error=None if code == 0 else "FLASH_FAILED",
                 detail=out[-1500:],
                 as_json=as_json,
@@ -196,7 +199,7 @@ def run(args: argparse.Namespace) -> int:
 
         try:
             code, payload, out = build_service.flash_firmware_bin(
-                env=args.env,
+                env=env,
                 port=args.port,
                 firmware_bin=temp_fw,
                 stream=(not as_json),
@@ -231,6 +234,8 @@ def run(args: argparse.Namespace) -> int:
         result_payload = {
             **payload,
             "mode": "from-ota",
+            "target": args.target,
+            "env": env,
             "ota_bundle": str(Path(from_ota)),
             "bypass_validation": bool(getattr(args, "bypass_validation", False)),
             "ota_meta": parsed.get("meta"),

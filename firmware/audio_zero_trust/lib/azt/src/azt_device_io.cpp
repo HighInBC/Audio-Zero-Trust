@@ -9,6 +9,22 @@
 
 namespace azt {
 
+#if CONFIG_IDF_TARGET_ESP32S3
+static constexpr int kEchoBaseI2cSdaPin = 45;
+static constexpr int kEchoBaseI2cSclPin = 0;
+static constexpr int kEchoBaseI2sBckPin = 17;      // SCLK
+static constexpr int kEchoBaseI2sWsPin = 3;        // LRCK
+static constexpr int kEchoBaseI2sDataOutPin = 48;  // DSDIN (host->codec)
+static constexpr int kEchoBaseI2sDataInPin = 4;    // ASDOUT (codec->host)
+#else
+static constexpr int kEchoBaseI2cSdaPin = 25;
+static constexpr int kEchoBaseI2cSclPin = 21;
+static constexpr int kEchoBaseI2sBckPin = 33;
+static constexpr int kEchoBaseI2sWsPin = 19;
+static constexpr int kEchoBaseI2sDataOutPin = 22;
+static constexpr int kEchoBaseI2sDataInPin = 23;
+#endif
+
 bool has_wifi_credentials(const AppState& state) {
   return state.wifi_ssid.length() > 0 && state.wifi_pass.length() > 0;
 }
@@ -126,11 +142,10 @@ static void setup_i2s_echo_base_std() {
   cfg.fixed_mclk = 0;
 
   i2s_pin_config_t pins{};
-  // Atom Echo mapping from M5 Echo Base reference
-  pins.bck_io_num = GPIO_NUM_33;
-  pins.ws_io_num = GPIO_NUM_19;
-  pins.data_out_num = GPIO_NUM_22;
-  pins.data_in_num = GPIO_NUM_23;
+  pins.bck_io_num = static_cast<gpio_num_t>(kEchoBaseI2sBckPin);
+  pins.ws_io_num = static_cast<gpio_num_t>(kEchoBaseI2sWsPin);
+  pins.data_out_num = static_cast<gpio_num_t>(kEchoBaseI2sDataOutPin);
+  pins.data_in_num = static_cast<gpio_num_t>(kEchoBaseI2sDataInPin);
 
   i2s_driver_install(kI2SPort, &cfg, 0, nullptr);
   i2s_set_pin(kI2SPort, &pins);
@@ -153,10 +168,10 @@ static void setup_i2s_internal_pdm() {
   cfg.fixed_mclk = 0;
 
   i2s_pin_config_t pins{};
-  pins.bck_io_num = GPIO_NUM_19;
-  pins.ws_io_num = GPIO_NUM_33;
+  pins.bck_io_num = static_cast<gpio_num_t>(kEchoBaseI2sWsPin);
+  pins.ws_io_num = static_cast<gpio_num_t>(kEchoBaseI2sBckPin);
   pins.data_out_num = I2S_PIN_NO_CHANGE;
-  pins.data_in_num = GPIO_NUM_23;
+  pins.data_in_num = static_cast<gpio_num_t>(kEchoBaseI2sDataInPin);
 
   i2s_driver_install(kI2SPort, &cfg, 0, nullptr);
   i2s_set_pin(kI2SPort, &pins);
@@ -191,8 +206,8 @@ static void es8311_init_for_echo_base(const AppState& state) {
 }
 
 void setup_audio_input(AppState& state) {
-  // Probe Echo Base (ES8311 on Atom Echo I2C pins).
-  Wire.begin(25, 21, 100000U);
+  // Probe Echo Base (ES8311 on Atom host I2C pins).
+  Wire.begin(kEchoBaseI2cSdaPin, kEchoBaseI2cSclPin, 100000U);
   delay(10);
   const bool has_echo = i2c_ping_addr(0x18);
   state.audio_echo_base_detected = has_echo;

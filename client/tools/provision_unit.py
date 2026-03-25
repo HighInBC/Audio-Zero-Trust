@@ -286,7 +286,7 @@ def main() -> int:
 
     if not args.skip_flash:
         pio = _resolve_platformio()
-        run([pio, 'run', '-e', 'm5stack-atom-m4-2-native', '-t', 'upload', '--upload-port', args.port], cwd=FW_DIR)
+        run([pio, 'run', '-e', 'atom-echo', '-t', 'upload', '--upload-port', args.port], cwd=FW_DIR)
 
     device_ip = args.ip
     if not args.no_auto_ip:

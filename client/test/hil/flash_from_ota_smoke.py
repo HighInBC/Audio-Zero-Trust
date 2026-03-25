@@ -34,7 +34,7 @@ def main() -> int:
     ap.add_argument("--tool-cmd", default="python3 tools/azt_tool.py")
     ap.add_argument("--bundle", required=True, help="Path to .otabundle")
     ap.add_argument("--port", default="/dev/ttyUSB0")
-    ap.add_argument("--env", default="m5stack-atom-m4-2-native")
+    ap.add_argument("--env", default="atom-echo")
     ap.add_argument("--firmware-key", default="")
     ap.add_argument("--host", default="", help="Optional host for post-flash state check")
     args = ap.parse_args()
