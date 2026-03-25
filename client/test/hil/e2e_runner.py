@@ -542,7 +542,7 @@ def main() -> int:
         results.append({"name": "post_reboot_state", "ok": False, "detail": str(err)})
 
     try:
-        rc_finite, obj_finite, out_finite = tool.json(["stream-read", "--host", host, "--seconds", str(args.finite_seconds)])
+        rc_finite, obj_finite, out_finite = tool.json(["stream-read", "--host", host, "--seconds", str(args.finite_seconds), "--probe"])
         payload_finite = obj_finite.get("payload") if isinstance(obj_finite, dict) else None
         finite_bytes = int(payload_finite.get("bytes") or 0) if isinstance(payload_finite, dict) else 0
         ok_fetch = rc_finite == 0 and finite_bytes > 0
@@ -653,7 +653,7 @@ def main() -> int:
 
     try:
         wait_http_state(tool, host, timeout_s=60)
-        rc_probe, obj_probe, out_probe = tool.json(["stream-read", "--host", host, "--seconds", str(args.indef_probe_seconds)])
+        rc_probe, obj_probe, out_probe = tool.json(["stream-read", "--host", host, "--seconds", str(args.indef_probe_seconds), "--probe"])
         payload_probe = obj_probe.get("payload") if isinstance(obj_probe, dict) else None
         if rc_probe == 0 and isinstance(payload_probe, dict):
             n = int(payload_probe.get("bytes") or 0)
@@ -666,7 +666,7 @@ def main() -> int:
     def probe_with_retry(attempts: int = 2) -> tuple[int, dict | None, str]:
         last_rc, last_obj, last_out = 1, None, ""
         for _ in range(attempts):
-            rc, obj, out = tool.json(["stream-read", "--host", host, "--seconds", str(args.reconnect_seconds)])
+            rc, obj, out = tool.json(["stream-read", "--host", host, "--seconds", str(args.reconnect_seconds), "--probe"])
             last_rc, last_obj, last_out = rc, obj, out
             payload = obj.get("payload") if isinstance(obj, dict) else None
             if rc == 0 and isinstance(payload, dict) and int(payload.get("bytes") or 0) > 0:
