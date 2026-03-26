@@ -1060,6 +1060,16 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
+  if (method == "GET" && path == "/api/v0/device/upgrade") {
+    r.code = 200;
+    r.content_type = "text/html; charset=utf-8";
+    r.body = "<!doctype html><html><head><meta charset=\"utf-8\"><title>AZT OTA Upgrade</title></head><body>"
+             "<h1>AZT OTA Upgrade</h1>"
+             "<p>POST multipart firmware bundle to <code>/api/v0/device/upgrade</code>.</p>"
+             "</body></html>";
+    return r;
+  }
+
   if (method == "POST" && path == "/api/v0/config") {
     return handle_config_post_json(state, body, false);
   }
