@@ -59,6 +59,10 @@ def main() -> int:
         serialization.Encoding.PEM,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
+    pub_der = priv.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
 
     with serial.Serial(args.port, baudrate=args.baud, timeout=0.25) as ser:
         _serial_prepare(ser, args.target)
@@ -81,7 +85,10 @@ def main() -> int:
                 send({"cmd": "PING"})
                 last_ping_at = now
             if sent_pub and (not pubkey_acked) and (now - last_pub_send_at) >= 2.0:
-                send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
+                if args.target == "atom-echos3r":
+                    send({"cmd": "PUBKEY_SET_DER", "der_b64": base64.b64encode(pub_der).decode("ascii")})
+                else:
+                    send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                 last_pub_send_at = now
 
             raw = ser.readline().decode("utf-8", errors="replace").strip()
@@ -97,7 +104,10 @@ def main() -> int:
             ev = msg.get("event")
             if ev == "PONG":
                 if not sent_pub:
-                    send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
+                    if args.target == "atom-echos3r":
+                        send({"cmd": "PUBKEY_SET_DER", "der_b64": base64.b64encode(pub_der).decode("ascii")})
+                    else:
+                        send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                     sent_pub = True
                     last_pub_send_at = now
                 continue

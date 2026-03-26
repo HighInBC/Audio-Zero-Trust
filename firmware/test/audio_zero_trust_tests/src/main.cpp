@@ -16,6 +16,7 @@
 namespace {
 
 String g_pubkey_pem;
+std::vector<uint8_t> g_pubkey_raw;
 azt_test::Registry g_registry;
 azt_test::Context g_ctx;
 
@@ -109,7 +110,7 @@ void maybe_finish_suite() {
 }
 
 void start_rsa_wrap_test(const char* test_name, const char* scenario) {
-  if (g_pubkey_pem.length() < 64) {
+  if (g_pubkey_raw.size() < 64) {
     emit_test_result(test_name, false, "no pubkey installed");
     maybe_finish_suite();
     return;
@@ -117,10 +118,8 @@ void start_rsa_wrap_test(const char* test_name, const char* scenario) {
 
   esp_fill_random(g_expected_plain, sizeof(g_expected_plain));
   std::vector<uint8_t> wrapped;
-  std::vector<uint8_t> pub(reinterpret_cast<const uint8_t*>(g_pubkey_pem.c_str()),
-                           reinterpret_cast<const uint8_t*>(g_pubkey_pem.c_str()) + g_pubkey_pem.length() + 1);
 
-  if (!azt::rsa_oaep_sha256_encrypt_pub(pub.data(), pub.size(), g_expected_plain, sizeof(g_expected_plain), wrapped)) {
+  if (!azt::rsa_oaep_sha256_encrypt_pub(g_pubkey_raw.data(), g_pubkey_raw.size(), g_expected_plain, sizeof(g_expected_plain), wrapped)) {
     emit_test_result(test_name, false, "rsa wrap failed");
     maybe_finish_suite();
     return;
@@ -282,9 +281,29 @@ void handle_command_line(const String& line) {
       return;
     }
     g_pubkey_pem = String(reinterpret_cast<const char*>(pem.data()));
+    g_pubkey_raw.assign(pem.begin(), pem.end());
+    if (g_pubkey_raw.empty() || g_pubkey_raw.back() != 0) g_pubkey_raw.push_back(0);
     JsonDocument d;
     d["event"] = "PUBKEY_SET_OK";
     d["len"] = g_pubkey_pem.length();
+    d["mode"] = "pem";
+    Serial.println(json_line(d));
+    return;
+  }
+
+  if (cmd == "PUBKEY_SET_DER") {
+    const char* der_b64 = in["der_b64"] | "";
+    std::vector<uint8_t> der;
+    if (!b64_decode_to_vec(String(der_b64), der) || der.empty()) {
+      emit_status("error", "invalid der_b64");
+      return;
+    }
+    g_pubkey_raw.assign(der.begin(), der.end());
+    g_pubkey_pem = "";
+    JsonDocument d;
+    d["event"] = "PUBKEY_SET_OK";
+    d["len"] = static_cast<uint32_t>(g_pubkey_raw.size());
+    d["mode"] = "der";
     Serial.println(json_line(d));
     return;
   }
