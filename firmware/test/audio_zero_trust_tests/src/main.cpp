@@ -252,9 +252,21 @@ void handle_command_line(const String& line) {
     d["level"] = "error";
     d["msg"] = "invalid json command";
     d["json_error"] = err.c_str();
-    d["line_len"] = line.length();
-    String head = line.substring(0, 80);
-    d["line_head"] = head;
+    const size_t n = line.length();
+    d["line_len"] = n;
+    d["line_head"] = line.substring(0, 80);
+    d["line_tail"] = (n > 80) ? line.substring(n - 80) : line;
+    int q = 0, ob = 0, cb = 0;
+    for (size_t i = 0; i < n; ++i) {
+      const char c = line.charAt(i);
+      if (c == '"') q++;
+      else if (c == '{') ob++;
+      else if (c == '}') cb++;
+    }
+    d["quote_count"] = q;
+    d["open_brace_count"] = ob;
+    d["close_brace_count"] = cb;
+    if (n > 0) d["last_char_code"] = static_cast<int>(static_cast<unsigned char>(line.charAt(n - 1)));
     Serial.println(json_line(d));
     return;
   }
