@@ -360,13 +360,18 @@ def tls_bootstrap(*,
     )
 
     https_state = None
-    https_error = ""
+    https_error = None
     verify_host_value = (verify_host or host)
     https_url = f"{base_url(host=verify_host_value, port=int(https_port), scheme='https')}/api/v0/config/state"
     try:
         https_state = get_json(https_url, timeout=int(timeout))
     except Exception as e:
-        https_error = str(e)
+        https_error = {
+            "where": "tls_service.tls_bootstrap.https_verify",
+            "exception_type": type(e).__name__,
+            "message": str(e),
+            "url": https_url,
+        }
 
     reboot_attempted = False
     reboot_response = None
@@ -396,11 +401,16 @@ def tls_bootstrap(*,
 
         import time
         time.sleep(max(1, int(reboot_wait_seconds)))
-        https_error = ""
+        https_error = None
         try:
             https_state = get_json(https_url, timeout=int(timeout))
         except Exception as e:
-            https_error = str(e)
+            https_error = {
+                "where": "tls_service.tls_bootstrap.https_verify_after_reboot",
+                "exception_type": type(e).__name__,
+                "message": str(e),
+                "url": https_url,
+            }
 
     https_ok = bool(isinstance(https_state, dict) and https_state.get("ok"))
 

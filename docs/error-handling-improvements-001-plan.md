@@ -27,7 +27,7 @@ For exceptions, use:
 - [x] Phase 2: Normalize CLI top-level exception details to structured format
 - [x] Phase 3: Ensure tool entrypoint (`azt_tool.py`) uses structured unhandled exception detail
 - [x] Phase 4: Add actionable `configure-device` state probe network context (URL + where)
-- [ ] Phase 5: Service-layer network calls (`operations_service`, `device_service`, `tls_service`) include attempted URL/endpoint on failures
+- [~] Phase 5: Service-layer network calls (`operations_service`, `device_service`, `tls_service`) include attempted URL/endpoint on failures (in progress: core request paths updated)
 - [ ] Phase 6: Replace ambiguous combined validation failures with one-code-per-condition in remaining high-traffic paths
 - [ ] Phase 7: Add negative-path tests asserting error code + `where` + key context fields
 

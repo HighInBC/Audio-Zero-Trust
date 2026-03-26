@@ -22,6 +22,19 @@ from tools.azt_sdk.services.url_service import base_url
 import os
 
 
+def _error_detail(*, where: str, exc: Exception, url: str | None = None, context: dict | None = None) -> dict:
+    out = {
+        "where": where,
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if url:
+        out["url"] = url
+    if context:
+        out["context"] = context
+    return out
+
+
 def parse_meta(items: list[str]) -> dict:
     out = {}
     for item in items or []:
@@ -130,7 +143,7 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
         pub = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(state_dev_pub, validate=True))
         pub.verify(base64.b64decode(att_sig_b64, validate=True), att_payload_raw)
     except Exception as e:
-        return False, "ERR_ATTESTATION_SIG_VERIFY", {"detail": str(e)}
+        return False, "ERR_ATTESTATION_SIG_VERIFY", {"detail": _error_detail(where="operations_service.certify_issue.attestation_sig_verify", exc=e)}
 
     payload = {
         "schema": "azt.issue.certification.v1",
@@ -315,9 +328,17 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
             return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), {"url": url, "response": parsed}
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        return False, "ERR_OTA_BUNDLE_HTTP", {"url": url, "http_status": e.code, "response": body}
+        return False, "ERR_OTA_BUNDLE_HTTP", {
+            "url": url,
+            "http_status": e.code,
+            "response": body,
+            "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
+        }
     except Exception as e:
-        return False, "ERR_OTA_BUNDLE_POST", {"url": url, "error": str(e)}
+        return False, "ERR_OTA_BUNDLE_POST", {
+            "url": url,
+            "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
+        }
 
 
 def separate_headers(*, in_path: str, out_headers: str) -> tuple[bool, dict]:
