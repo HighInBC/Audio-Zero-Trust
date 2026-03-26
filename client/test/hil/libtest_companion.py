@@ -24,6 +24,7 @@ def _serial_prepare(ser, target: str) -> None:
         ser.rts = False
         time.sleep(0.05)
         ser.reset_input_buffer()
+        ser.reset_output_buffer()
         return
     # atom-echos3r uses native USB CDC; assert DTR so firmware serial path is active.
     if t == "atom-echos3r":
@@ -31,12 +32,14 @@ def _serial_prepare(ser, target: str) -> None:
         ser.rts = False
         time.sleep(0.15)
         ser.reset_input_buffer()
+        ser.reset_output_buffer()
         return
     # fallback
     ser.dtr = False
     ser.rts = False
     time.sleep(0.05)
     ser.reset_input_buffer()
+    ser.reset_output_buffer()
 
 
 def main() -> int:
