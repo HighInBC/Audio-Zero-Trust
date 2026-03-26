@@ -312,6 +312,7 @@ void handle_command_line(const String& line) {
 
 void setup() {
   Serial.begin(115200);
+  Serial.setTimeout(5000);
   delay(200);
 
   g_ctx.pubkey_pem = &g_pubkey_pem;
