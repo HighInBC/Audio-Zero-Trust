@@ -117,14 +117,14 @@ def wait_http_down(tool: ToolRunner, host: str, timeout_s: int = 20) -> bool:
     return False
 
 
-def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wifi_password: str, identity_prefix: str, upload_fs: bool) -> tuple[str, Path, Path, str, str, list[dict]]:
+def fresh_setup(tool: ToolRunner, host_hint: str, port: str, target: str, wifi_ssid: str, wifi_password: str, identity_prefix: str, upload_fs: bool) -> tuple[str, Path, Path, str, str, list[dict]]:
     steps: list[dict] = []
 
     # Transitional architecture step: route setup via azt-tool command surface.
     # NOTE: upload_fs is currently ignored here; once a dedicated CLI command exists,
     # E2E should invoke that command instead of direct PlatformIO usage.
     rc_erase, out_erase = tool.cmd(
-        ["erase-device", "--port", port],
+        ["erase-device", "--port", port, "--target", target],
         )
     steps.append({"name": "tool_erase_device", "ok": rc_erase == 0, "detail": out_erase[-2500:]})
     if rc_erase != 0:
@@ -134,7 +134,7 @@ def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wif
     identity = f"{identity_prefix}-{stamp}"
 
     rc_flash, out_flash = tool.cmd(
-        ["flash-device", "--from-source", "--port", port],
+        ["flash-device", "--from-source", "--port", port, "--target", target],
         )
     steps.append({"name": "tool_flash_device", "ok": rc_flash == 0, "detail": out_flash[-2500:]})
     if rc_flash != 0:
@@ -235,6 +235,7 @@ def main() -> int:
     ap.add_argument("--fast", action="store_true", help="Skip erase/flash/provision setup and run checks against existing host/key")
     ap.add_argument("--secrets-file", default=".secrets/e2e.env", help="Optional KEY=VALUE file for local secrets (default: .secrets/e2e.env)")
     ap.add_argument("--port", default=None)
+    ap.add_argument("--target", default="atom-echo", choices=["atom-echo", "atom-echos3r"], help="Hardware target for erase/flash during fresh setup")
     ap.add_argument("--wifi-ssid", default=None)
     ap.add_argument("--wifi-password", default=None)
     ap.add_argument("--identity-prefix", default="e2e")
@@ -275,6 +276,7 @@ def main() -> int:
                 tool,
                 host_hint=args.host,
                 port=port,
+                target=args.target,
                 wifi_ssid=wifi_ssid,
                 wifi_password=wifi_password,
                 identity_prefix=args.identity_prefix,

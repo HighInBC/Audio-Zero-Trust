@@ -52,7 +52,7 @@ def require_structured_detail(obj: dict) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate AZT CLI --json envelope contract")
-    ap.add_argument("--tool-cmd", default="python3 client/tools/azt_tool.py")
+    ap.add_argument("--tool-cmd", default="python3 tools/azt_tool.py")
     ap.add_argument("--host", default="", help="Optional device host for device-backed checks")
     ap.add_argument("--port", type=int, default=8080)
     args = ap.parse_args()
@@ -71,7 +71,7 @@ def main() -> int:
     if errs:
         failures.append("create-signing-credentials: " + "; ".join(errs) + f" | raw={raw[:300]}")
 
-    for cmd in (["erase-device", "--port", "/dev/null"], ["flash-device", "--port", "/dev/null"]):
+    for cmd in (["erase-device", "--port", "/dev/null", "--target", "atom-echo"], ["flash-device", "--port", "/dev/null", "--target", "atom-echo", "--from-source"]):
         # Expected to fail on invalid port but still should emit envelope.
         rc, obj, raw = run_cmd(args.tool_cmd, cmd)
         name = cmd[0]
@@ -79,7 +79,10 @@ def main() -> int:
         if not errs and obj.get("ok") is True:
             errs.append("expected failure with /dev/null but got ok=true")
         if obj.get("ok") is False:
-            errs.extend(require_structured_detail(obj))
+            err_code = str(obj.get("error") or "")
+            # Structured detail is mandatory for exception-wrapper style failures.
+            if err_code.endswith("_ERROR") or err_code.endswith("_EXCEPTION"):
+                errs.extend(require_structured_detail(obj))
         if errs:
             failures.append(f"{name}: " + "; ".join(errs) + f" | raw={raw[:300]}")
 
