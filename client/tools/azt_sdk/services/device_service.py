@@ -31,16 +31,29 @@ def _error_detail(*, where: str, exc: Exception, url: str | None = None, context
     return out
 
 
+def _get_json_safe(*, url: str, timeout: int, where: str, error: str) -> dict:
+    try:
+        return get_json(url, timeout=timeout)
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": error,
+            "detail": _error_detail(where=where, exc=e, url=url),
+        }
+
+
 def _state_get_v0(*, host: str, port: int, timeout: int) -> dict:
     scheme = os.getenv("AZT_SCHEME", "auto")
     b = base_url(host=host, port=port, scheme=scheme)
-    return get_json(f"{b}/api/v0/config/state", timeout=timeout)
+    url = f"{b}/api/v0/config/state"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v0", error="STATE_GET_V0_FAILED")
 
 
 def _state_get_v1_legacy(*, host: str, port: int, timeout: int) -> dict:
     scheme = os.getenv("AZT_SCHEME", "auto")
     b = base_url(host=host, port=port, scheme=scheme)
-    return get_json(f"{b}/api/v1/config/state", timeout=timeout)
+    url = f"{b}/api/v1/config/state"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v1_legacy", error="STATE_GET_V1_LEGACY_FAILED")
 
 
 def state_get(*, host: str, port: int, timeout: int) -> dict:
@@ -69,30 +82,39 @@ def state_get(*, host: str, port: int, timeout: int) -> dict:
 
 def attestation_get(*, host: str, port: int, timeout: int, nonce: str) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    return get_json(
-        f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
-        timeout=timeout,
-    )
+    url = f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.attestation_get", error="ATTESTATION_GET_FAILED")
 
 
 def certificate_get(*, host: str, port: int, timeout: int) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    return get_json(f"{b}/api/v0/device/certificate", timeout=timeout)
+    url = f"{b}/api/v0/device/certificate"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.certificate_get", error="CERTIFICATE_GET_FAILED")
 
 
 def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    return http_json("POST", f"{b}/api/v0/device/certificate", payload, timeout=timeout)
+    url = f"{b}/api/v0/device/certificate"
+    try:
+        return http_json("POST", url, payload, timeout=timeout)
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": "CERTIFICATE_POST_FAILED",
+            "detail": _error_detail(where="device_service.certificate_post", exc=e, url=url),
+        }
 
 
 def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    ch = get_json(f"{b}/api/v0/device/reboot/challenge", timeout=timeout)
+    challenge_url = f"{b}/api/v0/device/reboot/challenge"
+    ch = _get_json_safe(url=challenge_url, timeout=timeout, where="device_service.reboot_device.challenge", error="REBOOT_CHALLENGE_REQUEST_FAILED")
     if not ch.get("ok"):
         return {
             "ok": False,
             "error": "ERR_REBOOT_CHALLENGE",
             "detail": ch.get("error") or ch.get("detail") or "challenge request failed",
+            "challenge_url": challenge_url,
             "challenge_response": ch,
         }
 
@@ -114,7 +136,15 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
         "signature_b64": sig_b64,
         "signer_fingerprint_hex": signer_fp,
     }
-    return http_json("POST", f"{b}/api/v0/device/reboot", payload, timeout=timeout)
+    reboot_url = f"{b}/api/v0/device/reboot"
+    try:
+        return http_json("POST", reboot_url, payload, timeout=timeout)
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": "REBOOT_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.reboot_device.post", exc=e, url=reboot_url),
+        }
 
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:

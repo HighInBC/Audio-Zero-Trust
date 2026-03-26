@@ -31,6 +31,13 @@ ERROR_CODES: dict[str, str] = {
     "STREAM_REDIRECT_CHECK_REQUEST_FAILED": "Stream redirect probe request failed.",
     "STREAM_READ_REQUEST_FAILED": "Failed to open stream request.",
     "STREAM_READ_ITERATION_FAILED": "Failed while reading stream chunks.",
+    "STATE_GET_V0_FAILED": "Failed to fetch API v0 state endpoint.",
+    "STATE_GET_V1_LEGACY_FAILED": "Failed to fetch legacy API v1 state endpoint.",
+    "ATTESTATION_GET_FAILED": "Failed to fetch device attestation.",
+    "CERTIFICATE_GET_FAILED": "Failed to fetch device certificate.",
+    "CERTIFICATE_POST_FAILED": "Failed to upload device certificate.",
+    "REBOOT_CHALLENGE_REQUEST_FAILED": "Failed to fetch reboot challenge.",
+    "REBOOT_REQUEST_FAILED": "Failed to submit reboot request.",
 }
 
 
