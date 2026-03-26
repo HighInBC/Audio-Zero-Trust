@@ -70,13 +70,19 @@ def main() -> int:
 
         deadline = time.time() + args.timeout
         sent_pub = False
+        pubkey_acked = False
         started = False
+        last_pub_send_at = 0.0
 
         while time.time() < deadline:
             now = time.time()
             if (now - last_ping_at) >= 1.0:
                 send({"cmd": "PING"})
                 last_ping_at = now
+            if sent_pub and (not pubkey_acked) and (now - last_pub_send_at) >= 2.0:
+                send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
+                last_pub_send_at = now
+
             raw = ser.readline().decode("utf-8", errors="replace").strip()
             if not raw:
                 continue
@@ -92,11 +98,14 @@ def main() -> int:
                 if not sent_pub:
                     send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                     sent_pub = True
+                    last_pub_send_at = now
                 continue
 
-            if ev == "PUBKEY_SET_OK" and not started:
-                send({"cmd": "RUN_ALL"})
-                started = True
+            if ev == "PUBKEY_SET_OK":
+                pubkey_acked = True
+                if not started:
+                    send({"cmd": "RUN_ALL"})
+                    started = True
                 continue
 
             if ev == "RSA_WRAP_AES_REQ":
@@ -148,7 +157,7 @@ def main() -> int:
                 print(jdump({"companion_ok": ok, **msg}))
                 return 0 if ok else 1
 
-        print(jdump({"error": "timeout", "sent_pub": sent_pub, "started": started, "target": args.target}))
+        print(jdump({"error": "timeout", "sent_pub": sent_pub, "pubkey_acked": pubkey_acked, "started": started, "target": args.target}))
         return 3
 
 
