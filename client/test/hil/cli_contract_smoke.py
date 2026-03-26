@@ -37,6 +37,19 @@ def require_envelope(obj: dict, command: str) -> list[str]:
     return errs
 
 
+def require_structured_detail(obj: dict) -> list[str]:
+    errs: list[str] = []
+    detail = obj.get("detail")
+    if detail in (None, "", {}):
+        return ["expected structured detail on failure"]
+    if not isinstance(detail, dict):
+        return ["detail should be object on failure"]
+    for k in ("where", "exception_type", "message"):
+        if k not in detail:
+            errs.append(f"detail missing {k}")
+    return errs
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate AZT CLI --json envelope contract")
     ap.add_argument("--tool-cmd", default="python3 client/tools/azt_tool.py")
@@ -65,6 +78,8 @@ def main() -> int:
         errs = require_envelope(obj, name)
         if not errs and obj.get("ok") is True:
             errs.append("expected failure with /dev/null but got ok=true")
+        if obj.get("ok") is False:
+            errs.extend(require_structured_detail(obj))
         if errs:
             failures.append(f"{name}: " + "; ".join(errs) + f" | raw={raw[:300]}")
 
