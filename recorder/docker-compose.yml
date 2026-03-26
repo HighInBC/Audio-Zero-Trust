@@ -7,6 +7,10 @@ services:
     user: "1000:1000"
     network_mode: host
     command: ["--config", "/config/recorder.yaml"]
+    environment:
+      - TZ=America/Vancouver
     volumes:
       - ./config:/config:ro
       - ./data/recordings:/data/recordings
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
