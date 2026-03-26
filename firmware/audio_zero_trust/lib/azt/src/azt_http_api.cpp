@@ -2319,7 +2319,14 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
                   "<h1>AZT OTA Upgrade</h1>"
                   "<p>POST multipart firmware bundle to <code>/api/v0/device/upgrade</code>.</p>"
                   "</body></html>";
-    send_response(client, 200, "text/html; charset=utf-8", html);
+    client.print("HTTP/1.1 200 OK\r\n");
+    client.print("Content-Type: text/html; charset=utf-8\r\n");
+    client.print("Cache-Control: no-store\r\n");
+    client.print("Connection: close\r\n");
+    client.print("Content-Length: ");
+    client.print(html.length());
+    client.print("\r\n\r\n");
+    client.print(html);
     return;
   }
 
