@@ -76,10 +76,12 @@ def main() -> int:
 
         while time.time() < deadline:
             now = time.time()
-            if (now - last_ping_at) >= 1.0:
+            if not sent_pub and (now - last_ping_at) >= 1.0:
                 send({"cmd": "PING"})
                 last_ping_at = now
-            if sent_pub and (not pubkey_acked) and (now - last_pub_send_at) >= 2.0:
+            if sent_pub and (not pubkey_acked) and (now - last_pub_send_at) >= 3.0:
+                # Retry only the pending PUBKEY_SET command; avoid interleaving extra commands
+                # while waiting for a potentially long serial frame to parse on-device.
                 send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                 last_pub_send_at = now
 
