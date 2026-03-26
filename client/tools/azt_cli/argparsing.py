@@ -75,6 +75,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sd.add_argument("--out", dest="out_path", default="", help="Output WAV path (single input only; default: <in>.wav)")
     sd.add_argument("--apply-gain", action="store_true", help="Apply recommended_decode_gain from stream header")
     sd.add_argument("--gain", type=float, default=None, help="Explicit decode gain multiplier (overrides --apply-gain)")
+    sd.add_argument("--preserve-tail", action="store_true", help="Keep unsigned tail audio after the last verified checkpoint (default: trim unsigned tail)")
     sd.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sd.set_defaults(func=handlers.cmd_stream_decode)
 

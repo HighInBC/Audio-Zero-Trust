@@ -46,6 +46,7 @@ def run(args: argparse.Namespace) -> int:
                     out_path=out_path,
                     apply_gain=bool(getattr(args, "apply_gain", False)),
                     gain=(float(args.gain) if getattr(args, "gain", None) is not None else None),
+                    preserve_tail=bool(getattr(args, "preserve_tail", False)),
                 )
                 ok = bool(out.get("ok"))
                 all_ok = all_ok and ok
