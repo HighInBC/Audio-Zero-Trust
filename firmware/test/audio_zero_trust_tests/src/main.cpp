@@ -33,6 +33,8 @@ uint32_t g_suite_pass = 0;
 uint32_t g_suite_fail = 0;
 int g_async_suite_index = -1;
 String g_rx_line;
+uint32_t g_rx_last_byte_ms = 0;
+uint32_t g_rx_last_debug_ms = 0;
 
 String json_line(const JsonDocument& doc) {
   String out;
@@ -357,11 +359,24 @@ void loop() {
       continue;
     }
     g_rx_line += c;
+    g_rx_last_byte_ms = millis();
     if (g_rx_line.length() > 4096) {
       g_rx_line = "";
       emit_status("error", "command line too long");
     }
   }
 
-  if (!had_data) delay(5);
+  if (!had_data) {
+    if (g_rx_line.length() > 0 && (millis() - g_rx_last_byte_ms) > 500 && (millis() - g_rx_last_debug_ms) > 500) {
+      JsonDocument d;
+      d["event"] = "STATUS";
+      d["level"] = "debug";
+      d["msg"] = "incomplete command buffered";
+      d["line_len"] = g_rx_line.length();
+      d["line_tail"] = g_rx_line.substring(g_rx_line.length() > 60 ? g_rx_line.length() - 60 : 0);
+      Serial.println(json_line(d));
+      g_rx_last_debug_ms = millis();
+    }
+    delay(5);
+  }
 }
