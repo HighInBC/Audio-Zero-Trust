@@ -6,6 +6,7 @@ import base64
 import json
 import sys
 import time
+import fcntl
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -62,8 +63,25 @@ def main() -> int:
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
 
+    lockf = open('/tmp/libtest_companion.lock', 'w')
+    try:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(jdump({"error": "companion_lock_busy"}), file=sys.stderr)
+        return 4
+
     with serial.Serial(args.port, baudrate=args.baud, timeout=0.25) as ser:
         _serial_prepare(ser, args.target)
+
+        # Drain any stale bytes/partial lines left by previous sessions before handshake.
+        drain_until = time.time() + 1.0
+        drained = 0
+        while time.time() < drain_until:
+            b = ser.read(256)
+            if b:
+                drained += len(b)
+        if drained:
+            print(jdump({"companion_drain_bytes": drained}), file=sys.stderr)
 
         def send(obj: dict):
             line = jdump(obj) + "\n"
