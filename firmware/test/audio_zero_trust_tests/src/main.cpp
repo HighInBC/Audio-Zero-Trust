@@ -32,6 +32,7 @@ uint32_t g_suite_total = 0;
 uint32_t g_suite_pass = 0;
 uint32_t g_suite_fail = 0;
 int g_async_suite_index = -1;
+String g_rx_line;
 
 String json_line(const JsonDocument& doc) {
   String out;
@@ -291,23 +292,6 @@ void handle_command_line(const String& line) {
     return;
   }
 
-  if (cmd == "PUBKEY_SET_DER") {
-    const char* der_b64 = in["der_b64"] | "";
-    std::vector<uint8_t> der;
-    if (!b64_decode_to_vec(String(der_b64), der) || der.empty()) {
-      emit_status("error", "invalid der_b64");
-      return;
-    }
-    g_pubkey_raw.assign(der.begin(), der.end());
-    g_pubkey_pem = "";
-    JsonDocument d;
-    d["event"] = "PUBKEY_SET_OK";
-    d["len"] = static_cast<uint32_t>(g_pubkey_raw.size());
-    d["mode"] = "der";
-    Serial.println(json_line(d));
-    return;
-  }
-
   if (cmd == "RUN_TEST") {
     String name = String((const char*)(in["name"] | ""));
     run_test_by_name(name);
@@ -331,7 +315,6 @@ void handle_command_line(const String& line) {
 
 void setup() {
   Serial.begin(115200);
-  Serial.setTimeout(5000);
   delay(200);
 
   g_ctx.pubkey_pem = &g_pubkey_pem;
@@ -349,12 +332,24 @@ void setup() {
 void loop() {
   check_pending_timeout();
 
-  if (!Serial.available()) {
-    delay(5);
-    return;
+  bool had_data = false;
+  while (Serial.available()) {
+    had_data = true;
+    const char c = static_cast<char>(Serial.read());
+    if (c == '\r') continue;
+    if (c == '\n') {
+      String line = g_rx_line;
+      g_rx_line = "";
+      line.trim();
+      if (line.length() > 0) handle_command_line(line);
+      continue;
+    }
+    g_rx_line += c;
+    if (g_rx_line.length() > 4096) {
+      g_rx_line = "";
+      emit_status("error", "command line too long");
+    }
   }
-  String line = Serial.readStringUntil('\n');
-  line.trim();
-  if (line.length() == 0) return;
-  handle_command_line(line);
+
+  if (!had_data) delay(5);
 }

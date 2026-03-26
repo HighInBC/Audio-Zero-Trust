@@ -53,14 +53,9 @@ def main() -> int:
         print("pyserial required: pip install pyserial", file=sys.stderr)
         raise SystemExit(2) from e
 
-    # Test companion key only; 1024 keeps PUBKEY_SET payload smaller for constrained serial JSON parsing paths.
-    priv = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pub_pem = priv.public_key().public_bytes(
         serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    pub_der = priv.public_key().public_bytes(
-        serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
 
@@ -85,10 +80,7 @@ def main() -> int:
                 send({"cmd": "PING"})
                 last_ping_at = now
             if sent_pub and (not pubkey_acked) and (now - last_pub_send_at) >= 2.0:
-                if args.target == "atom-echos3r":
-                    send({"cmd": "PUBKEY_SET_DER", "der_b64": base64.b64encode(pub_der).decode("ascii")})
-                else:
-                    send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
+                send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                 last_pub_send_at = now
 
             raw = ser.readline().decode("utf-8", errors="replace").strip()
@@ -104,10 +96,7 @@ def main() -> int:
             ev = msg.get("event")
             if ev == "PONG":
                 if not sent_pub:
-                    if args.target == "atom-echos3r":
-                        send({"cmd": "PUBKEY_SET_DER", "der_b64": base64.b64encode(pub_der).decode("ascii")})
-                    else:
-                        send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
+                    send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                     sent_pub = True
                     last_pub_send_at = now
                 continue
