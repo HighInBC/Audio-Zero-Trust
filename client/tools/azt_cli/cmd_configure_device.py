@@ -25,14 +25,14 @@ def run(args: argparse.Namespace) -> int:
         if ota_floor_raw:
             if ota_floor_raw == "same":
                 if ota_ver is None:
-                    emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE", payload={"detail": "--ota-version-code is required when --ota-min-version-code=same"}, as_json=bool(getattr(args, "as_json", False)))
+                    emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE_REQUIRED_FOR_SAME_FLOOR", payload={"detail": "--ota-version-code is required when --ota-min-version-code=same", "where": "cmd_configure_device.run.ota_floor_same"}, as_json=bool(getattr(args, "as_json", False)))
                     return 1
                 ota_floor = ota_ver
             else:
                 ota_floor = int(ota_floor_raw)
 
         if ota_floor is not None and ota_ver is None:
-            emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE", payload={"detail": "--ota-version-code is required when setting --ota-min-version-code"}, as_json=bool(getattr(args, "as_json", False)))
+            emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE_REQUIRED_FOR_MIN_FLOOR", payload={"detail": "--ota-version-code is required when setting --ota-min-version-code", "where": "cmd_configure_device.run.ota_floor_requires_version"}, as_json=bool(getattr(args, "as_json", False)))
             return 1
         ota_signer_pem = ""
         ota_signer_path = (getattr(args, "ota_signer_public_key_pem", "") or "").strip()

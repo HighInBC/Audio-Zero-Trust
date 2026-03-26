@@ -18,6 +18,10 @@ ERROR_CODES: dict[str, str] = {
     "CONFIGURE_DEVICE_INVALID_AUDIO_PREAMP_GAIN": "Audio preamp gain outside valid range.",
     "CONFIGURE_DEVICE_INVALID_AUDIO_ADC_GAIN": "Audio ADC gain outside valid range.",
     "CONFIGURE_DEVICE_HTTP_STATE_PROBE_FAILED": "HTTP state probe failed before config apply.",
+    "SERIAL_REQUIRED_FOR_OTA_CONTROLS": "Serial bootstrap is required when OTA floor/signer controls are requested.",
+    "HTTP_STATE_UNREACHABLE_SERIAL_DISABLED": "HTTP state probe failed while serial bootstrap is disabled.",
+    "INVALID_OTA_VERSION_CODE_REQUIRED_FOR_SAME_FLOOR": "--ota-version-code is required when --ota-min-version-code=same.",
+    "INVALID_OTA_VERSION_CODE_REQUIRED_FOR_MIN_FLOOR": "--ota-version-code is required when setting --ota-min-version-code.",
 }
 
 
