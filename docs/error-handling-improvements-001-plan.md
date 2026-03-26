@@ -41,12 +41,18 @@ For exceptions, use:
   - URL
   - exception type/message
 
+## Remaining Gaps Checklist
+
+- [ ] Add explicit regression tests for service-layer failure codes:
+  - `APPLY_CONFIG_POST_FAILED`, `APPLY_CONFIG_STATE_GET_FAILED`
+  - `CONFIG_PATCH_POST_FAILED`, `CONFIG_PATCH_STATE_GET_FAILED`
+  - `STATE_GET_V0_FAILED`, `ATTESTATION_GET_FAILED`, `CERTIFICATE_POST_FAILED`
+- [ ] Normalize remaining broad command-level `*_ERROR` wrappers into more specific families where practical.
+- [ ] Add a short `docs/error-contract.md` with canonical failure-detail object examples.
+- [ ] Optional: enforce known-code usage in CI (lint against unknown error constants).
+
 ## Next Priority
 
-Focus service-layer paths where users most frequently hit network/provisioning issues:
-
-1. `client/tools/azt_sdk/services/operations_service.py`
-2. `client/tools/azt_sdk/services/device_service.py`
-3. `client/tools/azt_sdk/services/tls_service.py`
-
-Add URL/path context in every caught request failure and ensure each branch has a distinct stable error code.
+1. Add focused negative tests for the new service-layer error codes.
+2. Split any remaining broad command-level error wrappers if they hide multiple causes.
+3. Document the contract in a dedicated short doc and lock with CI checks.

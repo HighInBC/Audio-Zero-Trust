@@ -38,6 +38,8 @@ ERROR_CODES: dict[str, str] = {
     "CERTIFICATE_POST_FAILED": "Failed to upload device certificate.",
     "REBOOT_CHALLENGE_REQUEST_FAILED": "Failed to fetch reboot challenge.",
     "REBOOT_REQUEST_FAILED": "Failed to submit reboot request.",
+    "TLS_BOOTSTRAP_REBOOT_CHALLENGE_FAILED": "TLS bootstrap reboot challenge request failed.",
+    "TLS_BOOTSTRAP_REBOOT_POST_FAILED": "TLS bootstrap reboot request submission failed.",
 }
 
 
