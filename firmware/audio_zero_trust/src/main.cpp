@@ -95,9 +95,12 @@ void setup() {
 
 void loop() {
   if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(200)) == pdTRUE) {
-    azt::maybe_maintain_wifi(g_state);
-    azt::maybe_refresh_time_sync(g_state);
-    azt::maybe_broadcast_discovery_announcement(g_state);
+    // During serial config payload ingestion, reduce background serial chatter and work.
+    if (!g_serial_state.config_mode) {
+      azt::maybe_maintain_wifi(g_state);
+      azt::maybe_refresh_time_sync(g_state);
+      azt::maybe_broadcast_discovery_announcement(g_state);
+    }
     xSemaphoreGive(g_state_mu);
   }
 

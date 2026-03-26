@@ -220,7 +220,28 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
         step = 128
         for i in range(0, len(blob), step):
             ser.write(blob[i:i + step])
-            time.sleep(0.002)
+            if (i // step) % 8 == 0:
+                try:
+                    ser.flush()
+                except Exception:
+                    pass
+            # Drain serial output while sending to avoid CDC backpressure during large payload transfer.
+            for _ in range(4):
+                line = ser.readline().decode('utf-8', errors='replace').strip()
+                if not line:
+                    break
+                print({'serial': line})
+                m = ip_re.search(line)
+                if m:
+                    device_ip = m.group(1)
+                m2 = wifi_ip_re.search(line)
+                if m2:
+                    device_ip = m2.group(1)
+            time.sleep(0.001)
+        try:
+            ser.flush()
+        except Exception:
+            pass
 
         apply_ok = False
         saw_reboot = False

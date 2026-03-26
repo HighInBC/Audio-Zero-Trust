@@ -139,7 +139,9 @@ void handle_serial_control(AppState& state,
     }
 
     if (step.timed_out) {
-      Serial.printf("AZT_CONFIG_APPLY code=408 body={\"ok\":false,\"error\":\"ERR_CONFIG_TIMEOUT\",\"detail\":\"serial config payload timeout\"}\n");
+      Serial.printf("AZT_CONFIG_APPLY code=408 body={\"ok\":false,\"error\":\"ERR_CONFIG_TIMEOUT\",\"detail\":\"serial config payload timeout\",\"received\":%u,\"expected\":%u}\n",
+                    static_cast<unsigned>(serial_state.config_buf.length()),
+                    static_cast<unsigned>(serial_state.config_expected_len));
       clear_serial_config_rx_state(serial_state);
     }
     return;
