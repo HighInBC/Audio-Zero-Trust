@@ -53,7 +53,8 @@ def main() -> int:
         print("pyserial required: pip install pyserial", file=sys.stderr)
         raise SystemExit(2) from e
 
-    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    # Test companion key only; 1024 keeps PUBKEY_SET payload smaller for constrained serial JSON parsing paths.
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=1024)
     pub_pem = priv.public_key().public_bytes(
         serialization.Encoding.PEM,
         serialization.PublicFormat.SubjectPublicKeyInfo,
