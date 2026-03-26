@@ -68,6 +68,12 @@ def main() -> int:
         def send(obj: dict):
             line = jdump(obj) + "\n"
             ser.write(line.encode("utf-8"))
+            dbg = {
+                "companion_send": obj.get("cmd", "?"),
+                "len": len(line),
+                "t": round(time.time(), 3),
+            }
+            print(jdump(dbg), file=sys.stderr)
 
         deadline = time.time() + args.timeout
         sent_pub = False
