@@ -66,16 +66,18 @@ def main() -> int:
             line = jdump(obj) + "\n"
             ser.write(line.encode("utf-8"))
 
-        last_ping_at = 0.0
-
         deadline = time.time() + args.timeout
         sent_pub = False
         pubkey_acked = False
         started = False
+        phase = "wait_pong"
+
+        send({"cmd": "PING"})
+        last_ping_at = time.time()
 
         while time.time() < deadline:
             now = time.time()
-            if not sent_pub and (now - last_ping_at) >= 1.0:
+            if phase == "wait_pong" and (now - last_ping_at) >= 5.0:
                 send({"cmd": "PING"})
                 last_ping_at = now
 
@@ -91,16 +93,18 @@ def main() -> int:
 
             ev = msg.get("event")
             if ev == "PONG":
-                if not sent_pub:
+                if phase == "wait_pong" and not sent_pub:
                     send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                     sent_pub = True
+                    phase = "wait_pubkey"
                 continue
 
             if ev == "PUBKEY_SET_OK":
                 pubkey_acked = True
-                if not started:
+                if phase == "wait_pubkey" and not started:
                     send({"cmd": "RUN_ALL"})
                     started = True
+                    phase = "run"
                 continue
 
             if ev == "RSA_WRAP_AES_REQ":
