@@ -121,7 +121,7 @@ static String parse_query_param(const String& path, const char* key) {
 }
 
 static bool is_valid_attestation_nonce(const String& nonce) {
-  if (nonce.length() < 8 || nonce.length() > 128) return false;
+  if (nonce.length() < 8 || nonce.length() > 256) return false;
   for (size_t i = 0; i < nonce.length(); ++i) {
     char c = nonce[i];
     bool ok =
@@ -1154,7 +1154,7 @@ HttpDispatchResult dispatch_request(const String& method,
     String nonce = parse_query_param(path, "nonce");
     if (!is_valid_attestation_nonce(nonce)) {
       r.code = 400;
-      r.body = "{\"ok\":false,\"error\":\"ERR_ATTEST_NONCE\",\"detail\":\"nonce required (8..128 chars, [A-Za-z0-9._-])\"}";
+      r.body = "{\"ok\":false,\"error\":\"ERR_ATTEST_NONCE\",\"detail\":\"nonce required (8..256 chars, [A-Za-z0-9._-])\"}";
       r.content_type = "application/json";
       return r;
     }
@@ -2311,6 +2311,15 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
   if (!is_remote_ip_authorized(state, remote_ip)) {
     send_json(client, 403,
               "{\"ok\":false,\"error\":\"ERR_AUTH_LISTENER_IP\",\"detail\":\"listener IP not authorized\"}");
+    return;
+  }
+
+  if (method == "GET" && path == "/api/v0/device/upgrade") {
+    String html = "<!doctype html><html><head><meta charset=\"utf-8\"><title>AZT OTA Upgrade</title></head><body>"
+                  "<h1>AZT OTA Upgrade</h1>"
+                  "<p>POST multipart firmware bundle to <code>/api/v0/device/upgrade</code>.</p>"
+                  "</body></html>";
+    send_response(client, 200, "text/html; charset=utf-8", html);
     return;
   }
 

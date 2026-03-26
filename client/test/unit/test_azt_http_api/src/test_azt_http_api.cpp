@@ -402,9 +402,11 @@ bool test_stream_query_drop_test_frames_invalid_defaults_zero(Context&) {
 }
 
 bool test_reboot_endpoint_sets_flag(Context&) {
+  // Reboot endpoint is authenticated via challenge/signature; unmanaged state should reject.
   azt::AppState st{};
   auto r = azt::dispatch_request("POST", "/api/v0/device/reboot", "", st);
-  return r.code == 200 && r.content_type == "application/json" && r.reboot_after_response;
+  return r.code == 409 && r.content_type == "application/json" && !r.reboot_after_response &&
+         r.body.indexOf("ERR_REBOOT_AUTH_NOT_READY") >= 0;
 }
 
 bool test_signing_public_key_endpoint_alias(Context&) {
