@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tools.azt_cli.output import emit_envelope
+from tools.azt_sdk.errors import exception_detail
 from tools.azt_sdk.services.provisioning_service import configure_device
 
 
@@ -93,7 +94,17 @@ def run(args: argparse.Namespace) -> int:
             command="configure-device",
             ok=False,
             error="CONFIGURE_DEVICE_ERROR",
-            detail=str(e),
+            detail=exception_detail(
+                where="cmd_configure_device.run",
+                exc=e,
+                context={
+                    "admin_creds_dir": str(getattr(args, "admin_creds_dir", "") or ""),
+                    "recorder_creds_dir": str(getattr(args, "recorder_creds_dir", "") or ""),
+                    "host": str(getattr(args, "host", "") or ""),
+                    "ip": str(getattr(args, "ip", "") or ""),
+                    "port": str(getattr(args, "port", "") or ""),
+                },
+            ),
             as_json=bool(getattr(args, "as_json", False)),
         )
         return 2

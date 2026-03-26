@@ -189,12 +189,20 @@ def configure_device(
 
     state0 = None
     state0_err = None
+    state0_url = None
     if device_ip:
         base = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "auto"))
+        state0_url = base + "/api/v0/config/state"
         try:
-            state0 = http_json("GET", base + "/api/v0/config/state")
+            state0 = http_json("GET", state0_url)
         except Exception as e:
-            state0_err = str(e)
+            state0_err = {
+                "error": "CONFIGURE_DEVICE_HTTP_STATE_PROBE_FAILED",
+                "where": "provisioning_service.configure_device.state_probe",
+                "url": state0_url,
+                "exception_type": type(e).__name__,
+                "message": str(e),
+            }
 
     serial_required = (
         (ota_min_version_code is not None)
@@ -230,6 +238,8 @@ def configure_device(
         common["tls_san_hosts"] = tls_material.get("san_hosts") or []
     if detected_ip:
         common["ip_detected"] = detected_ip
+    if state0_url:
+        common["state_probe_url"] = state0_url
     if state0_err:
         common["state_probe_error"] = state0_err
 
