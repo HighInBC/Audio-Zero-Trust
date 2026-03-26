@@ -16,11 +16,35 @@ def jdump(x: dict) -> str:
     return json.dumps(x, separators=(",", ":"))
 
 
+def _serial_prepare(ser, target: str) -> None:
+    t = (target or "").strip().lower()
+    # atom-echo uses USB-UART bridge; keep lines low and clear stale boot text.
+    if t == "atom-echo":
+        ser.dtr = False
+        ser.rts = False
+        time.sleep(0.05)
+        ser.reset_input_buffer()
+        return
+    # atom-echos3r uses native USB CDC; assert DTR so firmware serial path is active.
+    if t == "atom-echos3r":
+        ser.dtr = True
+        ser.rts = False
+        time.sleep(0.15)
+        ser.reset_input_buffer()
+        return
+    # fallback
+    ser.dtr = False
+    ser.rts = False
+    time.sleep(0.05)
+    ser.reset_input_buffer()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Companion app for on-device library test firmware")
     ap.add_argument("--port", default="/dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--timeout", type=int, default=60)
+    ap.add_argument("--target", default="atom-echo", choices=["atom-echo", "atom-echos3r"], help="Device target; controls serial handshake strategy")
     args = ap.parse_args()
 
     try:
@@ -36,22 +60,23 @@ def main() -> int:
     )
 
     with serial.Serial(args.port, baudrate=args.baud, timeout=0.25) as ser:
-        ser.dtr = False
-        ser.rts = False
-        time.sleep(0.05)
-        ser.reset_input_buffer()
+        _serial_prepare(ser, args.target)
 
         def send(obj: dict):
             line = jdump(obj) + "\n"
             ser.write(line.encode("utf-8"))
 
-        send({"cmd": "PING"})
+        last_ping_at = 0.0
 
         deadline = time.time() + args.timeout
         sent_pub = False
         started = False
 
         while time.time() < deadline:
+            now = time.time()
+            if (now - last_ping_at) >= 1.0:
+                send({"cmd": "PING"})
+                last_ping_at = now
             raw = ser.readline().decode("utf-8", errors="replace").strip()
             if not raw:
                 continue
@@ -123,7 +148,7 @@ def main() -> int:
                 print(jdump({"companion_ok": ok, **msg}))
                 return 0 if ok else 1
 
-        print(jdump({"error": "timeout", "sent_pub": sent_pub, "started": started}))
+        print(jdump({"error": "timeout", "sent_pub": sent_pub, "started": started, "target": args.target}))
         return 3
 
 
