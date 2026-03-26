@@ -328,6 +328,7 @@ void handle_command_line(const String& line) {
 }  // namespace
 
 void setup() {
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
   delay(200);
 
