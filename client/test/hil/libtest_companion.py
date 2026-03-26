@@ -73,14 +73,9 @@ def main() -> int:
         phase = "wait_pong"
 
         send({"cmd": "PING"})
-        last_ping_at = time.time()
 
         while time.time() < deadline:
             now = time.time()
-            if phase == "wait_pong" and (now - last_ping_at) >= 5.0:
-                send({"cmd": "PING"})
-                last_ping_at = now
-
             raw = ser.readline().decode("utf-8", errors="replace").strip()
             if not raw:
                 continue
