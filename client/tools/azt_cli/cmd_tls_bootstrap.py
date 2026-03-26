@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.tls_service import tls_bootstrap
 
 
@@ -42,5 +42,5 @@ def run(args: argparse.Namespace) -> int:
         emit_envelope(command="tls-bootstrap", ok=True, payload=payload, as_json=bool(getattr(args, "as_json", False)))
         return 0
     except Exception as e:
-        emit_envelope(command="tls-bootstrap", ok=False, error="TLS_BOOTSTRAP_FAILED", detail=str(e), as_json=bool(getattr(args, "as_json", False)))
+        emit_envelope(command="tls-bootstrap", ok=False, error="TLS_BOOTSTRAP_FAILED", detail=exception_detail("cmd_tls_bootstrap.run", e), as_json=bool(getattr(args, "as_json", False)))
         return 1

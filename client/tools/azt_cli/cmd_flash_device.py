@@ -12,7 +12,7 @@ import time
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_cli.targets import env_for_target
 from tools.azt_client.crypto import load_private_key_auto
 from tools.azt_sdk.services import build_service
@@ -260,7 +260,7 @@ def run(args: argparse.Namespace) -> int:
             command="flash-device",
             ok=False,
             error="FLASH_EXCEPTION",
-            detail=str(e),
+            detail=exception_detail("cmd_flash_device.run", e),
             as_json=bool(getattr(args, "as_json", False)),
         )
         return 2

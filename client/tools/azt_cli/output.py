@@ -6,6 +6,17 @@ from typing import Any
 REQUIRED_KEYS = ("ok", "command", "error", "detail", "payload")
 
 
+def exception_detail(where: str, exc: Exception, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "where": where,
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if context:
+        out["context"] = context
+    return out
+
+
 def validate_envelope(env: dict[str, Any]) -> None:
     for k in REQUIRED_KEYS:
         if k not in env:

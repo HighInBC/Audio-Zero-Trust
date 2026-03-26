@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.crypto_service import key_fingerprint_from_private_key
 from tools.azt_sdk.services.device_service import state_get
 
@@ -22,5 +22,5 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0 if ok else 1
     except Exception as e:
-        emit_envelope(command="key-match-check", ok=False, error="KEY_MATCH_CHECK_ERROR", detail=str(e), as_json=bool(getattr(args, "as_json", False)))
+        emit_envelope(command="key-match-check", ok=False, error="KEY_MATCH_CHECK_ERROR", detail=exception_detail("cmd_key_match_check.run", e), as_json=bool(getattr(args, "as_json", False)))
         return 2
