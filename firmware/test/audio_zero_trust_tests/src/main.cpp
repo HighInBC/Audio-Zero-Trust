@@ -247,7 +247,15 @@ void handle_command_line(const String& line) {
   JsonDocument in;
   auto err = deserializeJson(in, line);
   if (err) {
-    emit_status("error", "invalid json command");
+    JsonDocument d;
+    d["event"] = "STATUS";
+    d["level"] = "error";
+    d["msg"] = "invalid json command";
+    d["json_error"] = err.c_str();
+    d["line_len"] = line.length();
+    String head = line.substring(0, 80);
+    d["line_head"] = head;
+    Serial.println(json_line(d));
     return;
   }
 
