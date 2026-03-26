@@ -114,10 +114,14 @@ def timestamp_tar_path(file_path: Path) -> Path:
 
 
 def is_file_in_use(file_path: Path) -> bool:
+    # Best-effort open-file check without external dependencies.
+    # Compare several path forms because /proc fd symlinks can vary by namespace
+    # and may include a trailing " (deleted)" marker.
+    candidates = {str(file_path), str(file_path.absolute())}
     try:
-        target = str(file_path.resolve())
+        candidates.add(str(file_path.resolve()))
     except Exception:
-        target = str(file_path)
+        pass
 
     proc_root = Path("/proc")
     for proc_entry in proc_root.iterdir():
@@ -132,14 +136,15 @@ def is_file_in_use(file_path: Path) -> bool:
                     link = os.readlink(fd)
                 except Exception:
                     continue
-                if link == target or link.startswith(target + " "):
-                    return True
+                for target in candidates:
+                    if link == target or link.startswith(target + " ") or link == (target + " (deleted)"):
+                        return True
         except Exception:
             continue
     return False
 
 
-def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 60) -> list[Path]:
+def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 10) -> list[Path]:
     # Scale-aware scan:
     # - scope to recent date partitions (today + yesterday), where new rollovers occur
     # - pair files by basename in one pass (.azt vs .azt.timestamp.tar)
@@ -183,6 +188,19 @@ def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 
 
     out.sort(key=lambda x: x.stat().st_mtime)
     return out
+
+
+def should_timestamp_file(file_path: Path, *, older_than_seconds: int = 10) -> bool:
+    if not file_path.exists() or file_path.stat().st_size <= 0:
+        return False
+    if timestamp_tar_path(file_path).exists():
+        return False
+    age = time.time() - file_path.stat().st_mtime
+    if age < float(max(0, older_than_seconds)):
+        return False
+    if is_file_in_use(file_path):
+        return False
+    return True
 
 
 def timestamp_recording(file_path: Path, tsa_url: str) -> tuple[Path, Path, Path]:
@@ -297,7 +315,14 @@ class RecordingSession:
         except Exception as e:
             stream_err = e
         finally:
-            if self.cfg.auto_timestamp_on_complete and out_path.exists() and out_path.stat().st_size > 0:
+            # Do not timestamp immediately on stream end.
+            # Timestamping is gated by filesystem-observable completion:
+            #   - no .timestamp.tar yet
+            #   - mtime older than threshold
+            #   - file not open by any process
+            # This avoids false-finalization when writer/runtime state is ambiguous
+            # (e.g., resets/interruption around rollover).
+            if self.cfg.auto_timestamp_on_complete and should_timestamp_file(out_path, older_than_seconds=10):
                 try:
                     tsq_path, tsr_path, tar_path = await asyncio.to_thread(
                         timestamp_recording,

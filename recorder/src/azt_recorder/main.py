@@ -38,7 +38,7 @@ async def run(config_path: str) -> None:
             if not cfg.recording.auto_timestamp_on_complete:
                 continue
             out_root = Path(cfg.recording.output_dir)
-            candidates = await asyncio.to_thread(find_untimestamped_azt_files, out_root, older_than_seconds=60)
+            candidates = await asyncio.to_thread(find_untimestamped_azt_files, out_root, older_than_seconds=10)
             for p in candidates:
                 try:
                     _, _, tar_path = await asyncio.to_thread(timestamp_recording, p, cfg.recording.timestamp_tsa_url)
