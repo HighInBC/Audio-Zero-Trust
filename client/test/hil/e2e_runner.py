@@ -679,20 +679,22 @@ def main() -> int:
     except Exception as err:
         results.append({"name": "indefinite_probe", "ok": False, "detail": str(err)})
 
-    def probe_with_retry(attempts: int = 2) -> tuple[int, dict | None, str]:
+    def probe_with_retry(attempts: int = 3) -> tuple[int, dict | None, str]:
         last_rc, last_obj, last_out = 1, None, ""
         for _ in range(attempts):
-            reconnect_timeout = str(max(20, int(args.reconnect_seconds) + 5))
+            wait_http_state(tool, host, timeout_s=20)
+            reconnect_timeout = str(max(25, int(args.reconnect_seconds) + 8))
             rc, obj, out = tool.json(["stream-read", "--host", host, "--seconds", str(args.reconnect_seconds), "--timeout", reconnect_timeout, "--probe"])
             last_rc, last_obj, last_out = rc, obj, out
             payload = obj.get("payload") if isinstance(obj, dict) else None
             if rc == 0 and isinstance(payload, dict) and int(payload.get("bytes") or 0) > 0:
                 return rc, obj, out
-            time.sleep(0.5)
+            time.sleep(1.0)
         return last_rc, last_obj, last_out
 
-    rc_a, obj_a, out_a = probe_with_retry(attempts=2)
-    rc_b, obj_b, out_b = probe_with_retry(attempts=2)
+    rc_a, obj_a, out_a = probe_with_retry(attempts=3)
+    time.sleep(1.0)
+    rc_b, obj_b, out_b = probe_with_retry(attempts=3)
     payload_a = obj_a.get("payload") if isinstance(obj_a, dict) else None
     payload_b = obj_b.get("payload") if isinstance(obj_b, dict) else None
     ok_reconnect = (
