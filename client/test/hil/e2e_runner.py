@@ -342,65 +342,59 @@ def main() -> int:
 
     # Serial-configurable OTA floor controls (set + clear) via configure-device.
     if run_fresh and admin_creds_dir and isinstance(state, dict):
-        if args.target == "atom-echos3r":
-            results.append({"name": "serial_floor_set_configure", "ok": True, "detail": "skipped: serial OTA floor controls not yet validated for atom-echos3r"})
-            results.append({"name": "serial_floor_set_state", "ok": True, "detail": "skipped: serial OTA floor controls not yet validated for atom-echos3r"})
-            results.append({"name": "serial_floor_clear_configure", "ok": True, "detail": "skipped: serial OTA floor controls not yet validated for atom-echos3r"})
-            results.append({"name": "serial_floor_clear_state", "ok": True, "detail": "skipped: serial OTA floor controls not yet validated for atom-echos3r"})
-        else:
-            try:
-                identity_label = str(state.get("device_label") or args.identity_prefix)
-                floor_set_value = int(time.time()) + 5000
-                rc_cfg_set, obj_cfg_set, out_cfg_set = tool.json([
-                    "configure-device",
-                    "--admin-creds-dir", str(admin_creds_dir),
-                    "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
-                    "--identity", identity_label,
-                    "--wifi-ssid", wifi_ssid,
-                    "--wifi-password", wifi_password,
-                    "--port", port,
-                    "--ip", host,
-                    "--no-auto-ip",
-                    "--allow-serial-bootstrap",
-                    "--ota-version-code", str(floor_set_value),
-                    "--ota-min-version-code", str(floor_set_value),
-                ])
-                ok_cfg_set = rc_cfg_set == 0 and isinstance(obj_cfg_set, dict) and bool(obj_cfg_set.get("ok"))
-                results.append({"name": "serial_floor_set_configure", "ok": ok_cfg_set, "detail": obj_cfg_set if isinstance(obj_cfg_set, dict) else out_cfg_set[-400:]})
+        try:
+            identity_label = str(state.get("device_label") or args.identity_prefix)
+            floor_set_value = int(time.time()) + 5000
+            rc_cfg_set, obj_cfg_set, out_cfg_set = tool.json([
+                "configure-device",
+                "--admin-creds-dir", str(admin_creds_dir),
+                "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
+                "--identity", identity_label,
+                "--wifi-ssid", wifi_ssid,
+                "--wifi-password", wifi_password,
+                "--port", port,
+                "--ip", host,
+                "--no-auto-ip",
+                "--allow-serial-bootstrap",
+                "--ota-version-code", str(floor_set_value),
+                "--ota-min-version-code", str(floor_set_value),
+            ])
+            ok_cfg_set = rc_cfg_set == 0 and isinstance(obj_cfg_set, dict) and bool(obj_cfg_set.get("ok"))
+            results.append({"name": "serial_floor_set_configure", "ok": ok_cfg_set, "detail": obj_cfg_set if isinstance(obj_cfg_set, dict) else out_cfg_set[-400:]})
 
-                rc_st_set, obj_st_set, out_st_set = tool.json(["state-get", "--host", host])
-                payload_st_set = obj_st_set.get("payload") if isinstance(obj_st_set, dict) else None
-                st_set = payload_st_set.get("state") if isinstance(payload_st_set, dict) and isinstance(payload_st_set.get("state"), dict) else {}
-                floor_after_set = int(st_set.get("ota_min_allowed_version_code") or 0)
-                results.append({"name": "serial_floor_set_state", "ok": rc_st_set == 0 and floor_after_set == floor_set_value, "detail": {"expected": floor_set_value, "actual": floor_after_set, "raw": out_st_set[-300:]}})
+            rc_st_set, obj_st_set, out_st_set = tool.json(["state-get", "--host", host])
+            payload_st_set = obj_st_set.get("payload") if isinstance(obj_st_set, dict) else None
+            st_set = payload_st_set.get("state") if isinstance(payload_st_set, dict) and isinstance(payload_st_set.get("state"), dict) else {}
+            floor_after_set = int(st_set.get("ota_min_allowed_version_code") or 0)
+            results.append({"name": "serial_floor_set_state", "ok": rc_st_set == 0 and floor_after_set == floor_set_value, "detail": {"expected": floor_set_value, "actual": floor_after_set, "raw": out_st_set[-300:]}})
 
-                rc_cfg_clr, obj_cfg_clr, out_cfg_clr = tool.json([
-                    "configure-device",
-                    "--admin-creds-dir", str(admin_creds_dir),
-                    "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
-                    "--identity", identity_label,
-                    "--wifi-ssid", wifi_ssid,
-                    "--wifi-password", wifi_password,
-                    "--port", port,
-                    "--ip", host,
-                    "--no-auto-ip",
-                    "--allow-serial-bootstrap",
-                    "--ota-min-version-code-clear",
-                ])
-                ok_cfg_clr = rc_cfg_clr == 0 and isinstance(obj_cfg_clr, dict) and bool(obj_cfg_clr.get("ok"))
-                results.append({"name": "serial_floor_clear_configure", "ok": ok_cfg_clr, "detail": obj_cfg_clr if isinstance(obj_cfg_clr, dict) else out_cfg_clr[-400:]})
+            rc_cfg_clr, obj_cfg_clr, out_cfg_clr = tool.json([
+                "configure-device",
+                "--admin-creds-dir", str(admin_creds_dir),
+                "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
+                "--identity", identity_label,
+                "--wifi-ssid", wifi_ssid,
+                "--wifi-password", wifi_password,
+                "--port", port,
+                "--ip", host,
+                "--no-auto-ip",
+                "--allow-serial-bootstrap",
+                "--ota-min-version-code-clear",
+            ])
+            ok_cfg_clr = rc_cfg_clr == 0 and isinstance(obj_cfg_clr, dict) and bool(obj_cfg_clr.get("ok"))
+            results.append({"name": "serial_floor_clear_configure", "ok": ok_cfg_clr, "detail": obj_cfg_clr if isinstance(obj_cfg_clr, dict) else out_cfg_clr[-400:]})
 
-                rc_st_clr, obj_st_clr, out_st_clr = tool.json(["state-get", "--host", host])
-                payload_st_clr = obj_st_clr.get("payload") if isinstance(obj_st_clr, dict) else None
-                st_clr = payload_st_clr.get("state") if isinstance(payload_st_clr, dict) and isinstance(payload_st_clr.get("state"), dict) else {}
-                floor_raw = st_clr.get("ota_min_allowed_version_code")
-                floor_after_clear = int(floor_raw) if isinstance(floor_raw, (int, float, str)) and str(floor_raw).strip() != "" else -1
-                results.append({"name": "serial_floor_clear_state", "ok": rc_st_clr == 0 and floor_after_clear == 0, "detail": {"actual": floor_after_clear, "raw": out_st_clr[-300:]}})
-            except Exception as e:
-                results.append({"name": "serial_floor_set_configure", "ok": False, "detail": str(e)})
-                results.append({"name": "serial_floor_set_state", "ok": False, "detail": str(e)})
-                results.append({"name": "serial_floor_clear_configure", "ok": False, "detail": str(e)})
-                results.append({"name": "serial_floor_clear_state", "ok": False, "detail": str(e)})
+            rc_st_clr, obj_st_clr, out_st_clr = tool.json(["state-get", "--host", host])
+            payload_st_clr = obj_st_clr.get("payload") if isinstance(obj_st_clr, dict) else None
+            st_clr = payload_st_clr.get("state") if isinstance(payload_st_clr, dict) and isinstance(payload_st_clr.get("state"), dict) else {}
+            floor_raw = st_clr.get("ota_min_allowed_version_code")
+            floor_after_clear = int(floor_raw) if isinstance(floor_raw, (int, float, str)) and str(floor_raw).strip() != "" else -1
+            results.append({"name": "serial_floor_clear_state", "ok": rc_st_clr == 0 and floor_after_clear == 0, "detail": {"actual": floor_after_clear, "raw": out_st_clr[-300:]}})
+        except Exception as e:
+            results.append({"name": "serial_floor_set_configure", "ok": False, "detail": str(e)})
+            results.append({"name": "serial_floor_set_state", "ok": False, "detail": str(e)})
+            results.append({"name": "serial_floor_clear_configure", "ok": False, "detail": str(e)})
+            results.append({"name": "serial_floor_clear_state", "ok": False, "detail": str(e)})
 
     # API happy-path checks now routed through CLI commands.
     try:
