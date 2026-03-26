@@ -17,7 +17,7 @@ def stream_validate(*, in_path: str, key_path: str) -> dict:
     )
 
 
-def stream_decode(*, in_path: str, key_path: str, out_path: str, apply_gain: bool, gain: float | None) -> dict:
+def stream_decode(*, in_path: str, key_path: str, out_path: str, apply_gain: bool, gain: float | None, preserve_tail: bool) -> dict:
     key_raw = Path(key_path).read_bytes() if str(key_path).strip() else None
     return decode_azt1_stream_to_wav(
         data=Path(in_path).read_bytes(),
@@ -25,4 +25,5 @@ def stream_decode(*, in_path: str, key_path: str, out_path: str, apply_gain: boo
         admin_private_key_pem=key_raw,
         apply_gain=apply_gain,
         gain=gain,
+        preserve_tail=preserve_tail,
     )

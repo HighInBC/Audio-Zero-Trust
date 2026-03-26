@@ -24,6 +24,11 @@ TaskHandle_t g_stream_task = nullptr;
 
 azt::SerialControlState g_serial_state;
 
+void log_boot_marker(const char* msg) {
+  if (!msg) return;
+  Serial.printf("[Serial] %s\n", msg);
+}
+
 void stream_server_task(void*) {
   for (;;) {
     WiFiClient client = g_stream_server.available();
@@ -51,6 +56,11 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
+  log_boot_marker("setup_start");
+#if CONFIG_IDF_TARGET_ESP32S3
+  Serial.printf("[Serial] usb_mode=%d cdc_on_boot=%d\n", ARDUINO_USB_MODE, ARDUINO_USB_CDC_ON_BOOT);
+#endif
+
   g_state_mu = xSemaphoreCreateMutex();
 
   xSemaphoreTake(g_state_mu, portMAX_DELAY);
@@ -75,6 +85,7 @@ void setup() {
                           0);
 
   Serial.printf("AZT_HTTP api_port=%u stream_port=%u\n", azt::kHttpPort, kStreamPort);
+  log_boot_marker("http_server_started");
   if (https_ok) {
     Serial.printf("AZT_HTTPS api_tls_port=%u\n", kApiTlsPort);
   } else {

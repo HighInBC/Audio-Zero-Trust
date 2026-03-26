@@ -27,10 +27,12 @@ def _sanitize_common_name(name: str) -> str:
     return s[:80]
 
 
-def make_azt_filename(common_name: str, ts: datetime) -> str:
-    # <commonname>-<zulu time>.azt
-    # Example: Livingroom-2026-03-13T13:56:02Z.azt
-    return f"{_sanitize_common_name(common_name)}-{ts.astimezone(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}.azt"
+def make_azt_filename(common_name: str, ts_local: datetime) -> str:
+    # <commonname>-<local time>-<tz>.azt
+    # Example: Livingroom-2026-03-25T17:56:02-PDT.azt
+    ts_local = ts_local.astimezone()
+    tz_abbr = ts_local.tzname() or "LOCAL"
+    return f"{_sanitize_common_name(common_name)}-{ts_local.strftime('%Y-%m-%dT%H:%M:%S')}-{tz_abbr}.azt"
 
 
 class AuthorizationError(RuntimeError):
@@ -44,7 +46,7 @@ def _readline_limited(resp, max_len: int = 1 << 20) -> bytes:
     return line
 
 
-def _preflight_stream_header(resp, expected_device_fp_hex: str) -> bytes:
+def _preflight_stream_header(resp, expected_device_fp_hex: str) -> tuple[bytes, dict]:
     prefix = bytearray()
 
     magic = _readline_limited(resp, max_len=16)
@@ -100,7 +102,7 @@ def _preflight_stream_header(resp, expected_device_fp_hex: str) -> bytes:
             raise AuthorizationError("stream_next_header_bytes_missing")
         prefix.extend(enc)
 
-    return bytes(prefix)
+    return bytes(prefix), plain
 
 
 def _run_checked(cmd: list[str], *, err_code: str) -> None:
@@ -114,10 +116,14 @@ def timestamp_tar_path(file_path: Path) -> Path:
 
 
 def is_file_in_use(file_path: Path) -> bool:
+    # Best-effort open-file check without external dependencies.
+    # Compare several path forms because /proc fd symlinks can vary by namespace
+    # and may include a trailing " (deleted)" marker.
+    candidates = {str(file_path), str(file_path.absolute())}
     try:
-        target = str(file_path.resolve())
+        candidates.add(str(file_path.resolve()))
     except Exception:
-        target = str(file_path)
+        pass
 
     proc_root = Path("/proc")
     for proc_entry in proc_root.iterdir():
@@ -132,14 +138,15 @@ def is_file_in_use(file_path: Path) -> bool:
                     link = os.readlink(fd)
                 except Exception:
                     continue
-                if link == target or link.startswith(target + " "):
-                    return True
+                for target in candidates:
+                    if link == target or link.startswith(target + " ") or link == (target + " (deleted)"):
+                        return True
         except Exception:
             continue
     return False
 
 
-def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 60) -> list[Path]:
+def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 10) -> list[Path]:
     # Scale-aware scan:
     # - scope to recent date partitions (today + yesterday), where new rollovers occur
     # - pair files by basename in one pass (.azt vs .azt.timestamp.tar)
@@ -183,6 +190,19 @@ def find_untimestamped_azt_files(output_dir: Path, *, older_than_seconds: int = 
 
     out.sort(key=lambda x: x.stat().st_mtime)
     return out
+
+
+def should_timestamp_file(file_path: Path, *, older_than_seconds: int = 10) -> bool:
+    if not file_path.exists() or file_path.stat().st_size <= 0:
+        return False
+    if timestamp_tar_path(file_path).exists():
+        return False
+    age = time.time() - file_path.stat().st_mtime
+    if age < float(max(0, older_than_seconds)):
+        return False
+    if is_file_in_use(file_path):
+        return False
+    return True
 
 
 def timestamp_recording(file_path: Path, tsa_url: str) -> tuple[Path, Path, Path]:
@@ -275,12 +295,10 @@ class RecordingSession:
                 await asyncio.sleep(5)
 
     async def _run_single_rollover(self, base_out_dir: Path) -> None:
-        started = datetime.now(UTC)
-        date_out_dir = base_out_dir / started.strftime("%Y") / started.strftime("%m") / started.strftime("%d")
-        date_out_dir.mkdir(parents=True, exist_ok=True)
+        pending_dir = base_out_dir / ".pending"
+        pending_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = make_azt_filename(self.ad.device_name, started)
-        out_path = date_out_dir / filename
+        out_path = pending_dir / (f"{_sanitize_common_name(self.ad.device_name)}-pending.azt")
         print(f"[record] START device={self.ad.device_name} file={out_path}")
 
         # Hourly rollover by wall-clock hour; if disabled, use 24h chunk.
@@ -293,11 +311,18 @@ class RecordingSession:
         stream_err: Exception | None = None
         try:
             # Run blocking network+file write in thread to keep event loop responsive.
-            await asyncio.to_thread(self._stream_to_file, req, out_path, deadline)
+            out_path = await asyncio.to_thread(self._stream_to_file, req, base_out_dir, out_path, deadline)
         except Exception as e:
             stream_err = e
         finally:
-            if self.cfg.auto_timestamp_on_complete and out_path.exists() and out_path.stat().st_size > 0:
+            # Do not timestamp immediately on stream end.
+            # Timestamping is gated by filesystem-observable completion:
+            #   - no .timestamp.tar yet
+            #   - mtime older than threshold
+            #   - file not open by any process
+            # This avoids false-finalization when writer/runtime state is ambiguous
+            # (e.g., resets/interruption around rollover).
+            if self.cfg.auto_timestamp_on_complete and should_timestamp_file(out_path, older_than_seconds=10):
                 try:
                     tsq_path, tsr_path, tar_path = await asyncio.to_thread(
                         timestamp_recording,
@@ -319,28 +344,42 @@ class RecordingSession:
 
         print(f"[record] ROLLOVER device={self.ad.device_name} file={out_path}")
 
-    def _stream_to_file(self, req: urllib.request.Request, out_path: Path, deadline_monotonic: float) -> None:
+    def _stream_to_file(self, req: urllib.request.Request, base_out_dir: Path, out_path: Path, deadline_monotonic: float) -> Path:
         with urllib.request.urlopen(req, timeout=30) as resp:
             # Enforce authorization at stream start by verifying outer-header signature
             # and binding to the already authorized device signing fingerprint.
-            prefix = _preflight_stream_header(resp, self.ad.device_key_fingerprint_hex)
+            prefix, plain_header = _preflight_stream_header(resp, self.ad.device_key_fingerprint_hex)
+
+            # Use signed device recording start time as filename basis (local timezone).
+            recording_started_utc = str(plain_header.get("recording_started_utc") or "").strip()
+            started_local = datetime.now().astimezone()
+            if recording_started_utc:
+                try:
+                    started_utc = datetime.fromisoformat(recording_started_utc.replace("Z", "+00:00"))
+                    started_local = started_utc.astimezone()
+                except Exception:
+                    pass
+
+            final_dir = base_out_dir / started_local.strftime("%Y") / started_local.strftime("%m") / started_local.strftime("%d")
+            final_dir.mkdir(parents=True, exist_ok=True)
+            final_path = final_dir / make_azt_filename(self.ad.device_name, started_local)
 
             # RAM-gate file creation: do not create a recording file until we know
             # the stream has produced at least one payload chunk to keep.
             if time.monotonic() >= deadline_monotonic:
-                return
+                return final_path
             first_chunk = resp.read(4096)
             if not first_chunk:
-                return
+                return final_path
 
-            with open(out_path, "wb") as f:
+            with open(final_path, "wb") as f:
                 f.write(prefix)
                 f.write(first_chunk)
 
                 while True:
                     if time.monotonic() >= deadline_monotonic:
-                        return
+                        return final_path
                     chunk = resp.read(4096)
                     if not chunk:
-                        return
+                        return final_path
                     f.write(chunk)

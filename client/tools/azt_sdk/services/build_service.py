@@ -10,17 +10,26 @@ FW_DIR = REPO_ROOT / "firmware" / "audio_zero_trust"
 
 
 def resolve_platformio() -> str:
+    pio = shutil.which("platformio")
+    if pio:
+        return pio
+    pio = shutil.which("pio")
+    if pio:
+        return pio
+
     candidates = [
+        Path.home() / ".local" / "bin" / "pio",
+        Path.home() / ".local" / "bin" / "platformio",
         REPO_ROOT / ".venv" / "bin" / "platformio",
         Path(sys.executable).resolve().parent / "platformio",
     ]
     for c in candidates:
-        if c.exists() and c.is_file():
-            return str(c)
-    pio = shutil.which("platformio")
-    if pio:
-        return pio
-    raise FileNotFoundError("platformio not found (install in .venv or ensure it is on PATH)")
+        try:
+            if c.exists() and c.is_file() and c.resolve().exists():
+                return str(c)
+        except Exception:
+            pass
+    raise FileNotFoundError("platformio not found (install in .venv or ensure platformio/pio is on PATH)")
 
 
 def _run_pio(*, env: str, port: str, target: str, stream: bool) -> tuple[int, dict, str]:
@@ -142,10 +151,13 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
             py = str(pio_penv_py)
         esptool_cmd = [py, str(esptool)]
 
+    chip = "esp32s3" if env == "atom-echos3r" else "esp32"
+    flash_size = "8MB" if env == "atom-echos3r" else "4MB"
+
     cmd = [
         *esptool_cmd,
         "--chip",
-        "esp32",
+        chip,
         "--port",
         port,
         "--baud",
@@ -161,7 +173,7 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         "--flash_freq",
         "40m",
         "--flash_size",
-        "4MB",
+        flash_size,
         "0x1000",
         str(bootloader),
         "0x8000",
@@ -184,6 +196,8 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
             "partitions_bin": str(partitions),
             "boot_app0_bin": str(boot_app0),
             "app_offset": "0x10000",
+            "chip": chip,
+            "flash_size": flash_size,
         }, out
 
     proc = subprocess.Popen(
@@ -210,4 +224,6 @@ def flash_firmware_bin(*, env: str, port: str, firmware_bin: str, stream: bool =
         "partitions_bin": str(partitions),
         "boot_app0_bin": str(boot_app0),
         "app_offset": "0x10000",
+        "chip": chip,
+        "flash_size": flash_size,
     }, out

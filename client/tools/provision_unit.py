@@ -151,10 +151,8 @@ def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int =
 
     end = time.time() + timeout_s
     with serial.Serial(port, baudrate=baud, timeout=0.25) as ser:
-        # Nudge board; many ESP32 boards print boot/Wi-Fi lines after DTR reset.
-        ser.dtr = False
-        ser.rts = False
-        time.sleep(0.05)
+        # Avoid control-line reset pulses here; on Atom EchoS3R these can force
+        # ROM download mode via companion reset logic.
         ser.reset_input_buffer()
         while time.time() < end:
             line = ser.readline().decode('utf-8', errors='replace').strip()
@@ -173,50 +171,51 @@ def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int =
     return None
 
 
-def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 115200, timeout_s: int = 75) -> tuple[bool, str | None]:
+def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 115200, timeout_s: int = 75) -> tuple[bool, str | None, str | None]:
     try:
         import serial  # type: ignore
     except Exception:
         print({'ok': False, 'error': 'PYSERIAL_MISSING', 'detail': 'install pyserial in venv'})
-        return False, None
+        return False, None, 'PYSERIAL_MISSING'
 
     blob = json.dumps(signed_payload, separators=(",", ":")).encode('utf-8')
     ip_re = re.compile(r'AZT_IP=(\d+\.\d+\.\d+\.\d+)')
     wifi_ip_re = re.compile(r'AZT_WIFI_CONNECTED.*\bip=(\d+\.\d+\.\d+\.\d+)')
 
     with serial.Serial(port, baudrate=baud, timeout=0.25) as ser:
-        # Reset + settle.
-        ser.dtr = False
-        ser.rts = True
-        time.sleep(0.12)
-        ser.rts = False
-        time.sleep(0.6)
+        # Do not pulse RTS/DTR: EchoS3R can enter ROM downloader via reset logic.
         ser.reset_input_buffer()
 
         ser.write(f'AZT_CONFIG_BEGIN_LEN {len(blob)}\n'.encode('utf-8'))
 
         begin_ok = False
         device_ip: str | None = None
-        t_begin = time.time() + 5
-        while time.time() < t_begin:
-            line = ser.readline().decode('utf-8', errors='replace').strip()
-            if not line:
-                continue
-            print({'serial': line})
-            m = ip_re.search(line)
-            if m:
-                device_ip = m.group(1)
-            m2 = wifi_ip_re.search(line)
-            if m2:
-                device_ip = m2.group(1)
-            if line.startswith('AZT_CONFIG_BEGIN_LEN OK'):
-                begin_ok = True
+
+        for attempt in range(3):
+            if attempt > 0:
+                ser.write(f'AZT_CONFIG_BEGIN_LEN {len(blob)}\n'.encode('utf-8'))
+            t_begin = time.time() + 4
+            while time.time() < t_begin:
+                line = ser.readline().decode('utf-8', errors='replace').strip()
+                if not line:
+                    continue
+                print({'serial': line})
+                m = ip_re.search(line)
+                if m:
+                    device_ip = m.group(1)
+                m2 = wifi_ip_re.search(line)
+                if m2:
+                    device_ip = m2.group(1)
+                if line.startswith('AZT_CONFIG_BEGIN_LEN OK'):
+                    begin_ok = True
+                    break
+                if line.startswith('AZT_CONFIG_BEGIN_LEN ERR'):
+                    return False, device_ip, line
+            if begin_ok:
                 break
-            if line.startswith('AZT_CONFIG_BEGIN_LEN ERR'):
-                return False, device_ip
 
         if not begin_ok:
-            return False, device_ip
+            return False, device_ip, 'AZT_CONFIG_BEGIN_LEN_TIMEOUT'
 
         step = 128
         for i in range(0, len(blob), step):
@@ -226,12 +225,15 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
         apply_ok = False
         saw_reboot = False
         saw_post_reboot_service_banner = False
+        last_apply_line: str | None = None
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             line = ser.readline().decode('utf-8', errors='replace').strip()
             if not line:
                 continue
             print({'serial': line})
+            if line.startswith('AZT_CONFIG_APPLY '):
+                last_apply_line = line
             if 'AZT_CONFIG_APPLY code=200' in line:
                 apply_ok = True
             if line.startswith('AZT_REBOOT '):
@@ -251,7 +253,9 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
                 if not saw_reboot or saw_post_reboot_service_banner:
                     break
 
-        return apply_ok, device_ip
+        if not apply_ok:
+            return False, device_ip, (last_apply_line or 'AZT_CONFIG_APPLY_TIMEOUT')
+        return True, device_ip, (last_apply_line or None)
 
 
 def main() -> int:
@@ -286,7 +290,7 @@ def main() -> int:
 
     if not args.skip_flash:
         pio = _resolve_platformio()
-        run([pio, 'run', '-e', 'm5stack-atom-m4-2-native', '-t', 'upload', '--upload-port', args.port], cwd=FW_DIR)
+        run([pio, 'run', '-e', 'atom-echo', '-t', 'upload', '--upload-port', args.port], cwd=FW_DIR)
 
     device_ip = args.ip
     if not args.no_auto_ip:
@@ -333,9 +337,9 @@ def main() -> int:
             return 9
 
         print({'info': 'attempting serial bootstrap via AZT_CONFIG_BEGIN_LEN'})
-        ok_serial, ip_from_serial = serial_apply_signed_config(args.port, signed, baud=args.baud)
+        ok_serial, ip_from_serial, serial_detail = serial_apply_signed_config(args.port, signed, baud=args.baud)
         if not ok_serial:
-            print({'ok': False, 'error': 'SERIAL_BOOTSTRAP_FAILED', 'detail': 'serial config apply did not complete'})
+            print({'ok': False, 'error': 'SERIAL_BOOTSTRAP_FAILED', 'detail': serial_detail or 'serial config apply did not complete'})
             return 7
         if ip_from_serial:
             device_ip = ip_from_serial

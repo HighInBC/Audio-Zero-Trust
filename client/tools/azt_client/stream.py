@@ -365,6 +365,7 @@ def decode_azt1_stream_to_wav(
     admin_private_key_pem: bytes | None = None,
     apply_gain: bool = False,
     gain: float | None = None,
+    preserve_tail: bool = False,
 ) -> dict:
     # Full-chain validation + decode to WAV in one pass.
     priv = load_private_key_auto(admin_private_key_pem, purpose="stream private key") if admin_private_key_pem else None
@@ -498,7 +499,7 @@ def decode_azt1_stream_to_wav(
     seq_to_chain_v: dict[int, bytes] = {}
     record_seqs: list[int] = []
     max_verified_ref_seq = 0
-    pcm_out = bytearray()
+    pcm_chunks: list[tuple[int, bytes]] = []
 
     while off < len(data):
         if off + 10 > len(data):
@@ -564,8 +565,9 @@ def decode_azt1_stream_to_wav(
             pcm_bytes += len(block_body)
             pcm_blocks += 1
             if gain_to_apply == 1.0:
-                pcm_out.extend(block_body)
+                pcm_chunks.append((seq, block_body))
             else:
+                chunk = bytearray()
                 for i in range(0, len(block_body), 2):
                     s = int.from_bytes(block_body[i : i + 2], "little", signed=True)
                     sg = int(round(s * gain_to_apply))
@@ -573,7 +575,8 @@ def decode_azt1_stream_to_wav(
                         sg = 32767
                     elif sg < -32768:
                         sg = -32768
-                    pcm_out.extend(int(sg).to_bytes(2, "little", signed=True))
+                    chunk.extend(int(sg).to_bytes(2, "little", signed=True))
+                pcm_chunks.append((seq, bytes(chunk)))
         elif block_type == 0x01:
             sig_blocks += 1
             if len(block_body) >= 68:
@@ -593,14 +596,21 @@ def decode_azt1_stream_to_wav(
             telemetry_blocks += 1
         frames += 1
 
+    unsigned_tail_start_seq = (max_verified_ref_seq + 1) if max_verified_ref_seq > 0 else 1
+
+    signed_pcm_chunks = [chunk for seq, chunk in pcm_chunks if seq < unsigned_tail_start_seq]
+    all_pcm_chunks = [chunk for _, chunk in pcm_chunks]
+
+    unsigned_tail_trimmed = (not preserve_tail)
+    pcm_out_bytes = b"".join(all_pcm_chunks if preserve_tail else signed_pcm_chunks)
+
     out_wav_path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(out_wav_path), "wb") as wf:
         wf.setnchannels(channels)
         wf.setsampwidth(sample_width_bytes)
         wf.setframerate(sample_rate_hz)
-        wf.writeframes(bytes(pcm_out))
+        wf.writeframes(pcm_out_bytes)
 
-    unsigned_tail_start_seq = (max_verified_ref_seq + 1) if max_verified_ref_seq > 0 else 1
     unsigned_tail_blocks = sum(1 for s in record_seqs if s >= unsigned_tail_start_seq)
     unsigned_tail_bytes = max(0, len(data) - off)
 
@@ -647,15 +657,25 @@ def decode_azt1_stream_to_wav(
     unsigned_tail_seconds = (unsigned_tail_frames * frame_duration_ms) / 1000.0 if frame_duration_ms > 0 else None
 
     warnings: list[str] = []
-    if unsigned_tail_blocks > 0:
+    if unsigned_tail_frames > 0:
         if unsigned_tail_seconds is not None:
-            warnings.append(
-                f"The last {unsigned_tail_blocks} block(s) ({unsigned_tail_seconds:.3f} seconds of audio) are not covered by a verified checkpoint signature and could be tampered with."
-            )
+            if unsigned_tail_trimmed:
+                warnings.append(
+                    f"{unsigned_tail_frames} frame(s) ({unsigned_tail_seconds:.3f} seconds) of unsigned audio has been trimmed. Use --preserve-tail to keep."
+                )
+            else:
+                warnings.append(
+                    f"{unsigned_tail_frames} frame(s) ({unsigned_tail_seconds:.3f} seconds) of unsigned audio is not signed and is subject to tampering."
+                )
         else:
-            warnings.append(
-                f"The last {unsigned_tail_blocks} block(s) are not covered by a verified checkpoint signature and could be tampered with."
-            )
+            if unsigned_tail_trimmed:
+                warnings.append(
+                    f"{unsigned_tail_frames} frame(s) of unsigned audio has been trimmed. Use --preserve-tail to keep."
+                )
+            else:
+                warnings.append(
+                    f"{unsigned_tail_frames} frame(s) of unsigned audio is not signed and is subject to tampering."
+                )
 
     return {
         "ok": True,
@@ -677,7 +697,7 @@ def decode_azt1_stream_to_wav(
         "channels": channels,
         "sample_width_bytes": sample_width_bytes,
         "wav_out": str(out_wav_path),
-        "wav_bytes": len(pcm_out),
+        "wav_bytes": len(pcm_out_bytes),
         "bytes_total": len(data),
         "bytes_consumed": off,
         "unsigned_tail_start_seq": unsigned_tail_start_seq,
@@ -687,5 +707,7 @@ def decode_azt1_stream_to_wav(
         "unsigned_tail_frames": unsigned_tail_frames,
         "unsigned_tail_seconds": unsigned_tail_seconds,
         "unsigned_tail_bytes": unsigned_tail_bytes,
+        "unsigned_tail_trimmed": unsigned_tail_trimmed and (unsigned_tail_frames > 0),
+        "unsigned_tail_preserved": preserve_tail and (unsigned_tail_frames > 0),
         "warnings": warnings,
     }
