@@ -295,11 +295,10 @@ class RecordingSession:
                 await asyncio.sleep(5)
 
     async def _run_single_rollover(self, base_out_dir: Path) -> None:
-        started = datetime.now(UTC)
-        date_out_dir = base_out_dir / started.strftime("%Y") / started.strftime("%m") / started.strftime("%d")
-        date_out_dir.mkdir(parents=True, exist_ok=True)
+        pending_dir = base_out_dir / ".pending"
+        pending_dir.mkdir(parents=True, exist_ok=True)
 
-        out_path = date_out_dir / (f"{_sanitize_common_name(self.ad.device_name)}-pending.azt")
+        out_path = pending_dir / (f"{_sanitize_common_name(self.ad.device_name)}-pending.azt")
         print(f"[record] START device={self.ad.device_name} file={out_path}")
 
         # Hourly rollover by wall-clock hour; if disabled, use 24h chunk.
@@ -312,7 +311,7 @@ class RecordingSession:
         stream_err: Exception | None = None
         try:
             # Run blocking network+file write in thread to keep event loop responsive.
-            out_path = await asyncio.to_thread(self._stream_to_file, req, out_path, deadline)
+            out_path = await asyncio.to_thread(self._stream_to_file, req, base_out_dir, out_path, deadline)
         except Exception as e:
             stream_err = e
         finally:
@@ -345,7 +344,7 @@ class RecordingSession:
 
         print(f"[record] ROLLOVER device={self.ad.device_name} file={out_path}")
 
-    def _stream_to_file(self, req: urllib.request.Request, out_path: Path, deadline_monotonic: float) -> Path:
+    def _stream_to_file(self, req: urllib.request.Request, base_out_dir: Path, out_path: Path, deadline_monotonic: float) -> Path:
         with urllib.request.urlopen(req, timeout=30) as resp:
             # Enforce authorization at stream start by verifying outer-header signature
             # and binding to the already authorized device signing fingerprint.
@@ -353,14 +352,17 @@ class RecordingSession:
 
             # Use signed device recording start time as filename basis (local timezone).
             recording_started_utc = str(plain_header.get("recording_started_utc") or "").strip()
-            final_path = out_path
+            started_local = datetime.now().astimezone()
             if recording_started_utc:
                 try:
                     started_utc = datetime.fromisoformat(recording_started_utc.replace("Z", "+00:00"))
                     started_local = started_utc.astimezone()
-                    final_path = out_path.parent / make_azt_filename(self.ad.device_name, started_local)
                 except Exception:
                     pass
+
+            final_dir = base_out_dir / started_local.strftime("%Y") / started_local.strftime("%m") / started_local.strftime("%d")
+            final_dir.mkdir(parents=True, exist_ok=True)
+            final_path = final_dir / make_azt_filename(self.ad.device_name, started_local)
 
             # RAM-gate file creation: do not create a recording file until we know
             # the stream has produced at least one payload chunk to keep.
