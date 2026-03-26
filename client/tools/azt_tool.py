@@ -13,7 +13,7 @@ if str(CLIENT_ROOT) not in sys.path:
 
 from tools.azt_cli import argparsing as cli_argparsing
 from tools.azt_cli import handler_map as cli_handler_map
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services import operations_service as ops
 
 
@@ -391,7 +391,7 @@ def main() -> int:
                 command=str(getattr(args, "command", "unknown")),
                 ok=False,
                 error="UNHANDLED_EXCEPTION",
-                detail=str(e),
+                detail=exception_detail("azt_tool.main", e, context={"command": str(getattr(args, "command", "unknown"))}),
                 as_json=True,
             )
             return 2
