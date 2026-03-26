@@ -72,18 +72,12 @@ def main() -> int:
         sent_pub = False
         pubkey_acked = False
         started = False
-        last_pub_send_at = 0.0
 
         while time.time() < deadline:
             now = time.time()
             if not sent_pub and (now - last_ping_at) >= 1.0:
                 send({"cmd": "PING"})
                 last_ping_at = now
-            if sent_pub and (not pubkey_acked) and (now - last_pub_send_at) >= 3.0:
-                # Retry only the pending PUBKEY_SET command; avoid interleaving extra commands
-                # while waiting for a potentially long serial frame to parse on-device.
-                send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
-                last_pub_send_at = now
 
             raw = ser.readline().decode("utf-8", errors="replace").strip()
             if not raw:
@@ -100,7 +94,6 @@ def main() -> int:
                 if not sent_pub:
                     send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                     sent_pub = True
-                    last_pub_send_at = now
                 continue
 
             if ev == "PUBKEY_SET_OK":
