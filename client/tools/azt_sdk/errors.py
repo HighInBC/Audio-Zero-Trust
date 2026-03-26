@@ -22,6 +22,15 @@ ERROR_CODES: dict[str, str] = {
     "HTTP_STATE_UNREACHABLE_SERIAL_DISABLED": "HTTP state probe failed while serial bootstrap is disabled.",
     "INVALID_OTA_VERSION_CODE_REQUIRED_FOR_SAME_FLOOR": "--ota-version-code is required when --ota-min-version-code=same.",
     "INVALID_OTA_VERSION_CODE_REQUIRED_FOR_MIN_FLOOR": "--ota-version-code is required when setting --ota-min-version-code.",
+    "APPLY_CONFIG_POST_FAILED": "Signed config POST failed.",
+    "APPLY_CONFIG_STATE_GET_FAILED": "State GET after config POST failed.",
+    "CONFIG_PATCH_POST_FAILED": "Signed config patch POST failed.",
+    "CONFIG_PATCH_STATE_GET_FAILED": "State GET after config patch POST failed.",
+    "SIGNING_KEY_CHECK_PEM_FETCH_FAILED": "Failed to fetch signing key PEM endpoint.",
+    "SIGNING_KEY_CHECK_ALIAS_FETCH_FAILED": "Failed to fetch signing key alias endpoint.",
+    "STREAM_REDIRECT_CHECK_REQUEST_FAILED": "Stream redirect probe request failed.",
+    "STREAM_READ_REQUEST_FAILED": "Failed to open stream request.",
+    "STREAM_READ_ITERATION_FAILED": "Failed while reading stream chunks.",
 }
 
 
