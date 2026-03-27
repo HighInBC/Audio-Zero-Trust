@@ -238,9 +238,23 @@ def _resolve_firmware_bin(path_str: str, env: str) -> Path:
     return firmware_path
 
 
+def _resolve_ota_target(explicit_target: str, env: str) -> str:
+    t = (explicit_target or "").strip().lower()
+    if t:
+        return t
+    e = (env or "").strip().lower()
+    if e in {"atom-echo", "m5stack-atom", "m5stack-atom-libtests"}:
+        return "atom-echo"
+    if e in {"atom-echos3r", "m5stack-atoms3r", "m5stack-atoms3r-libtests", "m5stack-atoms3"}:
+        return "atom-echos3r"
+    raise RuntimeError("ERR_OTA_TARGET_REQUIRED")
+
+
 def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
     if bool(getattr(args, "interactive", False)):
         args.key_path = _prompt_default("Signer private key PEM", args.key_path or "")
+        if not (getattr(args, "target", "") or "").strip():
+            args.target = _prompt_default("Target (atom-echo|atom-echos3r)", "")
         args.version_code = _prompt_default("Version code", str(args.version_code or "timestamp"))
         if not (args.version or "").strip():
             args.version = _prompt_default("Version label (blank uses version-code)", "")
@@ -276,12 +290,15 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
     else:
         rollback_floor_code = int(rf_raw)
 
+    target = _resolve_ota_target(getattr(args, "target", ""), args.env)
+
     ok, payload = ops.ota_bundle_create(
         repo_root=REPO_ROOT,
         key_path=args.key_path,
         out_path=args.out_path,
         firmware_path=args.firmware_path,
         env=args.env,
+        target=target,
         channel=args.channel,
         version=version_label,
         version_code=version_code,

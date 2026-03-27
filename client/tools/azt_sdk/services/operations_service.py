@@ -293,7 +293,7 @@ def build_current_firmware(*, repo_root: Path, env: str) -> Path:
     return fw_path
 
 
-def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware_path: str, env: str, channel: str, version: str, version_code: int, rollback_floor_code: int | None = None) -> tuple[bool, dict]:
+def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware_path: str, env: str, target: str, channel: str, version: str, version_code: int, rollback_floor_code: int | None = None) -> tuple[bool, dict]:
     keyp = Path(key_path)
     outp = Path(out_path)
 
@@ -313,10 +313,15 @@ def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware
 
     fw = fw_path.read_bytes()
     fw_sha256 = hashlib.sha256(fw).hexdigest()
+    target_val = (target or "").strip().lower()
+    if target_val not in {"atom-echo", "atom-echos3r"}:
+        raise RuntimeError("ERR_OTA_TARGET_INVALID")
+
     meta = {
         "schema": "azt.ota.bundle.v1",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "channel": channel,
+        "target": target_val,
         "version": version,
         "version_code": int(version_code),
         "firmware_name": fw_path.name,
@@ -350,6 +355,7 @@ def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware
         "firmware": str(fw_path),
         "firmware_size": len(fw),
         "firmware_sha256": fw_sha256,
+        "target": target_val,
         "version_code": int(version_code),
         "rollback_floor_code": (None if floor_code is None else int(floor_code)),
         "signer_fingerprint_hex": signer_fp,

@@ -2048,6 +2048,21 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     return false;
   }
 
+  String ota_target = String((const char*)(meta["target"] | ""));
+#if CONFIG_IDF_TARGET_ESP32S3
+  const char* expected_target = "atom-echos3r";
+#else
+  const char* expected_target = "atom-echo";
+#endif
+  if (ota_target.length() == 0) {
+    out_err = "missing target in bundle metadata";
+    return false;
+  }
+  if (!ota_target.equalsIgnoreCase(expected_target)) {
+    out_err = String("target mismatch: bundle=") + ota_target + " device=" + expected_target;
+    return false;
+  }
+
   String ota_version = String((const char*)(meta["version"] | ""));
   uint64_t ota_version_code = 0;
   String vc_err;
