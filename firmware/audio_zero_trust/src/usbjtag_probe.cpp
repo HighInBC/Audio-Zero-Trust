@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <cstring>
 #include <memory>
+#include <esp_heap_caps.h>
 
 static const uint8_t kMagic[4] = {'A', 'Z', 'T', '1'};
 
@@ -61,6 +62,7 @@ static void send_frame(const uint8_t* payload, uint32_t len) {
 }
 
 void setup() {
+  Serial.setRxBufferSize(8192);
   Serial.begin(115200);
   delay(200);
   const char* banner = "READY";
@@ -99,10 +101,23 @@ void loop() {
     return;
   }
 
-  std::unique_ptr<uint8_t[]> payload(new uint8_t[len]);
-  if (len > 0 && read_exact(payload.get(), len, 15000) != len) {
+  uint8_t* payload = nullptr;
+  if (len > 0) {
+    payload = static_cast<uint8_t*>(heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!payload) {
+      payload = static_cast<uint8_t*>(heap_caps_malloc(len, MALLOC_CAP_8BIT));
+    }
+    if (!payload) {
+      const char* msg = "ERR_OOM";
+      send_frame(reinterpret_cast<const uint8_t*>(msg), 7);
+      return;
+    }
+  }
+
+  if (len > 0 && read_exact(payload, len, 15000) != len) {
     const char* msg = "ERR_TIMEOUT_PAYLOAD";
     send_frame(reinterpret_cast<const uint8_t*>(msg), 19);
+    if (payload) heap_caps_free(payload);
     return;
   }
 
@@ -113,16 +128,19 @@ void loop() {
     return;
   }
   const uint32_t got_crc = read_u32be(crc_raw);
-  const uint32_t calc_crc = crc32_update(0, payload.get(), len);
+  const uint32_t calc_crc = crc32_update(0, payload, len);
   if (got_crc != calc_crc) {
     const char* msg = "ERR_CRC";
     send_frame(reinterpret_cast<const uint8_t*>(msg), 7);
+    if (payload) heap_caps_free(payload);
     return;
   }
 
   // strict request/response: only respond after full request frame is received+validated
   char ok[32];
   int n = snprintf(ok, sizeof(ok), "OK:%lu", static_cast<unsigned long>(len));
-  if (n < 0) return;
-  send_frame(reinterpret_cast<const uint8_t*>(ok), static_cast<uint32_t>(n));
+  if (n >= 0) {
+    send_frame(reinterpret_cast<const uint8_t*>(ok), static_cast<uint32_t>(n));
+  }
+  if (payload) heap_caps_free(payload);
 }
