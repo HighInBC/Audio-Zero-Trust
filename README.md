@@ -209,7 +209,8 @@ python3 -m pip install platformio cryptography pyserial requests intelhex argon2
 ### 5) Optional clean slate
 
 ```bash
-python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0
+python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0 --target atom-echo
+# or: --target atom-echos3r
 ```
 
 ### 6) Flash firmware
@@ -217,13 +218,15 @@ python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0
 From source (developer path):
 
 ```bash
-python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0
+python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0 --target atom-echo
+# or: --target atom-echos3r
 ```
 
 From release OTA bundle (user/release path):
 
 ```bash
-python3 client/tools/azt_tool.py flash-device --from-ota firmware/releases/<release>.otabundle --port /dev/ttyUSB0
+python3 client/tools/azt_tool.py flash-device --from-ota firmware/releases/<release>.otabundle --port /dev/ttyUSB0 --target atom-echo
+# or: --target atom-echos3r
 ```
 
 Push a release OTA bundle over the network OTA endpoint:
@@ -430,8 +433,9 @@ python3 client/tools/azt_tool.py ota-bundle-post --host <ip> --in <bundle> --tim
 Recovery:
 
 ```bash
-python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0
-python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0
+python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0 --target atom-echo
+python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0 --target atom-echo
+# use --target atom-echos3r for EchoS3R hardware
 ```
 
 Then re-run `configure-device`.
