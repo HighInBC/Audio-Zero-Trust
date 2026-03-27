@@ -52,7 +52,8 @@ If you just want to install and run, jump to **[Install](#install)**.
 - `spec/` — protocol/container/spec references
 - `docs/` — operational documentation (including serial flash profile contracts)
 
-Current hardware target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
+Recommended hardware target: **M5Stack ATOM EchoS3R**.
+Legacy/alternate target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
 
 ---
 
@@ -173,6 +174,8 @@ Current non-goals / caveats:
 
 ## Install
 
+> **Hardware recommendation:** Use **M5Stack ATOM EchoS3R** for new installs (`--target atom-echos3r`).
+
 ### 1) Prerequisites
 
 ```bash
@@ -209,8 +212,8 @@ python3 -m pip install platformio cryptography pyserial requests intelhex argon2
 ### 5) Optional clean slate
 
 ```bash
-python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0 --target atom-echo
-# or: --target atom-echos3r
+python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0 --target atom-echos3r
+# legacy: --target atom-echo
 ```
 
 ### 6) Flash firmware
@@ -218,15 +221,15 @@ python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0 --target atom-
 From source (developer path):
 
 ```bash
-python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0 --target atom-echo
-# or: --target atom-echos3r
+python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0 --target atom-echos3r
+# legacy: --target atom-echo
 ```
 
 From release OTA bundle (user/release path):
 
 ```bash
-python3 client/tools/azt_tool.py flash-device --from-ota firmware/releases/<release>.otabundle --port /dev/ttyUSB0 --target atom-echo
-# or: --target atom-echos3r
+python3 client/tools/azt_tool.py flash-device --from-ota firmware/releases/<release>.otabundle --port /dev/ttyUSB0 --target atom-echos3r
+# legacy: --target atom-echo
 ```
 
 Push a release OTA bundle over the network OTA endpoint:
@@ -433,9 +436,9 @@ python3 client/tools/azt_tool.py ota-bundle-post --host <ip> --in <bundle> --tim
 Recovery:
 
 ```bash
-python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0 --target atom-echo
-python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0 --target atom-echo
-# use --target atom-echos3r for EchoS3R hardware
+python3 client/tools/azt_tool.py erase-device --port /dev/ttyUSB0 --target atom-echos3r
+python3 client/tools/azt_tool.py flash-device --from-source --port /dev/ttyUSB0 --target atom-echos3r
+# legacy: use --target atom-echo for Atom Echo hardware
 ```
 
 Then re-run `configure-device`.
