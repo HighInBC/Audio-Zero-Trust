@@ -50,6 +50,10 @@ def require_structured_detail(obj: dict) -> list[str]:
     return errs
 
 
+def _write_json(path: Path, obj: dict) -> None:
+    path.write_text(json.dumps(obj), encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate AZT CLI --json envelope contract")
     ap.add_argument("--tool-cmd", default="python3 tools/azt_tool.py")
@@ -70,6 +74,59 @@ def main() -> int:
         errs.append("missing payload.artifacts")
     if errs:
         failures.append("create-signing-credentials: " + "; ".join(errs) + f" | raw={raw[:300]}")
+
+    # Negative-path regression checks for structured service failure codes.
+    if art:
+        artp = Path(art)
+        keyp = artp / "private_key.pem"
+        cfgp = artp / "contract-unsigned-config.json"
+        patchp = artp / "contract-patch.json"
+        _write_json(cfgp, {"config_version": 1, "device_label": ident})
+        _write_json(patchp, {"device_label": ident + "-p"})
+        neg_host = "203.0.113.1"
+
+        neg_cases = [
+            (
+                "apply-config",
+                ["apply-config", "--host", neg_host, "--timeout", "1", "--in", str(cfgp), "--key", str(keyp)],
+                {"APPLY_CONFIG_POST_FAILED", "APPLY_CONFIG_STATE_GET_FAILED"},
+            ),
+            (
+                "config-patch",
+                ["config-patch", "--host", neg_host, "--timeout", "1", "--patch", str(patchp), "--if-version", "1", "--key", str(keyp)],
+                {"CONFIG_PATCH_POST_FAILED", "CONFIG_PATCH_STATE_GET_FAILED"},
+            ),
+            (
+                "state-get",
+                ["state-get", "--host", neg_host, "--timeout", "1"],
+                {"STATE_GET_V0_FAILED"},
+            ),
+        ]
+
+        for name, cmd, expected_codes in neg_cases:
+            rc, obj, raw = run_cmd(args.tool_cmd, cmd)
+            errs = require_envelope(obj, name)
+            if rc == 0 or obj.get("ok") is not False:
+                errs.append(f"expected failure, rc={rc}, ok={obj.get('ok')}")
+            got_error = str(obj.get("error") or "")
+            if got_error not in expected_codes:
+                errs.append(f"unexpected error code: {got_error} expected one of {sorted(expected_codes)}")
+            detail = obj.get("detail")
+            payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+            if name in {"apply-config", "config-patch", "state-get"} and got_error:
+                # service-level failures should include structured detail either at top-level detail
+                # (legacy command wrappers) or payload.detail (newer style).
+                pdetail = payload.get("detail") if isinstance(payload.get("detail"), dict) else None
+                tdetail = obj.get("detail") if isinstance(obj.get("detail"), dict) else None
+                detail_obj = pdetail if isinstance(pdetail, dict) else tdetail
+                if not isinstance(detail_obj, dict):
+                    errs.append("missing structured detail object")
+                else:
+                    for k in ("where", "exception_type", "message", "url"):
+                        if k not in detail_obj:
+                            errs.append(f"detail missing {k}")
+            if errs:
+                failures.append(f"{name}: " + "; ".join(errs) + f" | raw={raw[:300]}")
 
     for cmd in (["erase-device", "--port", "/dev/null", "--target", "atom-echo"], ["flash-device", "--port", "/dev/null", "--target", "atom-echo", "--from-source"]):
         # Expected to fail on invalid port but still should emit envelope.

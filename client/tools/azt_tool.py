@@ -49,7 +49,10 @@ def cmd_apply_config(args: argparse.Namespace) -> int:
         timeout=int(args.timeout),
         fingerprint=args.fingerprint,
     )
-    emit_envelope(command="apply-config", ok=ok, error=None if ok else "APPLY_CONFIG_FAILED", payload=payload, as_json=bool(getattr(args, "as_json", False)))
+    fail_code = "APPLY_CONFIG_FAILED"
+    if not ok and isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload.get("error"):
+        fail_code = str(payload.get("error"))
+    emit_envelope(command="apply-config", ok=ok, error=None if ok else fail_code, payload=payload, as_json=bool(getattr(args, "as_json", False)))
     return 0 if ok else 1
 
 
@@ -182,7 +185,10 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
         timeout=int(args.timeout),
         fingerprint=args.fingerprint,
     )
-    emit_envelope(command="config-patch", ok=ok, error=None if ok else "CONFIG_PATCH_FAILED", payload=payload, as_json=bool(getattr(args, "as_json", False)))
+    fail_code = "CONFIG_PATCH_FAILED"
+    if not ok and isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload.get("error"):
+        fail_code = str(payload.get("error"))
+    emit_envelope(command="config-patch", ok=ok, error=None if ok else fail_code, payload=payload, as_json=bool(getattr(args, "as_json", False)))
     return 0 if ok else 1
 
 def cmd_certify_issue(args: argparse.Namespace) -> int:

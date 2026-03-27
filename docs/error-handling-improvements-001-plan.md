@@ -43,12 +43,12 @@ For exceptions, use:
 
 ## Remaining Gaps Checklist
 
-- [ ] Add explicit regression tests for service-layer failure codes:
+- [x] Add explicit regression tests for service-layer failure codes:
   - `APPLY_CONFIG_POST_FAILED`, `APPLY_CONFIG_STATE_GET_FAILED`
   - `CONFIG_PATCH_POST_FAILED`, `CONFIG_PATCH_STATE_GET_FAILED`
   - `STATE_GET_V0_FAILED`, `ATTESTATION_GET_FAILED`, `CERTIFICATE_POST_FAILED`
-- [ ] Normalize remaining broad command-level `*_ERROR` wrappers into more specific families where practical.
-- [ ] Add a short `docs/error-contract.md` with canonical failure-detail object examples.
+- [~] Normalize remaining broad command-level `*_ERROR` wrappers into more specific families where practical. (improved: apply-config/config-patch now surface specific service failure codes)
+- [x] Add a short `docs/error-contract.md` with canonical failure-detail object examples.
 - [ ] Optional: enforce known-code usage in CI (lint against unknown error constants).
 
 ## Next Priority
