@@ -27,9 +27,7 @@ void loop() {
 
     if (rx_mode) {
       received++;
-      if ((received % 512) == 0) {
-        logln(String("[USBJTAG_PROBE] progress ") + received + "/" + expected);
-      }
+      // Strict turn-based mode: remain silent while host is transmitting.
       if (received >= expected) {
         logln(String("[USBJTAG_PROBE] complete ") + received + "/" + expected);
         rx_mode = false;
@@ -61,7 +59,7 @@ void loop() {
   }
 
   static uint32_t last = 0;
-  if (millis() - last > 2000) {
+  if (!rx_mode && (millis() - last > 2000)) {
     last = millis();
     logln(String("[USBJTAG_PROBE] hb ms=") + millis());
   }
