@@ -53,6 +53,11 @@ void stream_server_task(void*) {
 }  // namespace
 
 void setup() {
+#if CONFIG_IDF_TARGET_ESP32S3
+  // Atom EchoS3R: increase USB serial RX buffer to reduce large-payload ingress stalls.
+  // Old target (ESP32 Atom Echo) does not use this path.
+  Serial.setRxBufferSize(8192);
+#endif
   Serial.begin(115200);
   delay(200);
 
