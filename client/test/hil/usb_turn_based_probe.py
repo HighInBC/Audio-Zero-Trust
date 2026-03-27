@@ -56,13 +56,17 @@ def write_frame(ser: serial.Serial, payload: bytes) -> tuple[bool, str]:
 def run_once(port: str, size: int, timeout: float) -> tuple[bool, str]:
     payload = b"A" * size
     with serial.Serial(port, 115200, timeout=0.2, write_timeout=5, dsrdtr=False, rtscts=False, xonxoff=False) as ser:
-        ser.dtr = True
+        # Force clean sync point per trial.
+        ser.dtr = False
+        ser.rts = True
+        time.sleep(0.05)
         ser.rts = False
-        time.sleep(0.15)
+        ser.dtr = True
+        time.sleep(0.4)
         ser.reset_input_buffer()
         ser.reset_output_buffer()
 
-        ok, msg = read_frame(ser, 2.5)
+        ok, msg = read_frame(ser, 4.0)
         if not ok:
             return False, f"ready_missing:{msg}"
         if msg != "READY":
