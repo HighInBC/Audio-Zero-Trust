@@ -238,14 +238,11 @@ def _resolve_firmware_bin(path_str: str, env: str) -> Path:
     return firmware_path
 
 
-def _resolve_ota_target(explicit_target: str, env: str) -> str:
-    t = (explicit_target or "").strip().lower()
-    if t:
-        return t
-    e = (env or "").strip().lower()
-    if e in {"atom-echo", "m5stack-atom", "m5stack-atom-libtests"}:
+def _resolve_ota_env(target: str) -> str:
+    t = (target or "").strip().lower()
+    if t == "atom-echo":
         return "atom-echo"
-    if e in {"atom-echos3r", "m5stack-atoms3r", "m5stack-atoms3r-libtests", "m5stack-atoms3"}:
+    if t == "atom-echos3r":
         return "atom-echos3r"
     raise RuntimeError("ERR_OTA_TARGET_REQUIRED")
 
@@ -270,8 +267,8 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
         auto_out = Path("/tmp") / f"azt-ota-{int(time.time())}.otabundle"
         args.out_path = str(auto_out)
 
-    if not (args.key_path and args.version_code and args.out_path):
-        emit_envelope(command="ota-bundle-create", ok=False, error="OTA_BUNDLE_CREATE_ARGS", payload={"detail": "--key and --version-code are required; --out is required unless --post is used (or use --interactive)"}, as_json=bool(getattr(args, "as_json", False)))
+    if not (args.key_path and args.target and args.version_code and args.out_path):
+        emit_envelope(command="ota-bundle-create", ok=False, error="OTA_BUNDLE_CREATE_ARGS", payload={"detail": "--key, --target, and --version-code are required; --out is required unless --post is used (or use --interactive)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
     vc_raw = (str(args.version_code).strip().lower())
@@ -290,14 +287,15 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
     else:
         rollback_floor_code = int(rf_raw)
 
-    target = _resolve_ota_target(getattr(args, "target", ""), args.env)
+    target = str(getattr(args, "target", "") or "").strip().lower()
+    env = _resolve_ota_env(target)
 
     ok, payload = ops.ota_bundle_create(
         repo_root=REPO_ROOT,
         key_path=args.key_path,
         out_path=args.out_path,
         firmware_path=args.firmware_path,
-        env=args.env,
+        env=env,
         target=target,
         channel=args.channel,
         version=version_label,

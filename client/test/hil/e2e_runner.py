@@ -574,6 +574,7 @@ def main() -> int:
         rc_make_zero, obj_make_zero, out_make_zero = tool.json([
             "ota-bundle-create",
             "--key", str(ota_signer_key_path),
+            "--target", str(args.target),
             "--firmware", str(ota_firmware_bin),
             "--version-code", str(base_code),
             "--rollback-floor-code", "0",
@@ -589,6 +590,7 @@ def main() -> int:
         rc_make_f, _, out_make_f = tool.json([
             "ota-bundle-create",
             "--key", str(ota_signer_key_path),
+            "--target", str(args.target),
             "--firmware", str(ota_firmware_bin),
             "--version-code", str(high_code),
             "--rollback-floor-code", "same",
@@ -625,6 +627,7 @@ def main() -> int:
         rc_make_l, _, out_make_l = tool.json([
             "ota-bundle-create",
             "--key", str(ota_signer_key_path),
+            "--target", str(args.target),
             "--firmware", str(ota_firmware_bin),
             "--version-code", str(low_code),
             "--out", str(out_low),
