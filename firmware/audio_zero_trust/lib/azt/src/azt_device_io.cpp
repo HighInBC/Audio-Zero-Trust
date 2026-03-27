@@ -223,12 +223,21 @@ void setup_audio_input(AppState& state) {
     return;
   }
 
+#if CONFIG_IDF_TARGET_ESP32S3
+  // Atom EchoS3R has no internal fallback microphone path.
+  state.audio_input_source = "none";
+  state.audio_sample_rate_hz = 0;
+  state.audio_channels = 0;
+  state.audio_sample_width_bytes = 0;
+  Serial.printf("AZT_AUDIO source=none reason=no_codec_detected\n");
+#else
   setup_i2s_internal_pdm();
   state.audio_input_source = "internal_pdm";
   state.audio_sample_rate_hz = 16000;
   state.audio_channels = 1;
   state.audio_sample_width_bytes = 2;
   Serial.printf("AZT_AUDIO source=internal_pdm rate=%lu ch=%u sw=%u\n", static_cast<unsigned long>(state.audio_sample_rate_hz), static_cast<unsigned>(state.audio_channels), static_cast<unsigned>(state.audio_sample_width_bytes));
+#endif
 }
 
 void setup_i2s_pdm_mic() {

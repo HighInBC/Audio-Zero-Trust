@@ -433,7 +433,17 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.ota_signer_override_fingerprint_hex = "";
   state.config_revision = 0;
   state.audio_echo_base_detected = false;
+#if CONFIG_IDF_TARGET_ESP32S3
+  state.audio_input_source = "none";
+  state.audio_sample_rate_hz = 0;
+  state.audio_channels = 0;
+  state.audio_sample_width_bytes = 0;
+#else
   state.audio_input_source = "internal_pdm";
+  state.audio_sample_rate_hz = 16000;
+  state.audio_channels = 1;
+  state.audio_sample_width_bytes = 2;
+#endif
   state.audio_preamp_gain = 2;
   state.audio_adc_gain = 248;
 

@@ -63,7 +63,11 @@ struct AppState {
 
   // Audio input runtime + config
   bool audio_echo_base_detected = false;
+#if CONFIG_IDF_TARGET_ESP32S3
+  String audio_input_source = "none"; // none | echo_base
+#else
   String audio_input_source = "internal_pdm"; // internal_pdm | echo_base
+#endif
   uint8_t audio_preamp_gain = 2;  // ES8311 reg 0x16 (mic gain step)
   uint8_t audio_adc_gain = 248;   // ES8311 reg 0x17 (ADC gain/volume)
   uint32_t audio_sample_rate_hz = 16000;
