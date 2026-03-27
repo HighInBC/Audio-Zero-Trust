@@ -18,16 +18,42 @@ from tools.provision_unit import detect_device_ip_from_serial
 from tools.azt_sdk.services.url_service import base_url
 
 
+def _error_detail(*, where: str, exc: Exception, url: str | None = None, context: dict | None = None) -> dict:
+    out = {
+        "where": where,
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if url:
+        out["url"] = url
+    if context:
+        out["context"] = context
+    return out
+
+
+def _get_json_safe(*, url: str, timeout: int, where: str, error: str) -> dict:
+    try:
+        return get_json(url, timeout=timeout)
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": error,
+            "detail": _error_detail(where=where, exc=e, url=url),
+        }
+
+
 def _state_get_v0(*, host: str, port: int, timeout: int) -> dict:
     scheme = os.getenv("AZT_SCHEME", "auto")
     b = base_url(host=host, port=port, scheme=scheme)
-    return get_json(f"{b}/api/v0/config/state", timeout=timeout)
+    url = f"{b}/api/v0/config/state"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v0", error="STATE_GET_V0_FAILED")
 
 
 def _state_get_v1_legacy(*, host: str, port: int, timeout: int) -> dict:
     scheme = os.getenv("AZT_SCHEME", "auto")
     b = base_url(host=host, port=port, scheme=scheme)
-    return get_json(f"{b}/api/v1/config/state", timeout=timeout)
+    url = f"{b}/api/v1/config/state"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v1_legacy", error="STATE_GET_V1_LEGACY_FAILED")
 
 
 def state_get(*, host: str, port: int, timeout: int) -> dict:
@@ -56,30 +82,39 @@ def state_get(*, host: str, port: int, timeout: int) -> dict:
 
 def attestation_get(*, host: str, port: int, timeout: int, nonce: str) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    return get_json(
-        f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",
-        timeout=timeout,
-    )
+    url = f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.attestation_get", error="ATTESTATION_GET_FAILED")
 
 
 def certificate_get(*, host: str, port: int, timeout: int) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    return get_json(f"{b}/api/v0/device/certificate", timeout=timeout)
+    url = f"{b}/api/v0/device/certificate"
+    return _get_json_safe(url=url, timeout=timeout, where="device_service.certificate_get", error="CERTIFICATE_GET_FAILED")
 
 
 def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    return http_json("POST", f"{b}/api/v0/device/certificate", payload, timeout=timeout)
+    url = f"{b}/api/v0/device/certificate"
+    try:
+        return http_json("POST", url, payload, timeout=timeout)
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": "CERTIFICATE_POST_FAILED",
+            "detail": _error_detail(where="device_service.certificate_post", exc=e, url=url),
+        }
 
 
 def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    ch = get_json(f"{b}/api/v0/device/reboot/challenge", timeout=timeout)
+    challenge_url = f"{b}/api/v0/device/reboot/challenge"
+    ch = _get_json_safe(url=challenge_url, timeout=timeout, where="device_service.reboot_device.challenge", error="REBOOT_CHALLENGE_REQUEST_FAILED")
     if not ch.get("ok"):
         return {
             "ok": False,
             "error": "ERR_REBOOT_CHALLENGE",
             "detail": ch.get("error") or ch.get("detail") or "challenge request failed",
+            "challenge_url": challenge_url,
             "challenge_response": ch,
         }
 
@@ -101,18 +136,39 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
         "signature_b64": sig_b64,
         "signer_fingerprint_hex": signer_fp,
     }
-    return http_json("POST", f"{b}/api/v0/device/reboot", payload, timeout=timeout)
+    reboot_url = f"{b}/api/v0/device/reboot"
+    try:
+        return http_json("POST", reboot_url, payload, timeout=timeout)
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": "REBOOT_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.reboot_device.post", exc=e, url=reboot_url),
+        }
 
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     pem_url = f"{b}/api/v0/device/signing-public-key.pem"
     alias_url = f"{b}/api/v0/device/signing-public-key"
-    with urlopen_with_tls(Request(pem_url, method="GET"), timeout=timeout) as r:
-        pem_body = r.read().decode("utf-8", errors="replace")
-        pem_ct = r.headers.get("Content-Type", "")
-    with urlopen_with_tls(Request(alias_url, method="GET"), timeout=timeout) as r:
-        pem_alias = r.read().decode("utf-8", errors="replace")
+    try:
+        with urlopen_with_tls(Request(pem_url, method="GET"), timeout=timeout) as r:
+            pem_body = r.read().decode("utf-8", errors="replace")
+            pem_ct = r.headers.get("Content-Type", "")
+    except Exception as e:
+        return False, {
+            "error": "SIGNING_KEY_CHECK_PEM_FETCH_FAILED",
+            "detail": _error_detail(where="device_service.signing_key_check.pem", exc=e, url=pem_url),
+        }
+
+    try:
+        with urlopen_with_tls(Request(alias_url, method="GET"), timeout=timeout) as r:
+            pem_alias = r.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return False, {
+            "error": "SIGNING_KEY_CHECK_ALIAS_FETCH_FAILED",
+            "detail": _error_detail(where="device_service.signing_key_check.alias", exc=e, url=alias_url),
+        }
 
     has_pem = "BEGIN PUBLIC KEY" in pem_body
     alias_same = pem_alias == pem_body
@@ -121,17 +177,25 @@ def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict
         "content_type": pem_ct,
         "has_public_key_pem": has_pem,
         "alias_matches": alias_same,
+        "pem_url": pem_url,
+        "alias_url": alias_url,
     }
 
 
 def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: int, timeout: int) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     req_url = f"{b}/stream?seconds={seconds}"
-    r = requests.get(req_url, allow_redirects=False, timeout=timeout, verify=requests_verify_for_url(req_url))
+    try:
+        r = requests.get(req_url, allow_redirects=False, timeout=timeout, verify=requests_verify_for_url(req_url))
+    except Exception as e:
+        return False, {
+            "error": "STREAM_REDIRECT_CHECK_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_redirect_check", exc=e, url=req_url),
+        }
     status = int(r.status_code)
     location = r.headers.get("Location")
     ok = (status == 307) and bool(location and f":{stream_port}/stream" in location)
-    return ok, {"status": status, "location": location}
+    return ok, {"status": status, "location": location, "url": req_url}
 
 
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool) -> tuple[bool, dict]:
@@ -149,7 +213,17 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
       out_file = p.open("wb")
       resolved_out = str(p)
 
-    r = requests.get(url, stream=True, timeout=timeout, verify=requests_verify_for_url(url))
+    try:
+        r = requests.get(url, stream=True, timeout=timeout, verify=requests_verify_for_url(url))
+    except Exception as e:
+        if out_file is not None:
+            out_file.close()
+        return False, {
+            "error": "STREAM_READ_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_read", exc=e, url=url),
+            "out": resolved_out,
+        }
+
     try:
         start = time.time()
         for chunk in r.iter_content(chunk_size=4096):
@@ -159,12 +233,19 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                     out_file.write(chunk)
             if seconds is not None and (time.time() - start >= seconds):
                 break
+    except Exception as e:
+        return False, {
+            "error": "STREAM_READ_ITERATION_FAILED",
+            "detail": _error_detail(where="device_service.stream_read.iter", exc=e, url=url),
+            "bytes": total,
+            "out": resolved_out,
+        }
     finally:
         r.close()
         if out_file is not None:
             out_file.close()
     elapsed = time.time() - start
-    payload = {"bytes": total, "seconds": elapsed, "requested_seconds": seconds}
+    payload = {"bytes": total, "seconds": elapsed, "requested_seconds": seconds, "url": url}
     if resolved_out:
         payload["out"] = resolved_out
     return total > 0, payload

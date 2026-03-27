@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.certificate_service import issue_certificate
 
 
@@ -35,5 +35,5 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0 if ok else 2
     except Exception as e:
-        emit_envelope(command="certificate-issue", ok=False, error="CERTIFICATE_ISSUE_ERROR", detail=str(e), as_json=bool(getattr(args, "as_json", False)))
+        emit_envelope(command="certificate-issue", ok=False, error="CERTIFICATE_ISSUE_ERROR", detail=exception_detail("cmd_certificate_issue.run", e), as_json=bool(getattr(args, "as_json", False)))
         return 2

@@ -13,7 +13,7 @@ if str(CLIENT_ROOT) not in sys.path:
 
 from tools.azt_cli import argparsing as cli_argparsing
 from tools.azt_cli import handler_map as cli_handler_map
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services import operations_service as ops
 
 
@@ -49,7 +49,10 @@ def cmd_apply_config(args: argparse.Namespace) -> int:
         timeout=int(args.timeout),
         fingerprint=args.fingerprint,
     )
-    emit_envelope(command="apply-config", ok=ok, error=None if ok else "APPLY_CONFIG_FAILED", payload=payload, as_json=bool(getattr(args, "as_json", False)))
+    fail_code = "APPLY_CONFIG_FAILED"
+    if not ok and isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload.get("error"):
+        fail_code = str(payload.get("error"))
+    emit_envelope(command="apply-config", ok=ok, error=None if ok else fail_code, payload=payload, as_json=bool(getattr(args, "as_json", False)))
     return 0 if ok else 1
 
 
@@ -182,7 +185,10 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
         timeout=int(args.timeout),
         fingerprint=args.fingerprint,
     )
-    emit_envelope(command="config-patch", ok=ok, error=None if ok else "CONFIG_PATCH_FAILED", payload=payload, as_json=bool(getattr(args, "as_json", False)))
+    fail_code = "CONFIG_PATCH_FAILED"
+    if not ok and isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload.get("error"):
+        fail_code = str(payload.get("error"))
+    emit_envelope(command="config-patch", ok=ok, error=None if ok else fail_code, payload=payload, as_json=bool(getattr(args, "as_json", False)))
     return 0 if ok else 1
 
 def cmd_certify_issue(args: argparse.Namespace) -> int:
@@ -391,7 +397,7 @@ def main() -> int:
                 command=str(getattr(args, "command", "unknown")),
                 ok=False,
                 error="UNHANDLED_EXCEPTION",
-                detail=str(e),
+                detail=exception_detail("azt_tool.main", e, context={"command": str(getattr(args, "command", "unknown"))}),
                 as_json=True,
             )
             return 2

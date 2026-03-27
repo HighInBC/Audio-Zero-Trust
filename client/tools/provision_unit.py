@@ -171,6 +171,52 @@ def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int =
     return None
 
 
+def _serial_prepare_bootstrap(ser, port: str) -> None:
+    # Native USB CDC on S3 is commonly exposed as /dev/ttyACM*.
+    # Assert DTR for active CDC path and avoid RTS toggles.
+    is_cdc = str(port).startswith('/dev/ttyACM')
+    try:
+        if is_cdc:
+            ser.dtr = True
+            ser.rts = False
+            time.sleep(0.10)
+        else:
+            ser.dtr = False
+            ser.rts = False
+            time.sleep(0.05)
+    except Exception:
+        pass
+    try:
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+    except Exception:
+        pass
+
+
+def _drain_serial_nonblocking(ser, ip_re, wifi_ip_re, device_ip: str | None, budget_s: float = 0.03) -> str | None:
+    end = time.time() + max(0.0, budget_s)
+    while time.time() < end:
+        n = getattr(ser, 'in_waiting', 0) or 0
+        if n <= 0:
+            break
+        raw = ser.read(min(n, 1024))
+        if not raw:
+            break
+        txt = raw.decode('utf-8', errors='replace')
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            print({'serial': line})
+            m = ip_re.search(line)
+            if m:
+                device_ip = m.group(1)
+            m2 = wifi_ip_re.search(line)
+            if m2:
+                device_ip = m2.group(1)
+    return device_ip
+
+
 def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 115200, timeout_s: int = 75) -> tuple[bool, str | None, str | None]:
     try:
         import serial  # type: ignore
@@ -182,9 +228,8 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
     ip_re = re.compile(r'AZT_IP=(\d+\.\d+\.\d+\.\d+)')
     wifi_ip_re = re.compile(r'AZT_WIFI_CONNECTED.*\bip=(\d+\.\d+\.\d+\.\d+)')
 
-    with serial.Serial(port, baudrate=baud, timeout=0.25) as ser:
-        # Do not pulse RTS/DTR: EchoS3R can enter ROM downloader via reset logic.
-        ser.reset_input_buffer()
+    with serial.Serial(port, baudrate=baud, timeout=0.10, write_timeout=5) as ser:
+        _serial_prepare_bootstrap(ser, port)
 
         ser.write(f'AZT_CONFIG_BEGIN_LEN {len(blob)}\n'.encode('utf-8'))
 
@@ -217,10 +262,18 @@ def serial_apply_signed_config(port: str, signed_payload: dict, baud: int = 1152
         if not begin_ok:
             return False, device_ip, 'AZT_CONFIG_BEGIN_LEN_TIMEOUT'
 
-        step = 128
+        # Use larger chunks on CDC to reduce sender-side overhead and idle gaps.
+        step = 1024 if str(port).startswith('/dev/ttyACM') else 256
         for i in range(0, len(blob), step):
             ser.write(blob[i:i + step])
-            time.sleep(0.002)
+            # Keep drain non-blocking; never call readline() in the hot send loop.
+            device_ip = _drain_serial_nonblocking(ser, ip_re, wifi_ip_re, device_ip, budget_s=0.02)
+        try:
+            ser.flush()
+        except Exception:
+            pass
+        # One short post-send drain pass to consume immediate ACK/log bursts.
+        device_ip = _drain_serial_nonblocking(ser, ip_re, wifi_ip_re, device_ip, budget_s=0.10)
 
         apply_ok = False
         saw_reboot = False

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tools.azt_cli.output import emit_envelope
+from tools.azt_sdk.errors import exception_detail
 from tools.azt_sdk.services.provisioning_service import configure_device
 
 
@@ -24,14 +25,14 @@ def run(args: argparse.Namespace) -> int:
         if ota_floor_raw:
             if ota_floor_raw == "same":
                 if ota_ver is None:
-                    emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE", payload={"detail": "--ota-version-code is required when --ota-min-version-code=same"}, as_json=bool(getattr(args, "as_json", False)))
+                    emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE_REQUIRED_FOR_SAME_FLOOR", payload={"detail": "--ota-version-code is required when --ota-min-version-code=same", "where": "cmd_configure_device.run.ota_floor_same"}, as_json=bool(getattr(args, "as_json", False)))
                     return 1
                 ota_floor = ota_ver
             else:
                 ota_floor = int(ota_floor_raw)
 
         if ota_floor is not None and ota_ver is None:
-            emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE", payload={"detail": "--ota-version-code is required when setting --ota-min-version-code"}, as_json=bool(getattr(args, "as_json", False)))
+            emit_envelope(command="configure-device", ok=False, error="INVALID_OTA_VERSION_CODE_REQUIRED_FOR_MIN_FLOOR", payload={"detail": "--ota-version-code is required when setting --ota-min-version-code", "where": "cmd_configure_device.run.ota_floor_requires_version"}, as_json=bool(getattr(args, "as_json", False)))
             return 1
         ota_signer_pem = ""
         ota_signer_path = (getattr(args, "ota_signer_public_key_pem", "") or "").strip()
@@ -93,7 +94,17 @@ def run(args: argparse.Namespace) -> int:
             command="configure-device",
             ok=False,
             error="CONFIGURE_DEVICE_ERROR",
-            detail=str(e),
+            detail=exception_detail(
+                where="cmd_configure_device.run",
+                exc=e,
+                context={
+                    "admin_creds_dir": str(getattr(args, "admin_creds_dir", "") or ""),
+                    "recorder_creds_dir": str(getattr(args, "recorder_creds_dir", "") or ""),
+                    "host": str(getattr(args, "host", "") or ""),
+                    "ip": str(getattr(args, "ip", "") or ""),
+                    "port": str(getattr(args, "port", "") or ""),
+                },
+            ),
             as_json=bool(getattr(args, "as_json", False)),
         )
         return 2

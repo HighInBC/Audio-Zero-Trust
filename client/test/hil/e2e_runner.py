@@ -117,14 +117,14 @@ def wait_http_down(tool: ToolRunner, host: str, timeout_s: int = 20) -> bool:
     return False
 
 
-def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wifi_password: str, identity_prefix: str, upload_fs: bool) -> tuple[str, Path, Path, str, str, list[dict]]:
+def fresh_setup(tool: ToolRunner, host_hint: str, port: str, target: str, wifi_ssid: str, wifi_password: str, identity_prefix: str, upload_fs: bool) -> tuple[str, Path, Path, str, str, list[dict]]:
     steps: list[dict] = []
 
     # Transitional architecture step: route setup via azt-tool command surface.
     # NOTE: upload_fs is currently ignored here; once a dedicated CLI command exists,
     # E2E should invoke that command instead of direct PlatformIO usage.
     rc_erase, out_erase = tool.cmd(
-        ["erase-device", "--port", port],
+        ["erase-device", "--port", port, "--target", target],
         )
     steps.append({"name": "tool_erase_device", "ok": rc_erase == 0, "detail": out_erase[-2500:]})
     if rc_erase != 0:
@@ -134,7 +134,7 @@ def fresh_setup(tool: ToolRunner, host_hint: str, port: str, wifi_ssid: str, wif
     identity = f"{identity_prefix}-{stamp}"
 
     rc_flash, out_flash = tool.cmd(
-        ["flash-device", "--from-source", "--port", port],
+        ["flash-device", "--from-source", "--port", port, "--target", target],
         )
     steps.append({"name": "tool_flash_device", "ok": rc_flash == 0, "detail": out_flash[-2500:]})
     if rc_flash != 0:
@@ -235,6 +235,7 @@ def main() -> int:
     ap.add_argument("--fast", action="store_true", help="Skip erase/flash/provision setup and run checks against existing host/key")
     ap.add_argument("--secrets-file", default=".secrets/e2e.env", help="Optional KEY=VALUE file for local secrets (default: .secrets/e2e.env)")
     ap.add_argument("--port", default=None)
+    ap.add_argument("--target", default="atom-echo", choices=["atom-echo", "atom-echos3r"], help="Hardware target for erase/flash during fresh setup")
     ap.add_argument("--wifi-ssid", default=None)
     ap.add_argument("--wifi-password", default=None)
     ap.add_argument("--identity-prefix", default="e2e")
@@ -275,6 +276,7 @@ def main() -> int:
                 tool,
                 host_hint=args.host,
                 port=port,
+                target=args.target,
                 wifi_ssid=wifi_ssid,
                 wifi_password=wifi_password,
                 identity_prefix=args.identity_prefix,
@@ -542,7 +544,8 @@ def main() -> int:
         results.append({"name": "post_reboot_state", "ok": False, "detail": str(err)})
 
     try:
-        rc_finite, obj_finite, out_finite = tool.json(["stream-read", "--host", host, "--seconds", str(args.finite_seconds), "--probe"])
+        finite_timeout = str(max(20, int(args.finite_seconds) + 5))
+        rc_finite, obj_finite, out_finite = tool.json(["stream-read", "--host", host, "--seconds", str(args.finite_seconds), "--timeout", finite_timeout, "--probe"])
         payload_finite = obj_finite.get("payload") if isinstance(obj_finite, dict) else None
         finite_bytes = int(payload_finite.get("bytes") or 0) if isinstance(payload_finite, dict) else 0
         ok_fetch = rc_finite == 0 and finite_bytes > 0
@@ -555,6 +558,8 @@ def main() -> int:
     # OTA happy/sad-path checks.
     if ota_signer_key_path is None:
         ota_signer_key_path = key_path
+    ota_env = "atom-echos3r" if args.target == "atom-echos3r" else "atom-echo"
+    ota_firmware_bin = root / "firmware" / "audio_zero_trust" / ".pio" / "build" / ota_env / "firmware.bin"
     try:
         rc_state0, obj_state0, out_state0 = tool.json(["state-get", "--host", host])
         payload_state0 = obj_state0.get("payload") if isinstance(obj_state0, dict) else None
@@ -569,6 +574,7 @@ def main() -> int:
         rc_make_zero, obj_make_zero, out_make_zero = tool.json([
             "ota-bundle-create",
             "--key", str(ota_signer_key_path),
+            "--firmware", str(ota_firmware_bin),
             "--version-code", str(base_code),
             "--rollback-floor-code", "0",
             "--out", str(out_floor_zero),
@@ -583,6 +589,7 @@ def main() -> int:
         rc_make_f, _, out_make_f = tool.json([
             "ota-bundle-create",
             "--key", str(ota_signer_key_path),
+            "--firmware", str(ota_firmware_bin),
             "--version-code", str(high_code),
             "--rollback-floor-code", "same",
             "--out", str(out_floor),
@@ -618,6 +625,7 @@ def main() -> int:
         rc_make_l, _, out_make_l = tool.json([
             "ota-bundle-create",
             "--key", str(ota_signer_key_path),
+            "--firmware", str(ota_firmware_bin),
             "--version-code", str(low_code),
             "--out", str(out_low),
         ])
@@ -654,7 +662,8 @@ def main() -> int:
 
     try:
         wait_http_state(tool, host, timeout_s=60)
-        rc_probe, obj_probe, out_probe = tool.json(["stream-read", "--host", host, "--seconds", str(args.indef_probe_seconds), "--probe"])
+        probe_timeout = str(max(20, int(args.indef_probe_seconds) + 5))
+        rc_probe, obj_probe, out_probe = tool.json(["stream-read", "--host", host, "--seconds", str(args.indef_probe_seconds), "--timeout", probe_timeout, "--probe"])
         payload_probe = obj_probe.get("payload") if isinstance(obj_probe, dict) else None
         if rc_probe == 0 and isinstance(payload_probe, dict):
             n = int(payload_probe.get("bytes") or 0)
@@ -664,19 +673,22 @@ def main() -> int:
     except Exception as err:
         results.append({"name": "indefinite_probe", "ok": False, "detail": str(err)})
 
-    def probe_with_retry(attempts: int = 2) -> tuple[int, dict | None, str]:
+    def probe_with_retry(attempts: int = 3) -> tuple[int, dict | None, str]:
         last_rc, last_obj, last_out = 1, None, ""
         for _ in range(attempts):
-            rc, obj, out = tool.json(["stream-read", "--host", host, "--seconds", str(args.reconnect_seconds), "--probe"])
+            wait_http_state(tool, host, timeout_s=20)
+            reconnect_timeout = str(max(25, int(args.reconnect_seconds) + 8))
+            rc, obj, out = tool.json(["stream-read", "--host", host, "--seconds", str(args.reconnect_seconds), "--timeout", reconnect_timeout, "--probe"])
             last_rc, last_obj, last_out = rc, obj, out
             payload = obj.get("payload") if isinstance(obj, dict) else None
             if rc == 0 and isinstance(payload, dict) and int(payload.get("bytes") or 0) > 0:
                 return rc, obj, out
-            time.sleep(0.5)
+            time.sleep(1.0)
         return last_rc, last_obj, last_out
 
-    rc_a, obj_a, out_a = probe_with_retry(attempts=2)
-    rc_b, obj_b, out_b = probe_with_retry(attempts=2)
+    rc_a, obj_a, out_a = probe_with_retry(attempts=3)
+    time.sleep(1.0)
+    rc_b, obj_b, out_b = probe_with_retry(attempts=3)
     payload_a = obj_a.get("payload") if isinstance(obj_a, dict) else None
     payload_b = obj_b.get("payload") if isinstance(obj_b, dict) else None
     ok_reconnect = (

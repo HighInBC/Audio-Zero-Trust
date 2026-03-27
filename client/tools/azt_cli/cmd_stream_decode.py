@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.stream_service import stream_decode
 
 
@@ -56,7 +56,7 @@ def run(args: argparse.Namespace) -> int:
                 results.append(out)
             except Exception as e:
                 all_ok = False
-                results.append({"ok": False, "in": in_path, "out": out_path, "error": "STREAM_DECODE_EXCEPTION", "detail": str(e)})
+                results.append({"ok": False, "in": in_path, "out": out_path, "error": "STREAM_DECODE_EXCEPTION", "detail": exception_detail("cmd_stream_decode.run.item", e, context={"in": in_path, "out": out_path})})
 
         payload = results[0] if len(results) == 1 else {"ok": all_ok, "results": results}
         emit_envelope(
@@ -72,7 +72,7 @@ def run(args: argparse.Namespace) -> int:
             command="stream-decode",
             ok=False,
             error="STREAM_DECODE_EXCEPTION",
-            detail=str(e),
+            detail=exception_detail("cmd_stream_decode.run", e),
             payload={},
             as_json=bool(getattr(args, "as_json", False)),
         )

@@ -163,9 +163,10 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
     ca_key, ca_cert, _, active_ca_cert_path = _load_ca_signer(ca_key_path=ca_key_path, ca_cert_path=ca_cert_path)
 
     b = base_url(host=host, port=port, scheme=scheme)
-    csr_res = get_json(f"{b}/api/v0/tls/csr", timeout=timeout)
+    csr_url = f"{b}/api/v0/tls/csr"
+    csr_res = get_json(csr_url, timeout=timeout)
     if not csr_res.get("ok"):
-        raise RuntimeError(f"tls csr fetch failed: {csr_res}")
+        raise RuntimeError(f"tls csr fetch failed at {csr_url}: {csr_res}")
 
     public_key_pem = str(csr_res.get("public_key_pem") or "")
     dev_fp = str(csr_res.get("device_sign_fingerprint_hex") or "")
@@ -238,11 +239,13 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         "signature_algorithm": "ed25519",
         "signature_b64": sig_b64,
     }
-    post = http_json("POST", f"{b}/api/v0/tls/cert", req, timeout=timeout)
+    cert_post_url = f"{b}/api/v0/tls/cert"
+    post = http_json("POST", cert_post_url, req, timeout=timeout)
     if not post.get("ok"):
-        raise RuntimeError(f"tls cert post failed: {post}")
+        raise RuntimeError(f"tls cert post failed at {cert_post_url}: {post}")
 
-    tls_state = get_json(f"{b}/api/v0/tls/state", timeout=timeout)
+    tls_state_url = f"{b}/api/v0/tls/state"
+    tls_state = get_json(tls_state_url, timeout=timeout)
     return {
         "csr": csr_res,
         "install_response": post,
@@ -360,13 +363,18 @@ def tls_bootstrap(*,
     )
 
     https_state = None
-    https_error = ""
+    https_error = None
     verify_host_value = (verify_host or host)
     https_url = f"{base_url(host=verify_host_value, port=int(https_port), scheme='https')}/api/v0/config/state"
     try:
         https_state = get_json(https_url, timeout=int(timeout))
     except Exception as e:
-        https_error = str(e)
+        https_error = {
+            "where": "tls_service.tls_bootstrap.https_verify",
+            "exception_type": type(e).__name__,
+            "message": str(e),
+            "url": https_url,
+        }
 
     reboot_attempted = False
     reboot_response = None
@@ -380,7 +388,21 @@ def tls_bootstrap(*,
             raise RuntimeError("admin key must be Ed25519 private key")
 
         http_base = base_url(host=host, port=int(http_port), scheme="http")
-        ch = get_json(f"{http_base}/api/v0/device/reboot/challenge", timeout=int(timeout))
+        challenge_url = f"{http_base}/api/v0/device/reboot/challenge"
+        reboot_url = f"{http_base}/api/v0/device/reboot"
+        try:
+            ch = get_json(challenge_url, timeout=int(timeout))
+        except Exception as e:
+            ch = {
+                "ok": False,
+                "error": "TLS_BOOTSTRAP_REBOOT_CHALLENGE_FAILED",
+                "detail": {
+                    "where": "tls_service.tls_bootstrap.reboot_challenge",
+                    "exception_type": type(e).__name__,
+                    "message": str(e),
+                    "url": challenge_url,
+                },
+            }
         if ch.get("ok"):
             nonce = str(ch.get("nonce") or "")
             if nonce:
@@ -392,15 +414,34 @@ def tls_bootstrap(*,
                     "signature_b64": sig_b64,
                     "signer_fingerprint_hex": admin_fp,
                 }
-                reboot_response = http_json("POST", f"{http_base}/api/v0/device/reboot", reboot_req, timeout=int(timeout))
+                try:
+                    reboot_response = http_json("POST", reboot_url, reboot_req, timeout=int(timeout))
+                except Exception as e:
+                    reboot_response = {
+                        "ok": False,
+                        "error": "TLS_BOOTSTRAP_REBOOT_POST_FAILED",
+                        "detail": {
+                            "where": "tls_service.tls_bootstrap.reboot_post",
+                            "exception_type": type(e).__name__,
+                            "message": str(e),
+                            "url": reboot_url,
+                        },
+                    }
+        else:
+            reboot_response = ch
 
         import time
         time.sleep(max(1, int(reboot_wait_seconds)))
-        https_error = ""
+        https_error = None
         try:
             https_state = get_json(https_url, timeout=int(timeout))
         except Exception as e:
-            https_error = str(e)
+            https_error = {
+                "where": "tls_service.tls_bootstrap.https_verify_after_reboot",
+                "exception_type": type(e).__name__,
+                "message": str(e),
+                "url": https_url,
+            }
 
     https_ok = bool(isinstance(https_state, dict) and https_state.get("ok"))
 

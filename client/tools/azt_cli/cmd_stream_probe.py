@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.device_service import stream_read
 
 
@@ -53,7 +53,7 @@ def run(args: argparse.Namespace) -> int:
             command=command_name,
             ok=False,
             error="STREAM_READ_ERROR",
-            detail=str(e),
+            detail=exception_detail("cmd_stream_probe.run", e),
             as_json=bool(getattr(args, "as_json", False)),
         )
         return 1

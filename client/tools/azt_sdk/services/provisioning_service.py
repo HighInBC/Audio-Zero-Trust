@@ -19,6 +19,19 @@ from tools.provision_unit import (
 )
 
 
+def _error_detail(*, where: str, exc: Exception, url: str | None = None, context: dict | None = None) -> dict:
+    out = {
+        "where": where,
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if url:
+        out["url"] = url
+    if context:
+        out["context"] = context
+    return out
+
+
 def configure_device(
     *,
     admin_creds_dir: str,
@@ -189,12 +202,20 @@ def configure_device(
 
     state0 = None
     state0_err = None
+    state0_url = None
     if device_ip:
         base = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "auto"))
+        state0_url = base + "/api/v0/config/state"
         try:
-            state0 = http_json("GET", base + "/api/v0/config/state")
+            state0 = http_json("GET", state0_url)
         except Exception as e:
-            state0_err = str(e)
+            state0_err = {
+                "error": "CONFIGURE_DEVICE_HTTP_STATE_PROBE_FAILED",
+                "where": "provisioning_service.configure_device.state_probe",
+                "url": state0_url,
+                "exception_type": type(e).__name__,
+                "message": str(e),
+            }
 
     serial_required = (
         (ota_min_version_code is not None)
@@ -230,14 +251,23 @@ def configure_device(
         common["tls_san_hosts"] = tls_material.get("san_hosts") or []
     if detected_ip:
         common["ip_detected"] = detected_ip
+    if state0_url:
+        common["state_probe_url"] = state0_url
     if state0_err:
         common["state_probe_error"] = state0_err
 
     if state0 is None or serial_required:
         if not allow_serial_bootstrap:
-            return 9, False, ("SERIAL_REQUIRED" if serial_required else "HTTP_UNREACHABLE"), {
+            if serial_required:
+                return 9, False, "SERIAL_REQUIRED_FOR_OTA_CONTROLS", {
+                    **common,
+                    "detail": "serial bootstrap required for OTA floor controls",
+                    "where": "provisioning_service.configure_device.serial_gate",
+                }
+            return 9, False, "HTTP_STATE_UNREACHABLE_SERIAL_DISABLED", {
                 **common,
-                "detail": ("serial bootstrap required for OTA floor controls" if serial_required else "HTTP state unreachable and serial bootstrap not allowed"),
+                "detail": "HTTP state unreachable and serial bootstrap not allowed",
+                "where": "provisioning_service.configure_device.serial_gate",
             }
 
         ok_serial, ip_from_serial, serial_detail = serial_apply_signed_config(
@@ -324,14 +354,19 @@ def configure_device(
 
         state1 = None
         postcheck_err = None
+        postcheck_target = f"{base_after}/api/v0/config/state"
         for _ in range(20):
             try:
-                st = http_json("GET", f"{base_after}/api/v0/config/state")
+                st = http_json("GET", postcheck_target)
                 if isinstance(st, dict) and st.get("ok"):
                     state1 = st
                     break
             except Exception as e:
-                postcheck_err = str(e)
+                postcheck_err = _error_detail(
+                    where="provisioning_service.configure_device.postcheck",
+                    exc=e,
+                    url=postcheck_target,
+                )
             time.sleep(1.0)
 
         if state1 is None:
@@ -342,7 +377,7 @@ def configure_device(
                 "state_after": None,
                 "postcheck_warning": "state endpoint unreachable after serial apply",
                 "postcheck_error": postcheck_err,
-                "postcheck_target": f"{base_after}/api/v0/config/state",
+                "postcheck_target": postcheck_target,
             }
 
         ok = state1.get("admin_fingerprint_hex") == fp

@@ -6,6 +6,7 @@ import base64
 import json
 import sys
 import time
+import fcntl
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -16,11 +17,38 @@ def jdump(x: dict) -> str:
     return json.dumps(x, separators=(",", ":"))
 
 
+def _serial_prepare(ser, target: str) -> None:
+    t = (target or "").strip().lower()
+    # atom-echo uses USB-UART bridge; keep lines low and clear stale boot text.
+    if t == "atom-echo":
+        ser.dtr = False
+        ser.rts = False
+        time.sleep(0.05)
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        return
+    # atom-echos3r uses native USB CDC; assert DTR so firmware serial path is active.
+    if t == "atom-echos3r":
+        ser.dtr = True
+        ser.rts = False
+        time.sleep(0.15)
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        return
+    # fallback
+    ser.dtr = False
+    ser.rts = False
+    time.sleep(0.05)
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Companion app for on-device library test firmware")
     ap.add_argument("--port", default="/dev/ttyUSB0")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--timeout", type=int, default=60)
+    ap.add_argument("--target", default="atom-echo", choices=["atom-echo", "atom-echos3r"], help="Device target; controls serial handshake strategy")
     args = ap.parse_args()
 
     try:
@@ -35,23 +63,46 @@ def main() -> int:
         serialization.PublicFormat.SubjectPublicKeyInfo,
     )
 
+    lockf = open('/tmp/libtest_companion.lock', 'w')
+    try:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(jdump({"error": "companion_lock_busy"}), file=sys.stderr)
+        return 4
+
     with serial.Serial(args.port, baudrate=args.baud, timeout=0.25) as ser:
-        ser.dtr = False
-        ser.rts = False
-        time.sleep(0.05)
-        ser.reset_input_buffer()
+        _serial_prepare(ser, args.target)
+
+        # Drain any stale bytes/partial lines left by previous sessions before handshake.
+        drain_until = time.time() + 1.0
+        drained = 0
+        while time.time() < drain_until:
+            b = ser.read(256)
+            if b:
+                drained += len(b)
+        if drained:
+            print(jdump({"companion_drain_bytes": drained}), file=sys.stderr)
 
         def send(obj: dict):
             line = jdump(obj) + "\n"
             ser.write(line.encode("utf-8"))
-
-        send({"cmd": "PING"})
+            dbg = {
+                "companion_send": obj.get("cmd", "?"),
+                "len": len(line),
+                "t": round(time.time(), 3),
+            }
+            print(jdump(dbg), file=sys.stderr)
 
         deadline = time.time() + args.timeout
         sent_pub = False
+        pubkey_acked = False
         started = False
+        phase = "wait_pong"
+
+        send({"cmd": "PING"})
 
         while time.time() < deadline:
+            now = time.time()
             raw = ser.readline().decode("utf-8", errors="replace").strip()
             if not raw:
                 continue
@@ -64,14 +115,18 @@ def main() -> int:
 
             ev = msg.get("event")
             if ev == "PONG":
-                if not sent_pub:
+                if phase == "wait_pong" and not sent_pub:
                     send({"cmd": "PUBKEY_SET", "pem_b64": base64.b64encode(pub_pem).decode("ascii")})
                     sent_pub = True
+                    phase = "wait_pubkey"
                 continue
 
-            if ev == "PUBKEY_SET_OK" and not started:
-                send({"cmd": "RUN_ALL"})
-                started = True
+            if ev == "PUBKEY_SET_OK":
+                pubkey_acked = True
+                if phase == "wait_pubkey" and not started:
+                    send({"cmd": "RUN_ALL"})
+                    started = True
+                    phase = "run"
                 continue
 
             if ev == "RSA_WRAP_AES_REQ":
@@ -123,7 +178,7 @@ def main() -> int:
                 print(jdump({"companion_ok": ok, **msg}))
                 return 0 if ok else 1
 
-        print(jdump({"error": "timeout", "sent_pub": sent_pub, "started": started}))
+        print(jdump({"error": "timeout", "sent_pub": sent_pub, "pubkey_acked": pubkey_acked, "started": started, "target": args.target}))
         return 3
 
 

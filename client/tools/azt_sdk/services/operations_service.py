@@ -22,6 +22,19 @@ from tools.azt_sdk.services.url_service import base_url
 import os
 
 
+def _error_detail(*, where: str, exc: Exception, url: str | None = None, context: dict | None = None) -> dict:
+    out = {
+        "where": where,
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if url:
+        out["url"] = url
+    if context:
+        out["context"] = context
+    return out
+
+
 def parse_meta(items: list[str]) -> dict:
     out = {}
     for item in items or []:
@@ -52,13 +65,36 @@ def apply_config(*, in_path: str, key_path: str, host: str, port: int, timeout: 
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
     base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    apply_res = http_json("POST", f"{base}/api/v0/config", signed_cfg, timeout=timeout)
-    state_res = get_json(f"{base}/api/v0/config/state", timeout=timeout)
+    apply_url = f"{base}/api/v0/config"
+    state_url = f"{base}/api/v0/config/state"
+    try:
+        apply_res = http_json("POST", apply_url, signed_cfg, timeout=timeout)
+    except Exception as e:
+        return False, {
+            "host": host,
+            "port": port,
+            "signer_fingerprint_hex": fp,
+            "error": "APPLY_CONFIG_POST_FAILED",
+            "detail": _error_detail(where="operations_service.apply_config.post", exc=e, url=apply_url),
+        }
+    try:
+        state_res = get_json(state_url, timeout=timeout)
+    except Exception as e:
+        return False, {
+            "host": host,
+            "port": port,
+            "signer_fingerprint_hex": fp,
+            "error": "APPLY_CONFIG_STATE_GET_FAILED",
+            "detail": _error_detail(where="operations_service.apply_config.state_get", exc=e, url=state_url),
+            "apply_response": apply_res,
+        }
     ok = bool(apply_res.get("ok")) and bool(state_res.get("ok"))
     return ok, {
         "host": host,
         "port": port,
         "signer_fingerprint_hex": fp,
+        "apply_url": apply_url,
+        "state_url": state_url,
         "apply_response": apply_res,
         "state": state_res,
     }
@@ -81,14 +117,39 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
     base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    patch_res = http_json("POST", f"{base}/api/v0/config/patch", signed_cfg, timeout=timeout)
-    state_res = get_json(f"{base}/api/v0/config/state", timeout=timeout)
+    patch_url = f"{base}/api/v0/config/patch"
+    state_url = f"{base}/api/v0/config/state"
+    try:
+        patch_res = http_json("POST", patch_url, signed_cfg, timeout=timeout)
+    except Exception as e:
+        return False, {
+            "host": host,
+            "port": port,
+            "signer_fingerprint_hex": fp,
+            "if_version": int(if_version),
+            "error": "CONFIG_PATCH_POST_FAILED",
+            "detail": _error_detail(where="operations_service.config_patch.post", exc=e, url=patch_url),
+        }
+    try:
+        state_res = get_json(state_url, timeout=timeout)
+    except Exception as e:
+        return False, {
+            "host": host,
+            "port": port,
+            "signer_fingerprint_hex": fp,
+            "if_version": int(if_version),
+            "error": "CONFIG_PATCH_STATE_GET_FAILED",
+            "detail": _error_detail(where="operations_service.config_patch.state_get", exc=e, url=state_url),
+            "patch_response": patch_res,
+        }
     ok = bool(patch_res.get("ok")) and bool(state_res.get("ok"))
     return ok, {
         "host": host,
         "port": port,
         "signer_fingerprint_hex": fp,
         "if_version": int(if_version),
+        "patch_url": patch_url,
+        "state_url": state_url,
         "patch_response": patch_res,
         "state": state_res,
     }
@@ -130,7 +191,7 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
         pub = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(state_dev_pub, validate=True))
         pub.verify(base64.b64decode(att_sig_b64, validate=True), att_payload_raw)
     except Exception as e:
-        return False, "ERR_ATTESTATION_SIG_VERIFY", {"detail": str(e)}
+        return False, "ERR_ATTESTATION_SIG_VERIFY", {"detail": _error_detail(where="operations_service.certify_issue.attestation_sig_verify", exc=e)}
 
     payload = {
         "schema": "azt.issue.certification.v1",
@@ -315,9 +376,17 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
             return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), {"url": url, "response": parsed}
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        return False, "ERR_OTA_BUNDLE_HTTP", {"url": url, "http_status": e.code, "response": body}
+        return False, "ERR_OTA_BUNDLE_HTTP", {
+            "url": url,
+            "http_status": e.code,
+            "response": body,
+            "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
+        }
     except Exception as e:
-        return False, "ERR_OTA_BUNDLE_POST", {"url": url, "error": str(e)}
+        return False, "ERR_OTA_BUNDLE_POST", {
+            "url": url,
+            "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
+        }
 
 
 def separate_headers(*, in_path: str, out_headers: str) -> tuple[bool, dict]:

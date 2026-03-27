@@ -16,6 +16,7 @@
 namespace {
 
 String g_pubkey_pem;
+std::vector<uint8_t> g_pubkey_raw;
 azt_test::Registry g_registry;
 azt_test::Context g_ctx;
 
@@ -31,6 +32,9 @@ uint32_t g_suite_total = 0;
 uint32_t g_suite_pass = 0;
 uint32_t g_suite_fail = 0;
 int g_async_suite_index = -1;
+String g_rx_line;
+uint32_t g_rx_last_byte_ms = 0;
+uint32_t g_rx_last_debug_ms = 0;
 
 String json_line(const JsonDocument& doc) {
   String out;
@@ -109,7 +113,7 @@ void maybe_finish_suite() {
 }
 
 void start_rsa_wrap_test(const char* test_name, const char* scenario) {
-  if (g_pubkey_pem.length() < 64) {
+  if (g_pubkey_raw.size() < 64) {
     emit_test_result(test_name, false, "no pubkey installed");
     maybe_finish_suite();
     return;
@@ -117,10 +121,8 @@ void start_rsa_wrap_test(const char* test_name, const char* scenario) {
 
   esp_fill_random(g_expected_plain, sizeof(g_expected_plain));
   std::vector<uint8_t> wrapped;
-  std::vector<uint8_t> pub(reinterpret_cast<const uint8_t*>(g_pubkey_pem.c_str()),
-                           reinterpret_cast<const uint8_t*>(g_pubkey_pem.c_str()) + g_pubkey_pem.length() + 1);
 
-  if (!azt::rsa_oaep_sha256_encrypt_pub(pub.data(), pub.size(), g_expected_plain, sizeof(g_expected_plain), wrapped)) {
+  if (!azt::rsa_oaep_sha256_encrypt_pub(g_pubkey_raw.data(), g_pubkey_raw.size(), g_expected_plain, sizeof(g_expected_plain), wrapped)) {
     emit_test_result(test_name, false, "rsa wrap failed");
     maybe_finish_suite();
     return;
@@ -247,7 +249,27 @@ void handle_command_line(const String& line) {
   JsonDocument in;
   auto err = deserializeJson(in, line);
   if (err) {
-    emit_status("error", "invalid json command");
+    JsonDocument d;
+    d["event"] = "STATUS";
+    d["level"] = "error";
+    d["msg"] = "invalid json command";
+    d["json_error"] = err.c_str();
+    const size_t n = line.length();
+    d["line_len"] = n;
+    d["line_head"] = line.substring(0, 80);
+    d["line_tail"] = (n > 80) ? line.substring(n - 80) : line;
+    int q = 0, ob = 0, cb = 0;
+    for (size_t i = 0; i < n; ++i) {
+      const char c = line.charAt(i);
+      if (c == '"') q++;
+      else if (c == '{') ob++;
+      else if (c == '}') cb++;
+    }
+    d["quote_count"] = q;
+    d["open_brace_count"] = ob;
+    d["close_brace_count"] = cb;
+    if (n > 0) d["last_char_code"] = static_cast<int>(static_cast<unsigned char>(line.charAt(n - 1)));
+    Serial.println(json_line(d));
     return;
   }
 
@@ -274,9 +296,12 @@ void handle_command_line(const String& line) {
       return;
     }
     g_pubkey_pem = String(reinterpret_cast<const char*>(pem.data()));
+    g_pubkey_raw.assign(pem.begin(), pem.end());
+    if (g_pubkey_raw.empty() || g_pubkey_raw.back() != 0) g_pubkey_raw.push_back(0);
     JsonDocument d;
     d["event"] = "PUBKEY_SET_OK";
     d["len"] = g_pubkey_pem.length();
+    d["mode"] = "pem";
     Serial.println(json_line(d));
     return;
   }
@@ -303,6 +328,7 @@ void handle_command_line(const String& line) {
 }  // namespace
 
 void setup() {
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
   delay(200);
 
@@ -321,12 +347,37 @@ void setup() {
 void loop() {
   check_pending_timeout();
 
-  if (!Serial.available()) {
-    delay(5);
-    return;
+  bool had_data = false;
+  while (Serial.available()) {
+    had_data = true;
+    const char c = static_cast<char>(Serial.read());
+    if (c == '\r') continue;
+    if (c == '\n') {
+      String line = g_rx_line;
+      g_rx_line = "";
+      line.trim();
+      if (line.length() > 0) handle_command_line(line);
+      continue;
+    }
+    g_rx_line += c;
+    g_rx_last_byte_ms = millis();
+    if (g_rx_line.length() > 4096) {
+      g_rx_line = "";
+      emit_status("error", "command line too long");
+    }
   }
-  String line = Serial.readStringUntil('\n');
-  line.trim();
-  if (line.length() == 0) return;
-  handle_command_line(line);
+
+  if (!had_data) {
+    if (g_rx_line.length() > 0 && (millis() - g_rx_last_byte_ms) > 500 && (millis() - g_rx_last_debug_ms) > 500) {
+      JsonDocument d;
+      d["event"] = "STATUS";
+      d["level"] = "debug";
+      d["msg"] = "incomplete command buffered";
+      d["line_len"] = g_rx_line.length();
+      d["line_tail"] = g_rx_line.substring(g_rx_line.length() > 60 ? g_rx_line.length() - 60 : 0);
+      Serial.println(json_line(d));
+      g_rx_last_debug_ms = millis();
+    }
+    delay(5);
+  }
 }

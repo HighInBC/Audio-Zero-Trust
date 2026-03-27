@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_cli.targets import env_for_target
 from tools.azt_sdk.services.build_service import erase_device
 
@@ -26,7 +26,7 @@ def run(args: argparse.Namespace) -> int:
             command="erase-device",
             ok=False,
             error="ERASE_EXCEPTION",
-            detail=str(e),
+            detail=exception_detail("cmd_erase_device.run", e),
             as_json=bool(getattr(args, "as_json", False)),
         )
         return 2

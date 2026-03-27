@@ -6,7 +6,7 @@ import secrets
 import sys
 from pathlib import Path
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.attestation_service import verify_attestation
 
 
@@ -39,7 +39,7 @@ def run(args: argparse.Namespace) -> int:
             command="attestation-verify",
             ok=False,
             error="ATTESTATION_VERIFY_ERROR",
-            detail=str(e),
+            detail=exception_detail("cmd_attestation_verify.run", e),
             as_json=bool(getattr(args, "as_json", False)),
         )
         return 1

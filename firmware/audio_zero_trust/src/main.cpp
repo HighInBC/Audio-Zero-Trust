@@ -53,6 +53,11 @@ void stream_server_task(void*) {
 }  // namespace
 
 void setup() {
+#if CONFIG_IDF_TARGET_ESP32S3
+  // Atom EchoS3R: increase USB serial RX buffer to reduce large-payload ingress stalls.
+  // Old target (ESP32 Atom Echo) does not use this path.
+  Serial.setRxBufferSize(8192);
+#endif
   Serial.begin(115200);
   delay(200);
 
@@ -95,9 +100,12 @@ void setup() {
 
 void loop() {
   if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(200)) == pdTRUE) {
-    azt::maybe_maintain_wifi(g_state);
-    azt::maybe_refresh_time_sync(g_state);
-    azt::maybe_broadcast_discovery_announcement(g_state);
+    // During serial config payload ingestion, reduce background serial chatter and work.
+    if (!g_serial_state.config_mode) {
+      azt::maybe_maintain_wifi(g_state);
+      azt::maybe_refresh_time_sync(g_state);
+      azt::maybe_broadcast_discovery_announcement(g_state);
+    }
     xSemaphoreGive(g_state_mu);
   }
 

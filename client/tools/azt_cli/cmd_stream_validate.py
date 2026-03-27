@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.stream_service import stream_validate
 
 
@@ -12,5 +12,5 @@ def run(args: argparse.Namespace) -> int:
         emit_envelope(command="stream-validate", ok=bool(out.get("ok")), error=None if out.get("ok") else "STREAM_VALIDATE_FAILED", payload=out, as_json=bool(getattr(args, "as_json", False)))
         return 0 if out.get("ok") else 1
     except Exception as e:
-        emit_envelope(command="stream-validate", ok=False, error="STREAM_VALIDATE_EXCEPTION", detail=str(e), payload={}, as_json=bool(getattr(args, "as_json", False)))
+        emit_envelope(command="stream-validate", ok=False, error="STREAM_VALIDATE_EXCEPTION", detail=exception_detail("cmd_stream_validate.run", e), payload={}, as_json=bool(getattr(args, "as_json", False)))
         return 1
