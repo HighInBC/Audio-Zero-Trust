@@ -142,8 +142,8 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     if audio_preamp is not None or audio_adc is not None:
         pa = patch_obj.get("audio") if isinstance(patch_obj.get("audio"), dict) else {}
         if audio_preamp is not None:
-            if int(audio_preamp) < 0 or int(audio_preamp) > 255:
-                emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "--audio-preamp-gain must be 0..255"}, as_json=bool(getattr(args, "as_json", False)))
+            if int(audio_preamp) < 1 or int(audio_preamp) > 8:
+                emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "--audio-preamp-gain must be 1..8"}, as_json=bool(getattr(args, "as_json", False)))
                 return 1
             pa["preamp_gain"] = int(audio_preamp)
         if audio_adc is not None:

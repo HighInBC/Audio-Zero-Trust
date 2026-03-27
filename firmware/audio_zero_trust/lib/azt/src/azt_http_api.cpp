@@ -475,9 +475,9 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     }
     if (!audio["preamp_gain"].isNull()) {
       int v = audio["preamp_gain"].as<int>();
-      if (v < 0 || v > 255) {
+      if (v < 1 || v > 8) {
         r.code = 400;
-        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 0..255\"}";
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 1..8\"}";
         return r;
       }
       new_audio_preamp_gain = static_cast<uint8_t>(v);
@@ -928,9 +928,9 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     }
     if (!pa["preamp_gain"].isNull()) {
       int v = pa["preamp_gain"].as<int>();
-      if (v < 0 || v > 255) {
+      if (v < 1 || v > 8) {
         r.code = 400;
-        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 0..255\"}";
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 1..8\"}";
         return r;
       }
       new_audio_preamp_gain = static_cast<uint8_t>(v);

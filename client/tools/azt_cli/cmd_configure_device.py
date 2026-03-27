@@ -40,8 +40,8 @@ def run(args: argparse.Namespace) -> int:
             ota_signer_pem = Path(ota_signer_path).read_text(encoding="utf-8")
         audio_preamp_gain = getattr(args, "audio_preamp_gain", None)
         audio_adc_gain = getattr(args, "audio_adc_gain", None)
-        if audio_preamp_gain is not None and not (0 <= int(audio_preamp_gain) <= 255):
-            emit_envelope(command="configure-device", ok=False, error="INVALID_AUDIO_PREAMP_GAIN", payload={"detail": "--audio-preamp-gain must be 0..255"}, as_json=bool(getattr(args, "as_json", False)))
+        if audio_preamp_gain is not None and not (1 <= int(audio_preamp_gain) <= 8):
+            emit_envelope(command="configure-device", ok=False, error="INVALID_AUDIO_PREAMP_GAIN", payload={"detail": "--audio-preamp-gain must be 1..8"}, as_json=bool(getattr(args, "as_json", False)))
             return 1
         if audio_adc_gain is not None and not (0 <= int(audio_adc_gain) <= 255):
             emit_envelope(command="configure-device", ok=False, error="INVALID_AUDIO_ADC_GAIN", payload={"detail": "--audio-adc-gain must be 0..255"}, as_json=bool(getattr(args, "as_json", False)))

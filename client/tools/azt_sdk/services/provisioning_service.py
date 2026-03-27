@@ -102,7 +102,7 @@ def configure_device(
         return 13, False, "INVALID_OTA_MIN_VERSION_CODE_COMBINATION", {"detail": "cannot set and clear OTA floor together"}
     if ota_signer_public_key_pem and ota_signer_clear:
         return 14, False, "INVALID_OTA_SIGNER_COMBINATION", {"detail": "cannot set and clear OTA signer together"}
-    if audio_preamp_gain is not None and not (0 <= int(audio_preamp_gain) <= 255):
+    if audio_preamp_gain is not None and not (1 <= int(audio_preamp_gain) <= 8):
         return 16, False, "INVALID_AUDIO_PREAMP_GAIN", {"detail": int(audio_preamp_gain)}
     if audio_adc_gain is not None and not (0 <= int(audio_adc_gain) <= 255):
         return 17, False, "INVALID_AUDIO_ADC_GAIN", {"detail": int(audio_adc_gain)}
