@@ -125,6 +125,9 @@ void handle_serial_control(AppState& state,
   };
 
   if (serial_state.config_mode && serial_state.config_len_mode) {
+    static size_t last_rx_debug_len = 0;
+    static uint32_t last_rx_debug_ms = 0;
+
     String chunk;
     while (Serial.available() && serial_state.config_buf.length() < serial_state.config_expected_len) {
       int c = Serial.read();
@@ -132,16 +135,36 @@ void handle_serial_control(AppState& state,
       chunk += static_cast<char>(c);
     }
 
-    SerialConfigRxStep step = consume_config_payload_chunk(serial_state, chunk, millis(), kConfigRxTimeoutMs);
+    const uint32_t now_ms = millis();
+    SerialConfigRxStep step = consume_config_payload_chunk(serial_state, chunk, now_ms, kConfigRxTimeoutMs);
+    // Throttled RX progress debug: at most once per 1s and only when advanced >=512 bytes.
+    const size_t cur_len = serial_state.config_buf.length();
+    if (cur_len > 0 && (cur_len - last_rx_debug_len) >= 512 && (now_ms - last_rx_debug_ms) >= 1000) {
+      Serial.printf("AZT_CONFIG_RX_PROGRESS received=%u expected=%u remaining=%u\n",
+                    static_cast<unsigned>(cur_len),
+                    static_cast<unsigned>(serial_state.config_expected_len),
+                    static_cast<unsigned>(serial_state.config_expected_len > cur_len ? (serial_state.config_expected_len - cur_len) : 0));
+      last_rx_debug_len = cur_len;
+      last_rx_debug_ms = now_ms;
+    }
+
     if (step.reached_expected_len) {
+      Serial.printf("AZT_CONFIG_RX_COMPLETE received=%u expected=%u\n",
+                    static_cast<unsigned>(cur_len),
+                    static_cast<unsigned>(serial_state.config_expected_len));
+      last_rx_debug_len = 0;
+      last_rx_debug_ms = 0;
       apply_buffered_config();
       return;
     }
 
     if (step.timed_out) {
-      Serial.printf("AZT_CONFIG_APPLY code=408 body={\"ok\":false,\"error\":\"ERR_CONFIG_TIMEOUT\",\"detail\":\"serial config payload timeout\",\"received\":%u,\"expected\":%u}\n",
+      Serial.printf("AZT_CONFIG_APPLY code=408 body={\"ok\":false,\"error\":\"ERR_CONFIG_TIMEOUT\",\"detail\":\"serial config payload timeout\",\"received\":%u,\"expected\":%u,\"last_rx_age_ms\":%u}\n",
                     static_cast<unsigned>(serial_state.config_buf.length()),
-                    static_cast<unsigned>(serial_state.config_expected_len));
+                    static_cast<unsigned>(serial_state.config_expected_len),
+                    static_cast<unsigned>(serial_state.config_last_rx_ms > 0 ? (now_ms - serial_state.config_last_rx_ms) : 0));
+      last_rx_debug_len = 0;
+      last_rx_debug_ms = 0;
       clear_serial_config_rx_state(serial_state);
     }
     return;
