@@ -52,7 +52,7 @@ If you just want to install and run, jump to **[Install](#install)**.
 - `spec/` — protocol/container/spec references
 - `docs/` — operational documentation (including serial flash profile contracts)
 
-Recommended hardware target: **M5Stack ATOM EchoS3R**.
+Recommended hardware target: **M5Stack ATOM EchoS3R** ([official docs](https://docs.m5stack.com/en/core/Atom_EchoS3R)).
 Legacy/alternate target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
 
 ---
@@ -174,7 +174,7 @@ Current non-goals / caveats:
 
 ## Install
 
-> **Hardware recommendation:** Use **M5Stack ATOM EchoS3R** for new installs (`--target atom-echos3r`).
+> **Hardware recommendation:** Use **M5Stack ATOM EchoS3R** for new installs (`--target atom-echos3r`). Hardware page: <https://docs.m5stack.com/en/core/Atom_EchoS3R>.
 
 ### 1) Prerequisites
 
@@ -269,9 +269,11 @@ Compile current source, sign OTA metadata with your firmware key, and output bun
 ```bash
 python3 client/tools/azt_tool.py ota-bundle-create \
   --key client/tools/provisioned/firmware-master/private_key.pem \
+  --target atom-echos3r \
   --version-code timestamp \
   --rollback-floor-code same \
   --out firmware/releases/OTA-Audio-Zero-Trust-$(date -u +%Y%m%d).otabundle
+# legacy: --target atom-echo
 ```
 
 You can use `--post --host <device>` instead of `--out` to create and immediately post upgrade payload.
