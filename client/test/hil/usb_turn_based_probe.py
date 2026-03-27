@@ -1,68 +1,81 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, serial, time, re, sys
+import argparse, serial, time, zlib
+
+MAGIC = b"AZT1"
+
+
+def u32be(v: int) -> bytes:
+    return bytes([(v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF])
+
+
+def read_exact(ser: serial.Serial, n: int, timeout: float) -> bytes | None:
+    end = time.time() + timeout
+    out = bytearray()
+    while len(out) < n and time.time() < end:
+        chunk = ser.read(n - len(out))
+        if chunk:
+            out.extend(chunk)
+    return bytes(out) if len(out) == n else None
+
+
+def read_frame(ser: serial.Serial, timeout: float) -> tuple[bool, str]:
+    hdr = read_exact(ser, 8, timeout)
+    if hdr is None:
+        return False, "timeout_hdr"
+    if hdr[:4] != MAGIC:
+        return False, f"bad_magic:{hdr[:4]!r}"
+    ln = int.from_bytes(hdr[4:8], "big")
+    payload = read_exact(ser, ln, timeout)
+    if payload is None:
+        return False, "timeout_payload"
+    crc_raw = read_exact(ser, 4, timeout)
+    if crc_raw is None:
+        return False, "timeout_crc"
+    got_crc = int.from_bytes(crc_raw, "big")
+    calc_crc = zlib.crc32(payload) & 0xFFFFFFFF
+    if got_crc != calc_crc:
+        return False, f"bad_crc:{got_crc:08x}!={calc_crc:08x}"
+    return True, payload.decode("utf-8", errors="replace")
+
+
+def write_frame(ser: serial.Serial, payload: bytes) -> tuple[bool, str]:
+    frame = bytearray()
+    frame += MAGIC
+    frame += u32be(len(payload))
+    frame += payload
+    frame += u32be(zlib.crc32(payload) & 0xFFFFFFFF)
+    try:
+        ser.write(frame)
+        ser.flush()
+        return True, "ok"
+    except Exception as e:
+        return False, f"write_failed:{type(e).__name__}:{e}"
 
 
 def run_once(port: str, size: int, timeout: float) -> tuple[bool, str]:
-    payload = (b"A" * size)
+    payload = b"A" * size
     with serial.Serial(port, 115200, timeout=0.2, write_timeout=5, dsrdtr=False, rtscts=False, xonxoff=False) as ser:
         ser.dtr = True
         ser.rts = False
-        time.sleep(0.1)
+        time.sleep(0.15)
         ser.reset_input_buffer()
         ser.reset_output_buffer()
 
-        # Wait for any line from device so we know link is alive.
-        alive_deadline = time.time() + 3
-        while time.time() < alive_deadline:
-            b = ser.read(256)
-            if b:
-                break
+        ok, msg = read_frame(ser, 2.5)
+        if not ok:
+            return False, f"ready_missing:{msg}"
+        if msg != "READY":
+            return False, f"unexpected_ready:{msg}"
 
-        try:
-            ser.write(f"LEN {size}\n".encode())
-            ser.flush()
-        except Exception as e:
-            return False, f"begin_write_failed:{type(e).__name__}:{e}"
+        ok, msg = write_frame(ser, payload)
+        if not ok:
+            return False, msg
 
-        # Wait for begin ack before sending bulk payload.
-        begin_ok = False
-        begin_deadline = time.time() + 3
-        buf = ""
-        while time.time() < begin_deadline:
-            b = ser.read(256)
-            if not b:
-                continue
-            txt = b.decode("utf-8", errors="replace")
-            buf += txt
-            if "[USBJTAG_PROBE] begin" in buf:
-                begin_ok = True
-                break
-        if not begin_ok:
-            return False, "begin_ack_missing"
-
-        try:
-            # Strict turn: host sends entire payload, then waits for response.
-            ser.write(payload)
-            ser.flush()
-        except Exception as e:
-            return False, f"payload_write_failed:{type(e).__name__}:{e}"
-
-        complete_pat = re.compile(r"\[USBJTAG_PROBE\] complete (\d+)/(\d+)")
-        deadline = time.time() + timeout
-        out = ""
-        while time.time() < deadline:
-            b = ser.read(512)
-            if not b:
-                continue
-            txt = b.decode("utf-8", errors="replace")
-            out += txt
-            m = complete_pat.search(out)
-            if m:
-                got = int(m.group(1)); exp = int(m.group(2))
-                return (got == size and exp == size), f"complete:{got}/{exp}"
-
-        return False, "complete_timeout"
+        ok, msg = read_frame(ser, timeout)
+        if not ok:
+            return False, f"resp:{msg}"
+        return (msg == f"OK:{size}"), f"resp:{msg}"
 
 
 def main() -> int:
