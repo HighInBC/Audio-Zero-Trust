@@ -24,6 +24,7 @@ client/tools/keys/*
 # Temp logs/artifacts
 *.log
 *.tmp
+.coverage
 
 # Local secrets
 .secrets/*.env
