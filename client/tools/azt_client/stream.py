@@ -677,6 +677,8 @@ def decode_azt1_stream_to_wav(
                     f"{unsigned_tail_frames} frame(s) of unsigned audio is not signed and is subject to tampering."
                 )
 
+    messages = [{"level": "caution", "code": "UNSIGNED_AUDIO_TAIL", "text": w} for w in warnings]
+
     return {
         "ok": True,
         "inner_header_mode": next_header_mode,
@@ -709,5 +711,5 @@ def decode_azt1_stream_to_wav(
         "unsigned_tail_bytes": unsigned_tail_bytes,
         "unsigned_tail_trimmed": unsigned_tail_trimmed and (unsigned_tail_frames > 0),
         "unsigned_tail_preserved": preserve_tail and (unsigned_tail_frames > 0),
-        "warnings": warnings,
+        "messages": messages,
     }

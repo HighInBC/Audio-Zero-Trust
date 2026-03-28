@@ -6,14 +6,14 @@ import secrets
 import sys
 from pathlib import Path
 
-from tools.azt_cli.output import emit_envelope, exception_detail
+from tools.azt_cli.output import emit_envelope, emit_level, exception_detail
 from tools.azt_sdk.services.attestation_service import verify_attestation
 
 
 def run(args: argparse.Namespace) -> int:
     nonce_raw = str(getattr(args, "nonce", "") or "").strip()
     if nonce_raw:
-        print("WARN attestation-verify: --nonce is test-only; prefer auto-generated nonce for normal use", file=sys.stderr)
+        emit_level("caution", "attestation-verify: --nonce is test-only; prefer auto-generated nonce for normal use", stream=sys.stderr)
         nonce = nonce_raw
     else:
         nonce = secrets.token_hex(16)

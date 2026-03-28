@@ -4,14 +4,14 @@ import argparse
 import secrets
 import sys
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, emit_level
 from tools.azt_sdk.services.device_service import attestation_get
 
 
 def run(args: argparse.Namespace) -> int:
     nonce_raw = str(getattr(args, "nonce", "") or "").strip()
     if nonce_raw:
-        print("WARN attestation-get: --nonce is test-only; prefer auto-generated nonce for normal use", file=sys.stderr)
+        emit_level("caution", "attestation-get: --nonce is test-only; prefer auto-generated nonce for normal use", stream=sys.stderr)
         nonce = nonce_raw
     else:
         nonce = secrets.token_hex(16)

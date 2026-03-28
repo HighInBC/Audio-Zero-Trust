@@ -290,8 +290,14 @@ def configure_device(
                 **common,
                 "path": "serial-bootstrap",
                 "state_after": None,
-                "postcheck_warning": "serial apply succeeded but device IP was not parsed from serial output",
                 "postcheck_error": "IP_NOT_DETECTED_AFTER_SERIAL_BOOTSTRAP",
+                "messages": [
+                    {
+                        "level": "caution",
+                        "code": "IP_NOT_DETECTED_AFTER_SERIAL_BOOTSTRAP",
+                        "text": "serial apply succeeded but device IP was not parsed from serial output",
+                    }
+                ],
                 "detail": "device IP not detected from serial output; provide --ip for deterministic postcheck",
             }
 
@@ -375,8 +381,15 @@ def configure_device(
                 **common,
                 "path": "serial-bootstrap",
                 "state_after": None,
-                "postcheck_warning": "state endpoint unreachable after serial apply",
                 "postcheck_error": postcheck_err,
+                "messages": [
+                    {
+                        "level": "caution",
+                        "code": "POSTCHECK_STATE_UNREACHABLE",
+                        "text": "state endpoint unreachable after serial apply",
+                        "context": {"target": postcheck_target},
+                    }
+                ],
                 "postcheck_target": postcheck_target,
             }
 

@@ -459,9 +459,17 @@ python3 client/test/hil/flash_from_ota_smoke.py \
 
 ## Tests
 
-- `client/test/unit/` — client/tooling unit tests
-- `client/test/hil/` — host-in-the-loop integration tests (including `flash_from_ota_smoke.py`)
-- `firmware/test/audio_zero_trust_tests/` — firmware-targeted tests
+- `client/test/unit_sdk/` — Python SDK unit test suite (service-level unit tests with mocks)
+- `client/test/hil/` — host-side SDK/CLI integration tests (including `flash_from_ota_smoke.py`)
+- `firmware/test/unit/` — C++ unit test suites for shared/firmware libraries
+- `firmware/test/audio_zero_trust_tests/` — firmware unit-test runner project (PlatformIO)
+
+Run SDK unit tests:
+
+```bash
+cd Audio-Zero-Trust
+./.venv/bin/python -m pytest client/test/unit_sdk -q
+```
 - `recorder/test/` — recorder tests (scaffold)
 
 ---
