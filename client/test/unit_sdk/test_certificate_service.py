@@ -120,6 +120,70 @@ def test_issue_certificate_success_without_post_when_out_path_set(monkeypatch, t
     assert payload["post_response"] is None
 
 
+def test_issue_certificate_auto_attestation_missing_artifact(monkeypatch, tmp_path):
+    monkeypatch.setattr(certificate_service, "base_url", lambda **k: "http://h:8080")
+    monkeypatch.setattr(certificate_service, "get_json", lambda *a, **k: {
+        "ok": True,
+        "admin_fingerprint_hex": "a" * 64,
+        "device_sign_public_key_b64": "pub",
+        "device_sign_fingerprint_hex": "dfp",
+        "device_chip_id_hex": "chip1",
+    })
+    # verify_attestation ok=True but missing attestation_artifact triggers line 58 fallback to {}
+    monkeypatch.setattr(certificate_service, "verify_attestation", lambda **k: (True, {"schema_ok": True, "sig_ok": True}))
+
+    ok, err, detail = certificate_service.issue_certificate(
+        host="h",
+        port=8080,
+        timeout=1,
+        key_path=str(tmp_path / "admin.pem"),
+        attestation_path=None,
+        attestation_max_age_s=120,
+        cert_serial="c1",
+        valid_from_utc="2026-01-01T00:00:00Z",
+        valid_until_utc="2027-01-01T00:00:00Z",
+    )
+    assert ok is False
+    assert err == "ATTESTATION_STALE"
+
+
+def test_issue_certificate_returns_validate_attestation_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(certificate_service, "base_url", lambda **k: "http://h:8080")
+    monkeypatch.setattr(certificate_service, "get_json", lambda *a, **k: {
+        "ok": True,
+        "admin_fingerprint_hex": "a" * 64,
+        "device_sign_public_key_b64": "pub",
+        "device_sign_fingerprint_hex": "dfp",
+        "device_chip_id_hex": "chip1",
+    })
+
+    now = int(time.time())
+    att_file = tmp_path / "bad-att.json"
+    att_file.write_text(json.dumps({
+        "issued_at_epoch_s": now,
+        "host": "other",
+        "port": 8080,
+        "schema_ok": True,
+        "sig_ok": True,
+        "admin_fingerprint_hex": "a" * 64,
+        "device_chip_id_hex": "chip1",
+    }))
+
+    ok, err, detail = certificate_service.issue_certificate(
+        host="h",
+        port=8080,
+        timeout=1,
+        key_path=str(tmp_path / "admin.pem"),
+        attestation_path=str(att_file),
+        attestation_max_age_s=120,
+        cert_serial="c1",
+        valid_from_utc="2026-01-01T00:00:00Z",
+        valid_until_utc="2027-01-01T00:00:00Z",
+    )
+    assert ok is False
+    assert err == "ATTESTATION_TARGET_MISMATCH"
+
+
 def test_validate_attestation_target_mismatch():
     now = int(time.time())
     att = {

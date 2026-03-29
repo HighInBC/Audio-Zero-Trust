@@ -27,7 +27,7 @@ def resolve_platformio() -> str:
         try:
             if c.exists() and c.is_file() and c.resolve().exists():
                 return str(c)
-        except Exception:
+        except OSError:
             pass
     raise FileNotFoundError("platformio not found (install in .venv or ensure platformio/pio is on PATH)")
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import base64
 import json
 import ipaddress
+import urllib.error
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization, hashes
@@ -191,7 +192,7 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         seen_san.add(h)
         try:
             san_entries.append(x509.IPAddress(ipaddress.ip_address(h)))
-        except Exception:
+        except ValueError:
             san_entries.append(x509.DNSName(h))
 
     builder = (
@@ -286,7 +287,7 @@ def tls_material_generate(*,
         seen_san.add(h)
         try:
             san_entries.append(x509.IPAddress(ipaddress.ip_address(h)))
-        except Exception:
+        except ValueError:
             san_entries.append(x509.DNSName(h))
 
     cn = "azt-device"
@@ -368,7 +369,7 @@ def tls_bootstrap(*,
     https_url = f"{base_url(host=verify_host_value, port=int(https_port), scheme='https')}/api/v0/config/state"
     try:
         https_state = get_json(https_url, timeout=int(timeout))
-    except Exception as e:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
         https_error = {
             "where": "tls_service.tls_bootstrap.https_verify",
             "exception_type": type(e).__name__,
@@ -392,7 +393,7 @@ def tls_bootstrap(*,
         reboot_url = f"{http_base}/api/v0/device/reboot"
         try:
             ch = get_json(challenge_url, timeout=int(timeout))
-        except Exception as e:
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
             ch = {
                 "ok": False,
                 "error": "TLS_BOOTSTRAP_REBOOT_CHALLENGE_FAILED",
@@ -416,7 +417,7 @@ def tls_bootstrap(*,
                 }
                 try:
                     reboot_response = http_json("POST", reboot_url, reboot_req, timeout=int(timeout))
-                except Exception as e:
+                except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
                     reboot_response = {
                         "ok": False,
                         "error": "TLS_BOOTSTRAP_REBOOT_POST_FAILED",
@@ -435,7 +436,7 @@ def tls_bootstrap(*,
         https_error = None
         try:
             https_state = get_json(https_url, timeout=int(timeout))
-        except Exception as e:
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
             https_error = {
                 "where": "tls_service.tls_bootstrap.https_verify_after_reboot",
                 "exception_type": type(e).__name__,

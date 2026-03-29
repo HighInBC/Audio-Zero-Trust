@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import time
+import urllib.error
 from pathlib import Path
 import os
 
@@ -83,7 +84,7 @@ def configure_device(
         admin_priv = load_private_key_auto(priv_pem, purpose=str(priv_path))
         if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
             raise ValueError("admin signing key must be Ed25519")
-    except Exception as e:
+    except (ValueError, TypeError, OSError) as e:
         raise ValueError("admin creds must point to an Ed25519 private key PEM (used to sign config)") from e
 
     admin_pub_b64 = ed25519_public_b64_from_private_key(priv_path)
@@ -110,7 +111,9 @@ def configure_device(
     for listener_ip in authorized_listener_ips:
         try:
             ipaddress.IPv4Address(listener_ip)
-        except Exception:
+        except ipaddress.AddressValueError:
+            return 11, False, "INVALID_AUTHORIZED_LISTENER_IP", {"detail": listener_ip}
+        except ValueError:
             return 11, False, "INVALID_AUTHORIZED_LISTENER_IP", {"detail": listener_ip}
 
     device_ip = ip or None
@@ -208,7 +211,7 @@ def configure_device(
         state0_url = base + "/api/v0/config/state"
         try:
             state0 = http_json("GET", state0_url)
-        except Exception as e:
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
             state0_err = {
                 "error": "CONFIGURE_DEVICE_HTTP_STATE_PROBE_FAILED",
                 "where": "provisioning_service.configure_device.state_probe",
@@ -367,6 +370,12 @@ def configure_device(
                 if isinstance(st, dict) and st.get("ok"):
                     state1 = st
                     break
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+                postcheck_err = _error_detail(
+                    where="provisioning_service.configure_device.postcheck",
+                    exc=e,
+                    url=postcheck_target,
+                )
             except Exception as e:
                 postcheck_err = _error_detail(
                     where="provisioning_service.configure_device.postcheck",

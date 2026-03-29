@@ -20,3 +20,8 @@ def test_exception_detail_contains_expected_fields():
     assert d["where"] == "x"
     assert d["exception_type"] == "RuntimeError"
     assert d["context"]["a"] == 1
+
+
+def test_ensure_known_error_happy_path_returns_code():
+    code = "APPLY_CONFIG_POST_FAILED"
+    assert errors.ensure_known_error(code) == code

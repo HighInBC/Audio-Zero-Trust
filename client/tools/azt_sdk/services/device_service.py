@@ -3,6 +3,8 @@ from __future__ import annotations
 from urllib.parse import quote
 
 import base64
+import json
+import urllib.error
 from pathlib import Path
 from urllib.request import Request
 import requests
@@ -34,6 +36,12 @@ def _error_detail(*, where: str, exc: Exception, url: str | None = None, context
 def _get_json_safe(*, url: str, timeout: int, where: str, error: str) -> dict:
     try:
         return get_json(url, timeout=timeout)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+        return {
+            "ok": False,
+            "error": error,
+            "detail": _error_detail(where=where, exc=e, url=url),
+        }
     except Exception as e:
         return {
             "ok": False,
@@ -97,6 +105,12 @@ def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> di
     url = f"{b}/api/v0/device/certificate"
     try:
         return http_json("POST", url, payload, timeout=timeout)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+        return {
+            "ok": False,
+            "error": "CERTIFICATE_POST_FAILED",
+            "detail": _error_detail(where="device_service.certificate_post", exc=e, url=url),
+        }
     except Exception as e:
         return {
             "ok": False,
@@ -139,6 +153,12 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
     reboot_url = f"{b}/api/v0/device/reboot"
     try:
         return http_json("POST", reboot_url, payload, timeout=timeout)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+        return {
+            "ok": False,
+            "error": "REBOOT_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.reboot_device.post", exc=e, url=reboot_url),
+        }
     except Exception as e:
         return {
             "ok": False,
@@ -155,6 +175,11 @@ def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict
         with urlopen_with_tls(Request(pem_url, method="GET"), timeout=timeout) as r:
             pem_body = r.read().decode("utf-8", errors="replace")
             pem_ct = r.headers.get("Content-Type", "")
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
+        return False, {
+            "error": "SIGNING_KEY_CHECK_PEM_FETCH_FAILED",
+            "detail": _error_detail(where="device_service.signing_key_check.pem", exc=e, url=pem_url),
+        }
     except Exception as e:
         return False, {
             "error": "SIGNING_KEY_CHECK_PEM_FETCH_FAILED",
@@ -164,6 +189,11 @@ def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict
     try:
         with urlopen_with_tls(Request(alias_url, method="GET"), timeout=timeout) as r:
             pem_alias = r.read().decode("utf-8", errors="replace")
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
+        return False, {
+            "error": "SIGNING_KEY_CHECK_ALIAS_FETCH_FAILED",
+            "detail": _error_detail(where="device_service.signing_key_check.alias", exc=e, url=alias_url),
+        }
     except Exception as e:
         return False, {
             "error": "SIGNING_KEY_CHECK_ALIAS_FETCH_FAILED",
@@ -187,6 +217,11 @@ def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: in
     req_url = f"{b}/stream?seconds={seconds}"
     try:
         r = requests.get(req_url, allow_redirects=False, timeout=timeout, verify=requests_verify_for_url(req_url))
+    except (requests.RequestException, TimeoutError, OSError) as e:
+        return False, {
+            "error": "STREAM_REDIRECT_CHECK_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_redirect_check", exc=e, url=req_url),
+        }
     except Exception as e:
         return False, {
             "error": "STREAM_REDIRECT_CHECK_REQUEST_FAILED",
@@ -215,6 +250,14 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 
     try:
         r = requests.get(url, stream=True, timeout=timeout, verify=requests_verify_for_url(url))
+    except (requests.RequestException, TimeoutError, OSError) as e:
+        if out_file is not None:
+            out_file.close()
+        return False, {
+            "error": "STREAM_READ_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_read", exc=e, url=url),
+            "out": resolved_out,
+        }
     except Exception as e:
         if out_file is not None:
             out_file.close()
@@ -233,6 +276,13 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                     out_file.write(chunk)
             if seconds is not None and (time.time() - start >= seconds):
                 break
+    except (requests.RequestException, OSError, ValueError) as e:
+        return False, {
+            "error": "STREAM_READ_ITERATION_FAILED",
+            "detail": _error_detail(where="device_service.stream_read.iter", exc=e, url=url),
+            "bytes": total,
+            "out": resolved_out,
+        }
     except Exception as e:
         return False, {
             "error": "STREAM_READ_ITERATION_FAILED",

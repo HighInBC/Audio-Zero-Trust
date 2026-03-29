@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import time
 from urllib.parse import quote
 import os
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from tools.azt_client.http import get_json
@@ -46,15 +48,43 @@ def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tup
     sig_ok = False
     sig_detail = "schema_failed"
     if schema_ok:
+        payload_raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
         try:
-            payload_raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-            sig = base64.b64decode(att["signature_b64"], validate=True)
-            pub = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(payload["device_sign_public_key_b64"], validate=True))
-            pub.verify(sig, payload_raw)
-            sig_ok = True
-            sig_detail = "verified"
-        except Exception as ve:
-            sig_detail = f"verify_error:{ve}"
+            sig_b64 = att["signature_b64"]
+            sig = base64.b64decode(sig_b64, validate=True)
+        except KeyError:
+            sig_detail = "verify_error:signature_missing"
+            sig = None
+        except (binascii.Error, TypeError, ValueError) as e:
+            sig_detail = f"verify_error:signature_invalid_b64:{type(e).__name__}:{e}"
+            sig = None
+        except Exception as e:
+            sig_detail = f"verify_error:signature_unexpected:{type(e).__name__}:{e}"
+            sig = None
+
+        pub = None
+        if sig is not None:
+            try:
+                pub_b64 = payload["device_sign_public_key_b64"]
+                pub_raw = base64.b64decode(pub_b64, validate=True)
+                pub = ed25519.Ed25519PublicKey.from_public_bytes(pub_raw)
+            except KeyError:
+                sig_detail = "verify_error:public_key_missing"
+            except (binascii.Error, TypeError, ValueError) as e:
+                sig_detail = f"verify_error:public_key_invalid:{type(e).__name__}:{e}"
+            except Exception as e:
+                sig_detail = f"verify_error:public_key_unexpected:{type(e).__name__}:{e}"
+
+        if sig is not None and pub is not None:
+            try:
+                pub.verify(sig, payload_raw)
+                sig_ok = True
+                sig_detail = "verified"
+            except InvalidSignature as e:
+                sig_detail = f"verify_error:signature_mismatch:{type(e).__name__}:{e}"
+            except Exception as e:
+                sig_detail = f"verify_error:signature_unexpected:{type(e).__name__}:{e}"
 
     ok = schema_ok and sig_ok
     artifact = {
