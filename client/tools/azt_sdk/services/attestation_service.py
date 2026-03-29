@@ -41,6 +41,8 @@ def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tup
         and payload.get("device_sign_public_key_b64") == state.get("device_sign_public_key_b64")
         and payload.get("device_sign_fingerprint_hex") == state.get("device_sign_fingerprint_hex")
         and payload.get("device_chip_id_hex") == state.get("device_chip_id_hex")
+        and payload.get("recording_public_key_pem") == state.get("recording_public_key_pem")
+        and payload.get("recording_fingerprint_hex") == state.get("recording_fingerprint_hex")
         and att.get("signature_algorithm") == "ed25519"
         and isinstance(att.get("signature_b64"), str)
     )
@@ -96,6 +98,8 @@ def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tup
         "admin_fingerprint_hex": state.get("admin_fingerprint_hex"),
         "device_sign_fingerprint_hex": state.get("device_sign_fingerprint_hex"),
         "device_chip_id_hex": state.get("device_chip_id_hex"),
+        "recording_public_key_pem": state.get("recording_public_key_pem"),
+        "recording_fingerprint_hex": state.get("recording_fingerprint_hex"),
         "schema_ok": schema_ok,
         "sig_ok": sig_ok,
         "sig_detail": sig_detail,

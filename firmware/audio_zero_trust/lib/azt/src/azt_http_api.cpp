@@ -1183,7 +1183,9 @@ HttpDispatchResult dispatch_request(const String& method,
     payload += "\"nonce\":\"" + nonce + "\",";
     payload += "\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 + "\",";
     payload += "\"device_sign_fingerprint_hex\":\"" + state.device_sign_fingerprint_hex + "\",";
-    payload += "\"device_chip_id_hex\":\"" + state.device_chip_id_hex + "\"";
+    payload += "\"device_chip_id_hex\":\"" + state.device_chip_id_hex + "\",";
+    payload += "\"recording_public_key_pem\":" + json_quote(state.recording_pubkey_pem) + ",";
+    payload += "\"recording_fingerprint_hex\":\"" + state.recording_fingerprint_hex + "\"";
     payload += "}";
 
     unsigned char sig[crypto_sign_ed25519_BYTES] = {0};
@@ -1270,12 +1272,20 @@ HttpDispatchResult dispatch_request(const String& method,
     String dev_pub = String((const char*)(payload_doc["device_sign_public_key_b64"] | ""));
     String dev_fp = String((const char*)(payload_doc["device_sign_fingerprint_hex"] | ""));
     String chip_id = String((const char*)(payload_doc["device_chip_id_hex"] | ""));
+    String rec_pub = String((const char*)(payload_doc["recording_public_key_pem"] | ""));
+    String rec_fp = String((const char*)(payload_doc["recording_fingerprint_hex"] | ""));
     String admin_fp = String((const char*)(payload_doc["admin_signer_fingerprint_hex"] | ""));
     String cert_serial = String((const char*)(payload_doc["certificate_serial"] | ""));
 
     if (dev_pub != state.device_sign_public_key_b64 || dev_fp != state.device_sign_fingerprint_hex || chip_id != state.device_chip_id_hex) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CERT_DEVICE_MISMATCH\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+    if (rec_pub != state.recording_pubkey_pem || rec_fp != state.recording_fingerprint_hex) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_RECORDER_MISMATCH\"}";
       r.content_type = "application/json";
       return r;
     }
@@ -1530,6 +1540,7 @@ HttpDispatchResult dispatch_request(const String& method,
              "\",\"tls_san_hosts_csv\":" + json_quote(state.tls_san_hosts_csv) +
              ",\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex +
              "\",\"recording_key_configured\":" + String(recording_key_cfg ? "true" : "false") +
+             ",\"recording_public_key_pem\":" + json_quote(state.recording_pubkey_pem) +
              ",\"recording_fingerprint_hex\":\"" + state.recording_fingerprint_hex +
              "\",\"recording_key_alg\":\"rsa-oaep-sha256\"" +
              ",\"device_sign_alg\":\"ed25519\"" +
