@@ -29,6 +29,7 @@ def test_apply_config_handles_post_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(operations_service, "ed25519_fp_hex_from_private_key", lambda p: "f" * 64)
     monkeypatch.setattr(operations_service, "make_signed_config", lambda c, k, f: {"signed": True})
     monkeypatch.setattr(operations_service, "base_url", lambda **k: "http://h:8080")
+    monkeypatch.setattr(operations_service, "get_json", lambda *a, **k: {"ok": True, "config_revision": 3})
     monkeypatch.setattr(operations_service, "http_json", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("post boom")))
 
     ok, payload = operations_service.apply_config(
@@ -65,6 +66,45 @@ def test_apply_config_success(monkeypatch, tmp_path):
     )
     assert ok is True
     assert payload["state"]["ok"] is True
+
+
+def test_apply_config_signs_with_if_version_from_state(monkeypatch, tmp_path):
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(json.dumps({"config_version": 1}))
+    key = tmp_path / "k.pem"
+    key.write_bytes(b"k")
+
+    seen = {}
+
+    def _mk(c, k, f):
+        seen["if_version"] = c.get("if_version")
+        return {"signed": True}
+
+    monkeypatch.setattr(operations_service, "ed25519_fp_hex_from_private_key", lambda p: "f" * 64)
+    monkeypatch.setattr(operations_service, "make_signed_config", _mk)
+    monkeypatch.setattr(operations_service, "base_url", lambda **k: "http://h:8080")
+
+    calls = {"n": 0}
+    def _get(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"ok": True, "config_revision": 7}
+        return {"ok": True}
+
+    monkeypatch.setattr(operations_service, "get_json", _get)
+    monkeypatch.setattr(operations_service, "http_json", lambda *a, **k: {"ok": True})
+
+    ok, _ = operations_service.apply_config(
+        in_path=str(cfg),
+        key_path=str(key),
+        host="h",
+        port=8080,
+        timeout=1,
+        fingerprint="",
+    )
+
+    assert ok is True
+    assert seen["if_version"] == 7
 
 
 def test_config_patch_requires_dict_patch_obj(monkeypatch, tmp_path):

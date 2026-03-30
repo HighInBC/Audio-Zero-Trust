@@ -215,10 +215,6 @@ def configure_device(
     if ota_signer_clear:
         unsigned_cfg["ota_signer_clear"] = True
 
-    signed = make_signed_config(unsigned_cfg, priv_pem, fp)
-    (admin_dir / "config_bootstrap.json").write_text(json.dumps(unsigned_cfg, indent=2))
-    (admin_dir / "config_signed.json").write_text(json.dumps(signed, indent=2))
-
     state0 = None
     state0_err = None
     state0_url = None
@@ -235,6 +231,18 @@ def configure_device(
                 "exception_type": type(e).__name__,
                 "message": str(e),
             }
+
+    current_revision = 0
+    if isinstance(state0, dict) and bool(state0.get("ok")):
+        try:
+            current_revision = int(state0.get("config_revision") or 0)
+        except (TypeError, ValueError):
+            current_revision = 0
+    unsigned_cfg["if_version"] = current_revision
+
+    signed = make_signed_config(unsigned_cfg, priv_pem, fp)
+    (admin_dir / "config_bootstrap.json").write_text(json.dumps(unsigned_cfg, indent=2))
+    (admin_dir / "config_signed.json").write_text(json.dumps(signed, indent=2))
 
     serial_required = (
         (ota_min_version_code is not None)
@@ -263,6 +271,7 @@ def configure_device(
         "audio_adc_gain": (int(audio_adc_gain) if audio_adc_gain is not None else None),
         "tls_bootstrap_requested": bool(tls_bootstrap),
         "tls_deferred_until_ip": bool(tls_deferred_until_ip),
+        "if_version": int(current_revision),
     }
     if tls_material:
         common["tls_certificate_serial"] = tls_material.get("tls_certificate_serial")
@@ -339,6 +348,7 @@ def configure_device(
                 "tls_ca_certificate_pem": tls_material["tls_ca_certificate_pem"],
                 "tls_san_hosts": tls_material.get("san_hosts") or [],
             }
+            unsigned_cfg["if_version"] = int(current_revision) + 1
             signed_phase2 = make_signed_config(unsigned_cfg, priv_pem, fp)
             (admin_dir / "config_signed.json").write_text(json.dumps(signed_phase2, indent=2))
             ok_phase2 = False

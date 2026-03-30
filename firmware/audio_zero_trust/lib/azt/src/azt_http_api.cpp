@@ -385,6 +385,13 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     return r;
   }
 
+  int if_version = doc["if_version"] | -1;
+  if (if_version < 0 || static_cast<uint32_t>(if_version) != state.config_revision) {
+    r.code = 409;
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_VERSION_CONFLICT\",\"expected\":" + String(state.config_revision) + ",\"provided\":" + String(if_version) + "}";
+    return r;
+  }
+
   String new_admin_pem, new_admin_fp;
   if (!parse_header_key_values(doc, new_admin_pem, new_admin_fp)) {
     r.code = 400;

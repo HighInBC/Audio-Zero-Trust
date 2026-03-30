@@ -64,11 +64,34 @@ def apply_config(*, in_path: str, key_path: str, host: str, port: int, timeout: 
     unsigned_cfg = json.loads(Path(in_path).read_text())
     keyp = Path(key_path)
     fp = fingerprint.strip() or ed25519_fp_hex_from_private_key(keyp)
-    signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
     base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     apply_url = f"{base}/api/v0/config"
     state_url = f"{base}/api/v0/config/state"
+
+    try:
+        state_before = get_json(state_url, timeout=timeout)
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+        return False, {
+            "host": host,
+            "port": port,
+            "signer_fingerprint_hex": fp,
+            "error": "APPLY_CONFIG_STATE_GET_FAILED",
+            "detail": _error_detail(where="operations_service.apply_config.state_get_before", exc=e, url=state_url),
+        }
+    except Exception as e:
+        return False, {
+            "host": host,
+            "port": port,
+            "signer_fingerprint_hex": fp,
+            "error": "APPLY_CONFIG_STATE_GET_FAILED",
+            "detail": _error_detail(where="operations_service.apply_config.state_get_before", exc=e, url=state_url),
+        }
+
+    if_version = int(state_before.get("config_revision") or 0) if isinstance(state_before, dict) and state_before.get("ok") else 0
+    unsigned_cfg["if_version"] = if_version
+    signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
+
     try:
         apply_res = http_json("POST", apply_url, signed_cfg, timeout=timeout)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
@@ -112,8 +135,10 @@ def apply_config(*, in_path: str, key_path: str, host: str, port: int, timeout: 
         "host": host,
         "port": port,
         "signer_fingerprint_hex": fp,
+        "if_version": int(if_version),
         "apply_url": apply_url,
         "state_url": state_url,
+        "state_before": state_before,
         "apply_response": apply_res,
         "state": state_res,
     }
