@@ -2196,11 +2196,13 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   }
   ota_bc("S3_META_FIELDS_OK");
 
+  ota_bc("S3A_PREPARE_PARTITION");
   const esp_partition_t* target_part = esp_ota_get_next_update_partition(nullptr);
   if (!target_part) {
     out_err = "no OTA partition available";
     return false;
   }
+  ota_bc("S3B_PARTITION_OK");
   if (static_cast<size_t>(fw_size) > target_part->size) {
     out_err = "firmware too large for OTA slot";
     return false;
@@ -2214,11 +2216,13 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
                                            out_err)) {
     return false;
   }
+  ota_bc("S3C_LENGTHS_OK");
 
   constexpr size_t kFlashSector = 4096;
   constexpr size_t kEraseChunkSectors = 8;  // 32KB chunks to avoid long WDT-starving erases.
   constexpr size_t kEraseChunkBytes = kFlashSector * kEraseChunkSectors;
   const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
+  ota_bc("S3D_PRE_ERASE_LOOP");
   ota_bc("S4_ERASE_BEGIN");
   for (size_t off = 0; off < erase_len; off += kEraseChunkBytes) {
     const size_t remain = erase_len - off;
