@@ -2266,6 +2266,8 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
 
   int remain_fw = fw_size;
   size_t fw_offset = 0;
+  uint32_t q_highwater = 0;
+  uint32_t q_backpressure_loops = 0;
   while (remain_fw > 0) {
     if (writer_ctx.failed) {
       mbedtls_sha256_free(&sha);
@@ -2308,6 +2310,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
 
       while (xQueueSend(ota_q, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
         if (writer_ctx.failed) break;
+        q_backpressure_loops++;
         ota_kick_wdt();  // bounded backpressure while queue is full
       }
       if (writer_ctx.failed) {
@@ -2323,6 +2326,8 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
 
     remain_fw -= n;
     bytes_left -= n;
+    UBaseType_t q_now = uxQueueMessagesWaiting(ota_q);
+    if (q_now > q_highwater) q_highwater = static_cast<uint32_t>(q_now);
     ota_kick_wdt();
   }
 
@@ -2333,8 +2338,18 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     if (writer_ctx.failed) break;
     ota_kick_wdt();
   }
-  while (!writer_ctx.done) {
+  uint32_t writer_wait_deadline = millis() + 30000;
+  while (!writer_ctx.done && static_cast<int32_t>(millis() - writer_wait_deadline) < 0) {
     ota_kick_wdt();
+  }
+  if (!writer_ctx.done) {
+    writer_ctx.failed = true;
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "ota writer did not drain in time";
+    ota_stop_writer(writer_ctx, ota_q);
+    vQueueDelete(ota_q);
+    return false;
   }
   if (writer_ctx.failed) {
     mbedtls_sha256_free(&sha);
@@ -2407,6 +2422,11 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     p.putULong64("ota_min_vc", state.ota_min_allowed_version_code);
     p.end();
   }
+
+  Serial.printf("AZT_OTA_PIPELINE_OK q_highwater=%lu q_backpressure_loops=%lu fw_size=%d\n",
+                static_cast<unsigned long>(q_highwater),
+                static_cast<unsigned long>(q_backpressure_loops),
+                fw_size);
 
   return true;
 }
