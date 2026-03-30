@@ -1977,7 +1977,7 @@ struct OtaWriterCtx {
   esp_err_t write_err = ESP_OK;
 };
 
-static void ota_stop_writer(OtaWriterCtx& ctx, QueueHandle_t q) {
+static void ota_stop_writer(OtaWriterCtx& ctx, QueueHandle_t q, TaskHandle_t writer_task) {
   if (!q) return;
   OtaWriteMsg end_msg;
   end_msg.end = true;
@@ -1988,6 +1988,13 @@ static void ota_stop_writer(OtaWriterCtx& ctx, QueueHandle_t q) {
   uint32_t wait_deadline = millis() + 3000;
   while (!ctx.done && static_cast<int32_t>(millis() - wait_deadline) < 0) {
     ota_kick_wdt();
+  }
+
+  // Defensive teardown: if the writer task did not exit in time,
+  // force-delete it before queue destruction to prevent queue UAF panic.
+  if (!ctx.done && writer_task != nullptr) {
+    vTaskDelete(writer_task);
+    ctx.done = true;
   }
 }
 
@@ -2273,7 +2280,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
       mbedtls_sha256_free(&sha);
       esp_ota_abort(ota_handle);
       out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
-      ota_stop_writer(writer_ctx, ota_q);
+      ota_stop_writer(writer_ctx, ota_q, writer_task);
       vQueueDelete(ota_q);
       return false;
     }
@@ -2286,7 +2293,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
       writer_ctx.failed = true;
       esp_ota_abort(ota_handle);
       out_err = read_err.length() ? read_err : "stream read failed during firmware body";
-      ota_stop_writer(writer_ctx, ota_q);
+      ota_stop_writer(writer_ctx, ota_q, writer_task);
       vQueueDelete(ota_q);
       return false;
     }
@@ -2317,7 +2324,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
         mbedtls_sha256_free(&sha);
         esp_ota_abort(ota_handle);
         out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
-        ota_stop_writer(writer_ctx, ota_q);
+        ota_stop_writer(writer_ctx, ota_q, writer_task);
         vQueueDelete(ota_q);
         return false;
       }
@@ -2347,7 +2354,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     mbedtls_sha256_free(&sha);
     esp_ota_abort(ota_handle);
     out_err = "ota writer did not drain in time";
-    ota_stop_writer(writer_ctx, ota_q);
+    ota_stop_writer(writer_ctx, ota_q, writer_task);
     vQueueDelete(ota_q);
     return false;
   }
@@ -2355,7 +2362,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     mbedtls_sha256_free(&sha);
     esp_ota_abort(ota_handle);
     out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
-    ota_stop_writer(writer_ctx, ota_q);
+    ota_stop_writer(writer_ctx, ota_q, writer_task);
     vQueueDelete(ota_q);
     return false;
   }
