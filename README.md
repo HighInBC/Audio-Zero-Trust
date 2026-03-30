@@ -232,6 +232,14 @@ python3 client/tools/azt_tool.py flash-device --from-ota firmware/releases/<rele
 # legacy: --target atom-echo
 ```
 
+**First-flash / bring-up notes (Atom EchoS3R):**
+
+- A brand-new device may need to be placed into programming mode manually:
+  - Hold the **side** button
+  - Press the **top** button
+  - Release the **side** button
+- After the first successful flash, press the **side** button once again before running `configure-device`.
+
 Push a release OTA bundle over the network OTA endpoint:
 
 ```bash
