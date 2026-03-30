@@ -2227,10 +2227,12 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   for (size_t off = 0; off < erase_len; off += kEraseChunkBytes) {
     const size_t remain = erase_len - off;
     const size_t chunk = (remain > kEraseChunkBytes) ? kEraseChunkBytes : remain;
+    if (off == 0) ota_bc("S4A_ERASE_CALL_0_BEGIN");
     if (esp_partition_erase_range(target_part, off, chunk) != ESP_OK) {
       out_err = "failed to erase OTA slot";
       return false;
     }
+    if (off == 0) ota_bc("S4B_ERASE_CALL_0_OK");
     ota_kick_wdt();
   }
   if (!poison_ota_slot_header(target_part)) {
