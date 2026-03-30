@@ -1962,11 +1962,13 @@ bool ota_should_abort_on_error(bool has_error) {
   return has_error;
 }
 
+static constexpr size_t kOtaChunkBytes = 256;
+
 struct OtaWriteMsg {
   bool end = false;
   uint32_t offset = 0;
   uint16_t len = 0;
-  uint8_t data[1024] = {0};
+  uint8_t data[kOtaChunkBytes] = {0};
 };
 
 struct OtaWriterCtx {
@@ -2239,7 +2241,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   mbedtls_sha256_init(&sha);
   mbedtls_sha256_starts_ret(&sha, 0);
 
-  uint8_t buf[1024];
+  uint8_t buf[kOtaChunkBytes];
 
   // Two-stage OTA path: network reader feeds bounded queue, dedicated writer task drains to flash.
   // Security invariant preserved: first OTA header block is NOT written until SHA-256 verification succeeds.
