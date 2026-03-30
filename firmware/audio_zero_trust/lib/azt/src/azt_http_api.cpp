@@ -1964,6 +1964,10 @@ bool ota_should_abort_on_error(bool has_error) {
 
 static constexpr size_t kOtaChunkBytes = 256;
 
+static inline void ota_bc(const char* tag) {
+  Serial.printf("AZT_OTA_BC %s\n", tag);
+}
+
 struct OtaWriteMsg {
   bool end = false;
   uint32_t offset = 0;
@@ -2081,6 +2085,7 @@ void drain_request_body_best_effort(WiFiClient& client, int max_bytes, uint32_t 
 
 static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, AppState& state, String& out_err) {
   out_err = "";
+  ota_bc("S0_ENTER");
 
   String header_line = client.readStringUntil('\n');
   header_line.trim();
@@ -2091,6 +2096,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   if (!validate_ota_bundle_header_line(header_line, signer_fp, meta_b64, meta_sig_b64, out_err)) {
     return false;
   }
+  ota_bc("S1_HDR_OK");
 
   String trusted_pem = state.ota_signer_override_public_key_pem.length() > 0
                          ? state.ota_signer_override_public_key_pem
@@ -2121,6 +2127,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = "meta signature verify failed";
     return false;
   }
+  ota_bc("S2_META_SIG_OK");
 
   JsonDocument meta;
   if (deserializeJson(meta, meta_raw.data(), meta_raw.size())) {
@@ -2187,6 +2194,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   if (!validate_ota_firmware_meta(meta, fw_size, fw_sha, out_err)) {
     return false;
   }
+  ota_bc("S3_META_FIELDS_OK");
 
   const esp_partition_t* target_part = esp_ota_get_next_update_partition(nullptr);
   if (!target_part) {
@@ -2211,6 +2219,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   constexpr size_t kEraseChunkSectors = 8;  // 32KB chunks to avoid long WDT-starving erases.
   constexpr size_t kEraseChunkBytes = kFlashSector * kEraseChunkSectors;
   const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
+  ota_bc("S4_ERASE_BEGIN");
   for (size_t off = 0; off < erase_len; off += kEraseChunkBytes) {
     const size_t remain = erase_len - off;
     const size_t chunk = (remain > kEraseChunkBytes) ? kEraseChunkBytes : remain;
@@ -2224,6 +2233,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = "failed to poison OTA slot header";
     return false;
   }
+  ota_bc("S5_ERASE_POISON_OK");
 
   esp_ota_handle_t ota_handle = 0;
   ota_kick_wdt();
@@ -2233,6 +2243,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = String("ota begin failed: ") + String(static_cast<int>(begin_err));
     return false;
   }
+  ota_bc("S6_BEGIN_OK");
 
   const size_t first_block_len = std::min<size_t>(static_cast<size_t>(fw_size), kFlashSector);
   std::vector<uint8_t> first_block(first_block_len);
@@ -2247,6 +2258,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   // Security invariant preserved: first OTA header block is NOT written until SHA-256 verification succeeds.
   QueueHandle_t ota_q = xQueueCreate(6, sizeof(OtaWriteMsg));
   if (!ota_q) {
+    ota_bc("E_Q_CREATE_FAIL");
     mbedtls_sha256_free(&sha);
     esp_ota_abort(ota_handle);
     out_err = "failed to allocate OTA queue";
@@ -2272,6 +2284,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = "failed to start OTA writer task";
     return false;
   }
+  ota_bc("S7_WRITER_START_OK");
 
   int remain_fw = fw_size;
   size_t fw_offset = 0;
@@ -2370,16 +2383,19 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   }
 
   vQueueDelete(ota_q);
+  ota_bc("S8_STREAM_DRAIN_OK");
 
   uint8_t digest[32] = {0};
   mbedtls_sha256_finish_ret(&sha, digest);
   mbedtls_sha256_free(&sha);
   String got_sha = hex_lower(digest, sizeof(digest));
   if (ota_sha_mismatch(got_sha, fw_sha)) {
+    ota_bc("E_SHA_MISMATCH");
     esp_ota_abort(ota_handle);
     out_err = "firmware sha256 mismatch";
     return false;
   }
+  ota_bc("S9_SHA_OK");
 
   if (!first_block.empty()) {
     ota_kick_wdt();
@@ -2391,6 +2407,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
       return false;
     }
   }
+  ota_bc("S10_HEADER_RESTORE_OK");
 
   ota_kick_wdt();
   esp_err_t end_err = esp_ota_end(ota_handle);
@@ -2399,6 +2416,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = String("ota end failed: ") + String(static_cast<int>(end_err));
     return false;
   }
+  ota_bc("S11_END_OK");
 
   ota_kick_wdt();
   esp_err_t set_err = esp_ota_set_boot_partition(target_part);
@@ -2407,6 +2425,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = String("failed to set boot partition: ") + String(static_cast<int>(set_err));
     return false;
   }
+  ota_bc("S12_SET_BOOT_OK");
 
   // Drain any trailing bytes in the bundle body (if present).
   while (should_drain_trailing_bundle_bytes(bytes_left) && client.connected()) {
