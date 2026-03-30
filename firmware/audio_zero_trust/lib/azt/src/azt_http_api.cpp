@@ -1962,6 +1962,65 @@ bool ota_should_abort_on_error(bool has_error) {
   return has_error;
 }
 
+struct OtaWriteMsg {
+  bool end = false;
+  uint32_t offset = 0;
+  uint16_t len = 0;
+  uint8_t data[1024] = {0};
+};
+
+struct OtaWriterCtx {
+  QueueHandle_t q = nullptr;
+  esp_ota_handle_t handle = 0;
+  volatile bool failed = false;
+  volatile bool done = false;
+  esp_err_t write_err = ESP_OK;
+};
+
+static void ota_stop_writer(OtaWriterCtx& ctx, QueueHandle_t q) {
+  if (!q) return;
+  OtaWriteMsg end_msg;
+  end_msg.end = true;
+  for (int i = 0; i < 10 && !ctx.done; ++i) {
+    xQueueSend(q, &end_msg, pdMS_TO_TICKS(50));
+    ota_kick_wdt();
+  }
+  uint32_t wait_deadline = millis() + 3000;
+  while (!ctx.done && static_cast<int32_t>(millis() - wait_deadline) < 0) {
+    ota_kick_wdt();
+  }
+}
+
+static void ota_writer_task(void* arg) {
+  OtaWriterCtx* ctx = reinterpret_cast<OtaWriterCtx*>(arg);
+  if (!ctx || !ctx->q) {
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  OtaWriteMsg msg;
+  while (true) {
+    if (xQueueReceive(ctx->q, &msg, pdMS_TO_TICKS(250)) != pdTRUE) {
+      if (ctx->failed) break;
+      ota_kick_wdt();
+      continue;
+    }
+    if (msg.end) break;
+    if (msg.len == 0) continue;
+
+    esp_err_t wr_err = esp_ota_write_with_offset(ctx->handle, msg.data, static_cast<size_t>(msg.len), msg.offset);
+    if (wr_err != ESP_OK) {
+      ctx->failed = true;
+      ctx->write_err = wr_err;
+      break;
+    }
+    ota_kick_wdt();
+  }
+
+  ctx->done = true;
+  vTaskDelete(nullptr);
+}
+
 bool poison_ota_slot_header(const esp_partition_t* part) {
   // SECURITY FAIL-CLOSED: poison the target OTA header *before* writing
   // attacker-controlled bytes. If power is cut mid-update, the slot remains
@@ -2174,16 +2233,59 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   mbedtls_sha256_starts_ret(&sha, 0);
 
   uint8_t buf[1024];
+
+  // Two-stage OTA path: network reader feeds bounded queue, dedicated writer task drains to flash.
+  // Security invariant preserved: first OTA header block is NOT written until SHA-256 verification succeeds.
+  QueueHandle_t ota_q = xQueueCreate(6, sizeof(OtaWriteMsg));
+  if (!ota_q) {
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "failed to allocate OTA queue";
+    return false;
+  }
+
+  OtaWriterCtx writer_ctx;
+  writer_ctx.q = ota_q;
+  writer_ctx.handle = ota_handle;
+
+  TaskHandle_t writer_task = nullptr;
+  BaseType_t writer_ok = xTaskCreatePinnedToCore(ota_writer_task,
+                                                  "azt_ota_writer",
+                                                  8192,
+                                                  &writer_ctx,
+                                                  1,
+                                                  &writer_task,
+                                                  0);
+  if (writer_ok != pdPASS || writer_task == nullptr) {
+    vQueueDelete(ota_q);
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "failed to start OTA writer task";
+    return false;
+  }
+
   int remain_fw = fw_size;
   size_t fw_offset = 0;
   while (remain_fw > 0) {
+    if (writer_ctx.failed) {
+      mbedtls_sha256_free(&sha);
+      esp_ota_abort(ota_handle);
+      out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+      ota_stop_writer(writer_ctx, ota_q);
+      vQueueDelete(ota_q);
+      return false;
+    }
+
     int to_read = remain_fw > (int)sizeof(buf) ? (int)sizeof(buf) : remain_fw;
     int n = 0;
     String read_err;
     if (!ota_read_firmware_chunk(client, buf, to_read, n, read_err, 5000) || ota_stream_read_failed(n)) {
       mbedtls_sha256_free(&sha);
+      writer_ctx.failed = true;
       esp_ota_abort(ota_handle);
       out_err = read_err.length() ? read_err : "stream read failed during firmware body";
+      ota_stop_writer(writer_ctx, ota_q);
+      vQueueDelete(ota_q);
       return false;
     }
 
@@ -2198,24 +2300,52 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     }
 
     if (consumed < static_cast<size_t>(n)) {
-      const uint8_t* wr_ptr = buf + consumed;
-      size_t wr_len = static_cast<size_t>(n) - consumed;
-      ota_kick_wdt();
-      esp_err_t wr_err = esp_ota_write_with_offset(ota_handle, wr_ptr, wr_len, fw_offset);
-      ota_kick_wdt();
-      if (wr_err != ESP_OK) {
+      OtaWriteMsg msg;
+      msg.end = false;
+      msg.offset = static_cast<uint32_t>(fw_offset);
+      msg.len = static_cast<uint16_t>(static_cast<size_t>(n) - consumed);
+      memcpy(msg.data, buf + consumed, msg.len);
+
+      while (xQueueSend(ota_q, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+        if (writer_ctx.failed) break;
+        ota_kick_wdt();  // bounded backpressure while queue is full
+      }
+      if (writer_ctx.failed) {
         mbedtls_sha256_free(&sha);
         esp_ota_abort(ota_handle);
-        out_err = String("ota write failed: ") + String(static_cast<int>(wr_err));
+        out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+        ota_stop_writer(writer_ctx, ota_q);
+        vQueueDelete(ota_q);
         return false;
       }
-      fw_offset += wr_len;
+      fw_offset += msg.len;
     }
 
     remain_fw -= n;
     bytes_left -= n;
     ota_kick_wdt();
   }
+
+  // Signal writer completion and wait for drain.
+  OtaWriteMsg end_msg;
+  end_msg.end = true;
+  while (xQueueSend(ota_q, &end_msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+    if (writer_ctx.failed) break;
+    ota_kick_wdt();
+  }
+  while (!writer_ctx.done) {
+    ota_kick_wdt();
+  }
+  if (writer_ctx.failed) {
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+    ota_stop_writer(writer_ctx, ota_q);
+    vQueueDelete(ota_q);
+    return false;
+  }
+
+  vQueueDelete(ota_q);
 
   uint8_t digest[32] = {0};
   mbedtls_sha256_finish_ret(&sha, digest);
