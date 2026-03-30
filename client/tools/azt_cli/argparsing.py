@@ -305,6 +305,8 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     scerti.add_argument("--cert-serial", required=True, help="Certificate serial")
     scerti.add_argument("--out", dest="out_path", default="", help="Optional output JSON path")
     scerti.add_argument("--valid-until-utc", default="2036-01-01T00:00:00Z")
+    scerti.add_argument("--auto-record", action="store_true", help="Authorize recorder auto-record consumer in certificate")
+    scerti.add_argument("--auto-decode", action="store_true", help="Authorize air-gap auto-decode consumer in certificate")
     scerti.add_argument("--port", type=int, default=8080, help="Device API port")
     scerti.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
     scerti.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")

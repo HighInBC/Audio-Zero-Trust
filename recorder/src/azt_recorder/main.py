@@ -52,9 +52,14 @@ async def run(config_path: str) -> None:
     try:
         async for ad in listen_discovery(cfg.discovery.udp_port):
             decision = evaluate_discovery_ad(ad, cfg.trust)
-            if decision.authorized and decision.reason == "admin_allowlist_match_pending_verify":
+            if decision.authorized:
                 v = await verifier.verify_admin_certificate(ad)
-                decision = type(decision)(authorized=v.ok, reason=v.reason)
+                if not v.ok:
+                    decision = type(decision)(authorized=False, reason=v.reason)
+                elif "auto-record" not in set(v.authorized_consumers):
+                    decision = type(decision)(authorized=False, reason="certificate_missing_auto_record")
+                else:
+                    decision = type(decision)(authorized=True, reason="certificate_verified_auto_record_authorized")
 
             print(
                 f"[discovery] ip={ad.source_ip} name={ad.device_name!r} fp={ad.device_key_fingerprint_hex[:12]}.. "

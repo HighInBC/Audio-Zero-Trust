@@ -18,6 +18,8 @@ def run(args: argparse.Namespace) -> int:
             attestation_max_age_s=int(args.attestation_max_age_s),
             cert_serial=args.cert_serial,
             valid_until_utc=args.valid_until_utc,
+            auto_record=bool(getattr(args, "auto_record", False)),
+            auto_decode=bool(getattr(args, "auto_decode", False)),
             out_path=(args.out_path or None),
         )
         cert_doc = payload.get("certificate") if isinstance(payload, dict) else None

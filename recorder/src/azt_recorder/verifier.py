@@ -21,6 +21,7 @@ from .models import DiscoveryAd
 class VerifyResult:
     ok: bool
     reason: str
+    authorized_consumers: tuple[str, ...] = ()
 
 
 class TrustVerifier:
@@ -76,7 +77,8 @@ class TrustVerifier:
             self._verify_payload_matches_ad(pobj, ad)
             self._verify_payload_time(pobj)
             self._verify_device_attestation(ad, pobj)
-            vr = VerifyResult(True, "certificate_and_attestation_verified")
+            consumers = self._authorized_consumers_from_payload(pobj)
+            vr = VerifyResult(True, "certificate_and_attestation_verified", authorized_consumers=consumers)
         except Exception as e:
             vr = VerifyResult(False, f"certificate_verify_failed:{type(e).__name__}")
 
@@ -128,6 +130,19 @@ class TrustVerifier:
             raise ValueError("cert_issued_in_future")
         if now > t_until:
             raise ValueError("cert_expired")
+
+    @staticmethod
+    def _authorized_consumers_from_payload(pobj: dict) -> tuple[str, ...]:
+        vals = pobj.get("authorized_consumers", [])
+        if not isinstance(vals, list):
+            return ()
+        out: list[str] = []
+        for item in vals:
+            if isinstance(item, str):
+                tok = item.strip()
+                if tok:
+                    out.append(tok)
+        return tuple(out)
 
     @staticmethod
     def _fetch_attestation(base_url: str, nonce: str) -> dict:
