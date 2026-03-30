@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 import os
 
@@ -50,7 +51,7 @@ def _validate_attestation(*, att: dict, state: dict, host: str, port: int, attes
     return True, None, {}
 
 
-def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, attestation_path: str | None, attestation_max_age_s: int, cert_serial: str, valid_from_utc: str, valid_until_utc: str, out_path: str | None = None) -> tuple[bool, str | None, dict]:
+def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, attestation_path: str | None, attestation_max_age_s: int, cert_serial: str, valid_until_utc: str, out_path: str | None = None) -> tuple[bool, str | None, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
     if not bool(state.get("ok")):
@@ -81,6 +82,7 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
     if signer_fp != str(state.get("admin_fingerprint_hex") or ""):
         return False, "KEY_OWNERSHIP_MISMATCH", {"key_fingerprint_hex": signer_fp, "state_admin_fingerprint_hex": state.get("admin_fingerprint_hex")}
 
+    issued_at_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "certificate_version": 1,
         "certificate_type": "device_key_binding",
@@ -90,7 +92,7 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
         "recording_public_key_pem": state.get("recording_public_key_pem", ""),
         "recording_fingerprint_hex": state.get("recording_fingerprint_hex", ""),
         "admin_signer_fingerprint_hex": state.get("admin_fingerprint_hex", ""),
-        "valid_from_utc": valid_from_utc,
+        "issued_at_utc": issued_at_utc,
         "valid_until_utc": valid_until_utc,
         "certificate_serial": cert_serial,
         "signature_algorithm": "ed25519",

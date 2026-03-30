@@ -227,39 +227,6 @@ static bool parse_time_servers(JsonDocument& doc, String& out_csv) {
   return parse_time_servers_variant(doc["time"], out_csv);
 }
 
-static bool build_mic_cert_signed_payload(const JsonDocument& doc, String& out_payload) {
-  const int cert_version = doc["certificate_version"] | 0;
-  const char* cert_type = doc["certificate_type"] | "";
-  const char* dev_pub = doc["device_sign_public_key_b64"] | "";
-  const char* dev_fp = doc["device_sign_fingerprint_hex"] | "";
-  const char* chip_id = doc["device_chip_id_hex"] | "";
-  const char* admin_fp = doc["admin_signer_fingerprint_hex"] | "";
-  const char* valid_from = doc["valid_from_utc"] | "";
-  const char* valid_until = doc["valid_until_utc"] | "";
-  const char* serial = doc["certificate_serial"] | "";
-  const char* sig_alg = doc["signature_algorithm"] | "";
-
-  if (cert_version != 1 || strlen(cert_type) == 0 || strlen(dev_pub) == 0 || strlen(dev_fp) != 64 || strlen(chip_id) != 16 ||
-      strlen(admin_fp) != 64 || strlen(valid_from) == 0 ||
-      strlen(valid_until) == 0 || strlen(serial) == 0 || String(sig_alg) != "ed25519") {
-    return false;
-  }
-
-  out_payload = "{";
-  out_payload += "\"certificate_version\":1,";
-  out_payload += "\"certificate_type\":\"" + String(cert_type) + "\",";
-  out_payload += "\"device_sign_public_key_b64\":\"" + String(dev_pub) + "\",";
-  out_payload += "\"device_sign_fingerprint_hex\":\"" + String(dev_fp) + "\",";
-  out_payload += "\"device_chip_id_hex\":\"" + String(chip_id) + "\",";
-  out_payload += "\"admin_signer_fingerprint_hex\":\"" + String(admin_fp) + "\",";
-  out_payload += "\"valid_from_utc\":\"" + String(valid_from) + "\",";
-  out_payload += "\"valid_until_utc\":\"" + String(valid_until) + "\",";
-  out_payload += "\"certificate_serial\":\"" + String(serial) + "\",";
-  out_payload += "\"signature_algorithm\":\"ed25519\"";
-  out_payload += "}";
-  return true;
-}
-
 static bool is_remote_ip_authorized(const AppState& state, const String& remote_ip) {
   if (state.authorized_listener_ips_csv.length() == 0) return true;
 
@@ -1324,8 +1291,8 @@ HttpDispatchResult dispatch_request(const String& method,
       return r;
     }
 
-    String cert_json;
-    serializeJson(doc, cert_json);
+    // Preserve the third-party certificate envelope verbatim as received.
+    String cert_json = body;
 
     state.device_certificate_serial = cert_serial;
     state.device_certificate_json = cert_json;

@@ -17,7 +17,6 @@ def run(args: argparse.Namespace) -> int:
             attestation_path=(args.attestation_path or None),
             attestation_max_age_s=int(args.attestation_max_age_s),
             cert_serial=args.cert_serial,
-            valid_from_utc=args.valid_from_utc,
             valid_until_utc=args.valid_until_utc,
             out_path=(args.out_path or None),
         )

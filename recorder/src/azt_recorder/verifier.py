@@ -119,13 +119,15 @@ class TrustVerifier:
 
     @staticmethod
     def _verify_payload_time(pobj: dict) -> None:
-        vfrom = str(pobj.get("valid_from_utc", ""))
+        issued_at = str(pobj.get("issued_at_utc", ""))
         vuntil = str(pobj.get("valid_until_utc", ""))
-        t_from = datetime.strptime(vfrom, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        t_issued = datetime.strptime(issued_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
         t_until = datetime.strptime(vuntil, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
         now = datetime.now(UTC)
-        if now < t_from or now > t_until:
-            raise ValueError("cert_not_current")
+        if t_issued > now:
+            raise ValueError("cert_issued_in_future")
+        if now > t_until:
+            raise ValueError("cert_expired")
 
     @staticmethod
     def _fetch_attestation(base_url: str, nonce: str) -> dict:

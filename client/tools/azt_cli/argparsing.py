@@ -304,7 +304,6 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     scerti.add_argument("--attestation-max-age-s", type=int, default=120, help="Maximum allowed attestation age in seconds")
     scerti.add_argument("--cert-serial", required=True, help="Certificate serial")
     scerti.add_argument("--out", dest="out_path", default="", help="Optional output JSON path")
-    scerti.add_argument("--valid-from-utc", default="2026-01-01T00:00:00Z")
     scerti.add_argument("--valid-until-utc", default="2036-01-01T00:00:00Z")
     scerti.add_argument("--port", type=int, default=8080, help="Device API port")
     scerti.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")

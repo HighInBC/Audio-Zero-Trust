@@ -72,7 +72,7 @@ bool write_test_device_certificate(const String& device_pub_b64,
   payload += "\"device_sign_fingerprint_hex\":\"" + (tamper_device_fp ? String("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") : device_fp_hex) + "\",";
   payload += "\"device_chip_id_hex\":\"" + device_chip_id_hex + "\",";
   payload += "\"admin_signer_fingerprint_hex\":\"" + admin_fp_hex + "\",";
-  payload += "\"valid_from_utc\":\"2026-03-14T00:00:00Z\",";
+  payload += "\"issued_at_utc\":\"2026-03-14T00:00:00Z\",";
   payload += "\"valid_until_utc\":\"2036-03-14T00:00:00Z\",";
   payload += "\"certificate_serial\":\"" + cert_serial + "\",";
   payload += "\"signature_algorithm\":\"ed25519\"";

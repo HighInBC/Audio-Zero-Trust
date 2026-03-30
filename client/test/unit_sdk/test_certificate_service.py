@@ -48,7 +48,6 @@ def test_issue_certificate_state_get_failure(monkeypatch):
         attestation_path=None,
         attestation_max_age_s=120,
         cert_serial="c1",
-        valid_from_utc="2026-01-01T00:00:00Z",
         valid_until_utc="2027-01-01T00:00:00Z",
     )
     assert ok is False and err == "STATE_GET_FAILED"
@@ -67,7 +66,6 @@ def test_issue_certificate_auto_attestation_failure(monkeypatch):
         attestation_path=None,
         attestation_max_age_s=120,
         cert_serial="c1",
-        valid_from_utc="2026-01-01T00:00:00Z",
         valid_until_utc="2027-01-01T00:00:00Z",
     )
     assert ok is False and err == "ATTESTATION_VERIFY_FAILED"
@@ -110,7 +108,6 @@ def test_issue_certificate_success_without_post_when_out_path_set(monkeypatch, t
         attestation_path=str(att_file),
         attestation_max_age_s=120,
         cert_serial="c1",
-        valid_from_utc="2026-01-01T00:00:00Z",
         valid_until_utc="2027-01-01T00:00:00Z",
         out_path=str(tmp_path / "cert.json"),
     )
@@ -140,7 +137,6 @@ def test_issue_certificate_auto_attestation_missing_artifact(monkeypatch, tmp_pa
         attestation_path=None,
         attestation_max_age_s=120,
         cert_serial="c1",
-        valid_from_utc="2026-01-01T00:00:00Z",
         valid_until_utc="2027-01-01T00:00:00Z",
     )
     assert ok is False
@@ -177,7 +173,6 @@ def test_issue_certificate_returns_validate_attestation_error(monkeypatch, tmp_p
         attestation_path=str(att_file),
         attestation_max_age_s=120,
         cert_serial="c1",
-        valid_from_utc="2026-01-01T00:00:00Z",
         valid_until_utc="2027-01-01T00:00:00Z",
     )
     assert ok is False
@@ -266,7 +261,6 @@ def test_issue_certificate_key_ownership_mismatch(monkeypatch, tmp_path):
         attestation_path=str(att_file),
         attestation_max_age_s=120,
         cert_serial="c1",
-        valid_from_utc="2026-01-01T00:00:00Z",
         valid_until_utc="2027-01-01T00:00:00Z",
     )
 
@@ -312,7 +306,6 @@ def test_issue_certificate_post_failure(monkeypatch, tmp_path):
         attestation_path=str(att_file),
         attestation_max_age_s=120,
         cert_serial="c1",
-        valid_from_utc="2026-01-01T00:00:00Z",
         valid_until_utc="2027-01-01T00:00:00Z",
         out_path=None,
     )
