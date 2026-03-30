@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import time
 import urllib.error
 from pathlib import Path
@@ -31,6 +32,16 @@ def _error_detail(*, where: str, exc: Exception, url: str | None = None, context
     if context:
         out["context"] = context
     return out
+
+
+_MDNS_HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _is_valid_mdns_hostname(host: str) -> bool:
+    h = (host or "").strip().lower()
+    if not h:
+        return True
+    return bool(_MDNS_HOST_RE.fullmatch(h))
 
 
 def configure_device(
@@ -92,7 +103,7 @@ def configure_device(
 
     # Input validation for protocol-facing fields.
     ota_signer_public_key_pem = (ota_signer_public_key_pem or "").strip()
-    mdns_hostname = (mdns_hostname or "").strip()
+    mdns_hostname = (mdns_hostname or "").strip().lower()
     if ota_version_code is not None and ota_version_code < 0:
         return 11, False, "INVALID_OTA_VERSION_CODE", {"detail": ota_version_code}
     if ota_min_version_code is not None and ota_min_version_code < 0:
@@ -107,6 +118,11 @@ def configure_device(
         return 16, False, "INVALID_AUDIO_PREAMP_GAIN", {"detail": int(audio_preamp_gain)}
     if audio_adc_gain is not None and not (0 <= int(audio_adc_gain) <= 255):
         return 17, False, "INVALID_AUDIO_ADC_GAIN", {"detail": int(audio_adc_gain)}
+    if not _is_valid_mdns_hostname(mdns_hostname):
+        return 18, False, "INVALID_MDNS_HOSTNAME", {
+            "detail": mdns_hostname,
+            "rule": "must match ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+        }
 
     for listener_ip in authorized_listener_ips:
         try:

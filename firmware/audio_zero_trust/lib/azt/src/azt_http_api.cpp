@@ -171,6 +171,21 @@ static bool is_valid_ipv4_str(const String& s) {
   return ip.fromString(s);
 }
 
+static bool is_valid_mdns_hostname_str(const String& s) {
+  if (s.length() == 0) return true;
+  if (s.length() > 63) return false;
+  for (size_t i = 0; i < s.length(); ++i) {
+    char c = s[i];
+    bool ok =
+        (c >= 'a' && c <= 'z') ||
+        (c >= '0' && c <= '9') ||
+        c == '-';
+    if (!ok) return false;
+  }
+  if (s[0] == '-' || s[s.length() - 1] == '-') return false;
+  return true;
+}
+
 static bool parse_authorized_listener_ips_variant(JsonVariant v, String& out_csv) {
   out_csv = "";
   if (v.isNull()) return true;  // optional
@@ -431,6 +446,12 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     new_mdns_enabled = mdns["enabled"] | false;
     new_mdns_hostname = String((const char*)(mdns["hostname"] | ""));
     new_mdns_hostname.trim();
+    new_mdns_hostname.toLowerCase();
+    if (!is_valid_mdns_hostname_str(new_mdns_hostname)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mdns.hostname\"}";
+      return r;
+    }
   }
 
   JsonVariant audio = doc["audio"];
@@ -931,6 +952,12 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     new_mdns_enabled = pm["enabled"] | false;
     new_mdns_hostname = String((const char*)(pm["hostname"] | ""));
     new_mdns_hostname.trim();
+    new_mdns_hostname.toLowerCase();
+    if (!is_valid_mdns_hostname_str(new_mdns_hostname)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mdns.hostname\"}";
+      return r;
+    }
   }
 
   state.audio_preamp_gain = new_audio_preamp_gain;

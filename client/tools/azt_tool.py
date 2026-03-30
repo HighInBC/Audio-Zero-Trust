@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,16 @@ from tools.azt_cli import argparsing as cli_argparsing
 from tools.azt_cli import handler_map as cli_handler_map
 from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services import operations_service as ops
+
+
+_MDNS_HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _is_valid_mdns_hostname(host: str) -> bool:
+    h = (host or "").strip().lower()
+    if not h:
+        return True
+    return bool(_MDNS_HOST_RE.fullmatch(h))
 
 
 def _prompt_default(label: str, default: str = "") -> str:
@@ -95,12 +106,15 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     if patch_obj is None:
         patch_obj = {}
 
-    mdns_hostname = (getattr(args, "mdns_hostname", "") or "").strip()
+    mdns_hostname = (getattr(args, "mdns_hostname", "") or "").strip().lower()
     mdns_enabled = bool(getattr(args, "mdns_enabled", False))
     mdns_disabled = bool(getattr(args, "mdns_disabled", False))
 
     if mdns_enabled and mdns_disabled:
         emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "cannot set both --mdns-enabled and --mdns-disabled"}, as_json=bool(getattr(args, "as_json", False)))
+        return 1
+    if not _is_valid_mdns_hostname(mdns_hostname):
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "invalid --mdns-hostname (must match ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
     if mdns_enabled or mdns_disabled or mdns_hostname:
