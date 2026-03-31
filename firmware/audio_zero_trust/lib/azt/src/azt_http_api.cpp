@@ -1965,52 +1965,44 @@ bool ota_should_abort_on_error(bool has_error) {
 static constexpr size_t kOtaChunkBytes = 256;
 static inline void ota_bc(const char* tag);
 
-enum class OtaStage : uint8_t {
-  Erase,
-  Done,
-  Error,
-};
-
-struct OtaEraseSm {
+struct OtaEraseTaskCtx {
   const esp_partition_t* part = nullptr;
   size_t total_len = 0;
-  size_t cursor = 0;
   size_t chunk_bytes = 4096;
-  size_t sectors_per_step = 1;
-  OtaStage stage = OtaStage::Erase;
+  volatile bool failed = false;
+  volatile bool done = false;
   String err;
 };
 
-static bool ota_erase_sm_step(OtaEraseSm& sm) {
-  if (sm.stage == OtaStage::Done) return true;
-  if (sm.stage == OtaStage::Error) return false;
-  if (!sm.part || sm.total_len == 0 || sm.chunk_bytes == 0) {
-    sm.stage = OtaStage::Error;
-    sm.err = "erase state machine invalid init";
-    return false;
-  }
-
-  size_t sectors_done = 0;
-  while (sm.cursor < sm.total_len && sectors_done < sm.sectors_per_step) {
-    const size_t remain = sm.total_len - sm.cursor;
-    const size_t chunk = (remain > sm.chunk_bytes) ? sm.chunk_bytes : remain;
-    if (sm.cursor == 0) ota_bc("S4A_ERASE_CALL_0_BEGIN");
-    if (esp_partition_erase_range(sm.part, sm.cursor, chunk) != ESP_OK) {
-      sm.stage = OtaStage::Error;
-      sm.err = "failed to erase OTA slot";
-      return false;
+static void ota_erase_task(void* arg) {
+  OtaEraseTaskCtx* ctx = reinterpret_cast<OtaEraseTaskCtx*>(arg);
+  if (!ctx || !ctx->part || ctx->total_len == 0 || ctx->chunk_bytes == 0) {
+    if (ctx) {
+      ctx->failed = true;
+      ctx->err = "erase task invalid init";
+      ctx->done = true;
     }
-    if (sm.cursor == 0) ota_bc("S4B_ERASE_CALL_0_OK");
-    sm.cursor += chunk;
-    sectors_done++;
-    ota_kick_wdt();
+    vTaskDelete(nullptr);
+    return;
   }
 
-  if (sm.cursor >= sm.total_len) {
-    sm.stage = OtaStage::Done;
-    return true;
+  for (size_t off = 0; off < ctx->total_len; off += ctx->chunk_bytes) {
+    const size_t remain = ctx->total_len - off;
+    const size_t chunk = (remain > ctx->chunk_bytes) ? ctx->chunk_bytes : remain;
+    if (off == 0) ota_bc("S4A_ERASE_CALL_0_BEGIN");
+    if (esp_partition_erase_range(ctx->part, off, chunk) != ESP_OK) {
+      ctx->failed = true;
+      ctx->err = "failed to erase OTA slot";
+      ctx->done = true;
+      vTaskDelete(nullptr);
+      return;
+    }
+    if (off == 0) ota_bc("S4B_ERASE_CALL_0_OK");
+    vTaskDelay(1);
   }
-  return false;
+
+  ctx->done = true;
+  vTaskDelete(nullptr);
 }
 
 static inline void ota_bc(const char* tag) {
@@ -2268,24 +2260,38 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   ota_bc("S3C_LENGTHS_OK");
 
   constexpr size_t kFlashSector = 4096;
-  constexpr size_t kEraseChunkSectors = 1;  // tunable: sectors per state-machine step
   constexpr size_t kEraseChunkBytes = kFlashSector;
   const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
   ota_bc("S3D_PRE_ERASE_LOOP");
   ota_bc("S4_ERASE_BEGIN");
-  OtaEraseSm erase_sm;
-  erase_sm.part = target_part;
-  erase_sm.total_len = erase_len;
-  erase_sm.chunk_bytes = kEraseChunkBytes;
-  erase_sm.sectors_per_step = kEraseChunkSectors;
-  while (erase_sm.stage == OtaStage::Erase) {
-    ota_erase_sm_step(erase_sm);
-    if (erase_sm.stage == OtaStage::Error) {
-      out_err = erase_sm.err.length() ? erase_sm.err : "failed to erase OTA slot";
-      return false;
-    }
-    // state-machine tick boundary (bounded work)
+  OtaEraseTaskCtx erase_ctx;
+  erase_ctx.part = target_part;
+  erase_ctx.total_len = erase_len;
+  erase_ctx.chunk_bytes = kEraseChunkBytes;
+  TaskHandle_t erase_task = nullptr;
+  BaseType_t erase_ok = xTaskCreatePinnedToCore(ota_erase_task,
+                                                 "azt_ota_erase",
+                                                 6144,
+                                                 &erase_ctx,
+                                                 1,
+                                                 &erase_task,
+                                                 0);
+  if (erase_ok != pdPASS || erase_task == nullptr) {
+    out_err = "failed to start OTA erase task";
+    return false;
+  }
+  uint32_t erase_wait_deadline = millis() + 90000;
+  while (!erase_ctx.done && static_cast<int32_t>(millis() - erase_wait_deadline) < 0) {
     ota_kick_wdt();
+  }
+  if (!erase_ctx.done) {
+    vTaskDelete(erase_task);
+    out_err = "ota erase task timeout";
+    return false;
+  }
+  if (erase_ctx.failed) {
+    out_err = erase_ctx.err.length() ? erase_ctx.err : "failed to erase OTA slot";
+    return false;
   }
   if (!poison_ota_slot_header(target_part)) {
     out_err = "failed to poison OTA slot header";
