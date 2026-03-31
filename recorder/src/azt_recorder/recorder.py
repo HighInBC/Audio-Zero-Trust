@@ -27,11 +27,14 @@ def _sanitize_common_name(name: str) -> str:
     return s[:80]
 
 
-def make_azt_filename(common_name: str, ts_local: datetime) -> str:
-    # <commonname>-<local time>-<tz>.azt
-    # Example: Livingroom-2026-03-25T17:56:02-PDT.azt
+def make_azt_filename(common_name: str, ts_local: datetime, device_id: str = "") -> str:
+    # <commonname>-<deviceid>-<local time>-<tz>.azt
+    # Example: Livingroom-726244c8de53-2026-03-25T17:56:02-PDT.azt
     ts_local = ts_local.astimezone()
     tz_abbr = ts_local.tzname() or "LOCAL"
+    device_id_short = re.sub(r"[^0-9a-fA-F]", "", (device_id or "").strip())[:12].lower()
+    if device_id_short:
+        return f"{_sanitize_common_name(common_name)}-{device_id_short}-{ts_local.strftime('%Y-%m-%dT%H:%M:%S')}-{tz_abbr}.azt"
     return f"{_sanitize_common_name(common_name)}-{ts_local.strftime('%Y-%m-%dT%H:%M:%S')}-{tz_abbr}.azt"
 
 
@@ -362,7 +365,7 @@ class RecordingSession:
 
             final_dir = base_out_dir / started_local.strftime("%Y") / started_local.strftime("%m") / started_local.strftime("%d")
             final_dir.mkdir(parents=True, exist_ok=True)
-            final_path = final_dir / make_azt_filename(self.ad.device_name, started_local)
+            final_path = final_dir / make_azt_filename(self.ad.device_name, started_local, self.ad.device_key_fingerprint_hex)
 
             # RAM-gate file creation: do not create a recording file until we know
             # the stream has produced at least one payload chunk to keep.

@@ -1954,12 +1954,126 @@ bool ota_sha_mismatch(const String& got_sha, const String& expected_sha) {
   return got_sha != expected_sha;
 }
 
-bool ota_end_failed(bool end_ok) {
-  return !end_ok;
+static constexpr size_t kOtaChunkBytes = 256;
+
+#ifndef AZT_OTA_BREADCRUMBS
+#define AZT_OTA_BREADCRUMBS 0
+#endif
+
+static inline void ota_bc(const char* tag);
+
+struct OtaEraseTaskCtx {
+  const esp_partition_t* part = nullptr;
+  size_t total_len = 0;
+  size_t chunk_bytes = 4096;
+  volatile bool failed = false;
+  volatile bool done = false;
+  String err;
+};
+
+static void ota_erase_task(void* arg) {
+  OtaEraseTaskCtx* ctx = reinterpret_cast<OtaEraseTaskCtx*>(arg);
+  if (!ctx || !ctx->part || ctx->total_len == 0 || ctx->chunk_bytes == 0) {
+    if (ctx) {
+      ctx->failed = true;
+      ctx->err = "erase task invalid init";
+      ctx->done = true;
+    }
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  for (size_t off = 0; off < ctx->total_len; off += ctx->chunk_bytes) {
+    const size_t remain = ctx->total_len - off;
+    const size_t chunk = (remain > ctx->chunk_bytes) ? ctx->chunk_bytes : remain;
+    if (off == 0) ota_bc("S4A_ERASE_CALL_0_BEGIN");
+    if (esp_partition_erase_range(ctx->part, off, chunk) != ESP_OK) {
+      ctx->failed = true;
+      ctx->err = "failed to erase OTA slot";
+      ctx->done = true;
+      vTaskDelete(nullptr);
+      return;
+    }
+    if (off == 0) ota_bc("S4B_ERASE_CALL_0_OK");
+    vTaskDelay(1);
+  }
+
+  ctx->done = true;
+  vTaskDelete(nullptr);
 }
 
-bool ota_should_abort_on_error(bool has_error) {
-  return has_error;
+static inline void ota_bc(const char* tag) {
+#if AZT_OTA_BREADCRUMBS
+  Serial.printf("AZT_OTA_BC %s\n", tag);
+#else
+  (void)tag;
+#endif
+}
+
+struct OtaWriteMsg {
+  bool end = false;
+  uint32_t offset = 0;
+  uint16_t len = 0;
+  uint8_t data[kOtaChunkBytes] = {0};
+};
+
+struct OtaWriterCtx {
+  QueueHandle_t q = nullptr;
+  esp_ota_handle_t handle = 0;
+  volatile bool failed = false;
+  volatile bool done = false;
+  esp_err_t write_err = ESP_OK;
+};
+
+static void ota_stop_writer(OtaWriterCtx& ctx, QueueHandle_t q, TaskHandle_t writer_task) {
+  if (!q) return;
+  OtaWriteMsg end_msg;
+  end_msg.end = true;
+  for (int i = 0; i < 10 && !ctx.done; ++i) {
+    xQueueSend(q, &end_msg, pdMS_TO_TICKS(50));
+    ota_kick_wdt();
+  }
+  uint32_t wait_deadline = millis() + 3000;
+  while (!ctx.done && static_cast<int32_t>(millis() - wait_deadline) < 0) {
+    ota_kick_wdt();
+  }
+
+  // Defensive teardown: if the writer task did not exit in time,
+  // force-delete it before queue destruction to prevent queue UAF panic.
+  if (!ctx.done && writer_task != nullptr) {
+    vTaskDelete(writer_task);
+    ctx.done = true;
+  }
+}
+
+static void ota_writer_task(void* arg) {
+  OtaWriterCtx* ctx = reinterpret_cast<OtaWriterCtx*>(arg);
+  if (!ctx || !ctx->q) {
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  OtaWriteMsg msg;
+  while (true) {
+    if (xQueueReceive(ctx->q, &msg, pdMS_TO_TICKS(250)) != pdTRUE) {
+      if (ctx->failed) break;
+      ota_kick_wdt();
+      continue;
+    }
+    if (msg.end) break;
+    if (msg.len == 0) continue;
+
+    esp_err_t wr_err = esp_ota_write_with_offset(ctx->handle, msg.data, static_cast<size_t>(msg.len), msg.offset);
+    if (wr_err != ESP_OK) {
+      ctx->failed = true;
+      ctx->write_err = wr_err;
+      break;
+    }
+    ota_kick_wdt();
+  }
+
+  ctx->done = true;
+  vTaskDelete(nullptr);
 }
 
 bool poison_ota_slot_header(const esp_partition_t* part) {
@@ -2013,6 +2127,7 @@ void drain_request_body_best_effort(WiFiClient& client, int max_bytes, uint32_t 
 
 static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, AppState& state, String& out_err) {
   out_err = "";
+  ota_bc("S0_ENTER");
 
   String header_line = client.readStringUntil('\n');
   header_line.trim();
@@ -2023,6 +2138,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   if (!validate_ota_bundle_header_line(header_line, signer_fp, meta_b64, meta_sig_b64, out_err)) {
     return false;
   }
+  ota_bc("S1_HDR_OK");
 
   String trusted_pem = state.ota_signer_override_public_key_pem.length() > 0
                          ? state.ota_signer_override_public_key_pem
@@ -2053,6 +2169,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = "meta signature verify failed";
     return false;
   }
+  ota_bc("S2_META_SIG_OK");
 
   JsonDocument meta;
   if (deserializeJson(meta, meta_raw.data(), meta_raw.size())) {
@@ -2119,12 +2236,15 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   if (!validate_ota_firmware_meta(meta, fw_size, fw_sha, out_err)) {
     return false;
   }
+  ota_bc("S3_META_FIELDS_OK");
 
+  ota_bc("S3A_PREPARE_PARTITION");
   const esp_partition_t* target_part = esp_ota_get_next_update_partition(nullptr);
   if (!target_part) {
     out_err = "no OTA partition available";
     return false;
   }
+  ota_bc("S3B_PARTITION_OK");
   if (static_cast<size_t>(fw_size) > target_part->size) {
     out_err = "firmware too large for OTA slot";
     return false;
@@ -2138,24 +2258,47 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
                                            out_err)) {
     return false;
   }
+  ota_bc("S3C_LENGTHS_OK");
 
   constexpr size_t kFlashSector = 4096;
-  constexpr size_t kEraseChunkSectors = 8;  // 32KB chunks to avoid long WDT-starving erases.
-  constexpr size_t kEraseChunkBytes = kFlashSector * kEraseChunkSectors;
+  constexpr size_t kEraseChunkBytes = kFlashSector;
   const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
-  for (size_t off = 0; off < erase_len; off += kEraseChunkBytes) {
-    const size_t remain = erase_len - off;
-    const size_t chunk = (remain > kEraseChunkBytes) ? kEraseChunkBytes : remain;
-    if (esp_partition_erase_range(target_part, off, chunk) != ESP_OK) {
-      out_err = "failed to erase OTA slot";
-      return false;
-    }
+  ota_bc("S3D_PRE_ERASE_LOOP");
+  ota_bc("S4_ERASE_BEGIN");
+  OtaEraseTaskCtx erase_ctx;
+  erase_ctx.part = target_part;
+  erase_ctx.total_len = erase_len;
+  erase_ctx.chunk_bytes = kEraseChunkBytes;
+  TaskHandle_t erase_task = nullptr;
+  BaseType_t erase_ok = xTaskCreatePinnedToCore(ota_erase_task,
+                                                 "azt_ota_erase",
+                                                 6144,
+                                                 &erase_ctx,
+                                                 1,
+                                                 &erase_task,
+                                                 0);
+  if (erase_ok != pdPASS || erase_task == nullptr) {
+    out_err = "failed to start OTA erase task";
+    return false;
+  }
+  uint32_t erase_wait_deadline = millis() + 90000;
+  while (!erase_ctx.done && static_cast<int32_t>(millis() - erase_wait_deadline) < 0) {
     ota_kick_wdt();
+  }
+  if (!erase_ctx.done) {
+    vTaskDelete(erase_task);
+    out_err = "ota erase task timeout";
+    return false;
+  }
+  if (erase_ctx.failed) {
+    out_err = erase_ctx.err.length() ? erase_ctx.err : "failed to erase OTA slot";
+    return false;
   }
   if (!poison_ota_slot_header(target_part)) {
     out_err = "failed to poison OTA slot header";
     return false;
   }
+  ota_bc("S5_ERASE_POISON_OK");
 
   esp_ota_handle_t ota_handle = 0;
   ota_kick_wdt();
@@ -2165,6 +2308,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = String("ota begin failed: ") + String(static_cast<int>(begin_err));
     return false;
   }
+  ota_bc("S6_BEGIN_OK");
 
   const size_t first_block_len = std::min<size_t>(static_cast<size_t>(fw_size), kFlashSector);
   std::vector<uint8_t> first_block(first_block_len);
@@ -2173,17 +2317,64 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   mbedtls_sha256_init(&sha);
   mbedtls_sha256_starts_ret(&sha, 0);
 
-  uint8_t buf[1024];
+  uint8_t buf[kOtaChunkBytes];
+
+  // Two-stage OTA path: network reader feeds bounded queue, dedicated writer task drains to flash.
+  // Security invariant preserved: first OTA header block is NOT written until SHA-256 verification succeeds.
+  QueueHandle_t ota_q = xQueueCreate(6, sizeof(OtaWriteMsg));
+  if (!ota_q) {
+    ota_bc("E_Q_CREATE_FAIL");
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "failed to allocate OTA queue";
+    return false;
+  }
+
+  OtaWriterCtx writer_ctx;
+  writer_ctx.q = ota_q;
+  writer_ctx.handle = ota_handle;
+
+  TaskHandle_t writer_task = nullptr;
+  BaseType_t writer_ok = xTaskCreatePinnedToCore(ota_writer_task,
+                                                  "azt_ota_writer",
+                                                  8192,
+                                                  &writer_ctx,
+                                                  1,
+                                                  &writer_task,
+                                                  0);
+  if (writer_ok != pdPASS || writer_task == nullptr) {
+    vQueueDelete(ota_q);
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "failed to start OTA writer task";
+    return false;
+  }
+  ota_bc("S7_WRITER_START_OK");
+
   int remain_fw = fw_size;
   size_t fw_offset = 0;
+  uint32_t q_highwater = 0;
+  uint32_t q_backpressure_loops = 0;
   while (remain_fw > 0) {
+    if (writer_ctx.failed) {
+      mbedtls_sha256_free(&sha);
+      esp_ota_abort(ota_handle);
+      out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+      ota_stop_writer(writer_ctx, ota_q, writer_task);
+      vQueueDelete(ota_q);
+      return false;
+    }
+
     int to_read = remain_fw > (int)sizeof(buf) ? (int)sizeof(buf) : remain_fw;
     int n = 0;
     String read_err;
     if (!ota_read_firmware_chunk(client, buf, to_read, n, read_err, 5000) || ota_stream_read_failed(n)) {
       mbedtls_sha256_free(&sha);
+      writer_ctx.failed = true;
       esp_ota_abort(ota_handle);
       out_err = read_err.length() ? read_err : "stream read failed during firmware body";
+      ota_stop_writer(writer_ctx, ota_q, writer_task);
+      vQueueDelete(ota_q);
       return false;
     }
 
@@ -2198,34 +2389,78 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     }
 
     if (consumed < static_cast<size_t>(n)) {
-      const uint8_t* wr_ptr = buf + consumed;
-      size_t wr_len = static_cast<size_t>(n) - consumed;
-      ota_kick_wdt();
-      esp_err_t wr_err = esp_ota_write_with_offset(ota_handle, wr_ptr, wr_len, fw_offset);
-      ota_kick_wdt();
-      if (wr_err != ESP_OK) {
+      OtaWriteMsg msg;
+      msg.end = false;
+      msg.offset = static_cast<uint32_t>(fw_offset);
+      msg.len = static_cast<uint16_t>(static_cast<size_t>(n) - consumed);
+      memcpy(msg.data, buf + consumed, msg.len);
+
+      while (xQueueSend(ota_q, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+        if (writer_ctx.failed) break;
+        q_backpressure_loops++;
+        ota_kick_wdt();  // bounded backpressure while queue is full
+      }
+      if (writer_ctx.failed) {
         mbedtls_sha256_free(&sha);
         esp_ota_abort(ota_handle);
-        out_err = String("ota write failed: ") + String(static_cast<int>(wr_err));
+        out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+        ota_stop_writer(writer_ctx, ota_q, writer_task);
+        vQueueDelete(ota_q);
         return false;
       }
-      fw_offset += wr_len;
+      fw_offset += msg.len;
     }
 
     remain_fw -= n;
     bytes_left -= n;
+    UBaseType_t q_now = uxQueueMessagesWaiting(ota_q);
+    if (q_now > q_highwater) q_highwater = static_cast<uint32_t>(q_now);
     ota_kick_wdt();
   }
+
+  // Signal writer completion and wait for drain.
+  OtaWriteMsg end_msg;
+  end_msg.end = true;
+  while (xQueueSend(ota_q, &end_msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+    if (writer_ctx.failed) break;
+    ota_kick_wdt();
+  }
+  uint32_t writer_wait_deadline = millis() + 30000;
+  while (!writer_ctx.done && static_cast<int32_t>(millis() - writer_wait_deadline) < 0) {
+    ota_kick_wdt();
+  }
+  if (!writer_ctx.done) {
+    writer_ctx.failed = true;
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "ota writer did not drain in time";
+    ota_stop_writer(writer_ctx, ota_q, writer_task);
+    vQueueDelete(ota_q);
+    return false;
+  }
+  if (writer_ctx.failed) {
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+    ota_stop_writer(writer_ctx, ota_q, writer_task);
+    vQueueDelete(ota_q);
+    return false;
+  }
+
+  vQueueDelete(ota_q);
+  ota_bc("S8_STREAM_DRAIN_OK");
 
   uint8_t digest[32] = {0};
   mbedtls_sha256_finish_ret(&sha, digest);
   mbedtls_sha256_free(&sha);
   String got_sha = hex_lower(digest, sizeof(digest));
   if (ota_sha_mismatch(got_sha, fw_sha)) {
+    ota_bc("E_SHA_MISMATCH");
     esp_ota_abort(ota_handle);
     out_err = "firmware sha256 mismatch";
     return false;
   }
+  ota_bc("S9_SHA_OK");
 
   if (!first_block.empty()) {
     ota_kick_wdt();
@@ -2237,6 +2472,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
       return false;
     }
   }
+  ota_bc("S10_HEADER_RESTORE_OK");
 
   ota_kick_wdt();
   esp_err_t end_err = esp_ota_end(ota_handle);
@@ -2245,6 +2481,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = String("ota end failed: ") + String(static_cast<int>(end_err));
     return false;
   }
+  ota_bc("S11_END_OK");
 
   ota_kick_wdt();
   esp_err_t set_err = esp_ota_set_boot_partition(target_part);
@@ -2253,6 +2490,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = String("failed to set boot partition: ") + String(static_cast<int>(set_err));
     return false;
   }
+  ota_bc("S12_SET_BOOT_OK");
 
   // Drain any trailing bytes in the bundle body (if present).
   while (should_drain_trailing_bundle_bytes(bytes_left) && client.connected()) {
@@ -2277,6 +2515,16 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     p.putULong64("ota_min_vc", state.ota_min_allowed_version_code);
     p.end();
   }
+
+#if AZT_OTA_BREADCRUMBS
+  Serial.printf("AZT_OTA_PIPELINE_OK q_highwater=%lu q_backpressure_loops=%lu fw_size=%d\n",
+                static_cast<unsigned long>(q_highwater),
+                static_cast<unsigned long>(q_backpressure_loops),
+                fw_size);
+#else
+  (void)q_highwater;
+  (void)q_backpressure_loops;
+#endif
 
   return true;
 }
