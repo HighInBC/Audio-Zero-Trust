@@ -1954,15 +1954,12 @@ bool ota_sha_mismatch(const String& got_sha, const String& expected_sha) {
   return got_sha != expected_sha;
 }
 
-bool ota_end_failed(bool end_ok) {
-  return !end_ok;
-}
-
-bool ota_should_abort_on_error(bool has_error) {
-  return has_error;
-}
-
 static constexpr size_t kOtaChunkBytes = 256;
+
+#ifndef AZT_OTA_BREADCRUMBS
+#define AZT_OTA_BREADCRUMBS 0
+#endif
+
 static inline void ota_bc(const char* tag);
 
 struct OtaEraseTaskCtx {
@@ -2006,7 +2003,11 @@ static void ota_erase_task(void* arg) {
 }
 
 static inline void ota_bc(const char* tag) {
+#if AZT_OTA_BREADCRUMBS
   Serial.printf("AZT_OTA_BC %s\n", tag);
+#else
+  (void)tag;
+#endif
 }
 
 struct OtaWriteMsg {
@@ -2515,10 +2516,15 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     p.end();
   }
 
+#if AZT_OTA_BREADCRUMBS
   Serial.printf("AZT_OTA_PIPELINE_OK q_highwater=%lu q_backpressure_loops=%lu fw_size=%d\n",
                 static_cast<unsigned long>(q_highwater),
                 static_cast<unsigned long>(q_backpressure_loops),
                 fw_size);
+#else
+  (void)q_highwater;
+  (void)q_backpressure_loops;
+#endif
 
   return true;
 }
