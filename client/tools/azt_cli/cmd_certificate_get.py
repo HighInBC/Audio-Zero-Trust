@@ -4,7 +4,7 @@ import argparse
 import base64
 import json
 
-from tools.azt_cli.output import emit_envelope
+from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.device_service import certificate_get
 
 
@@ -33,16 +33,25 @@ def _decode_certificate_payload_for_human(res: dict) -> dict:
 
 
 def run(args: argparse.Namespace) -> int:
-    res = certificate_get(host=args.host, port=int(args.port), timeout=int(args.timeout))
-    ok = bool(res.get("ok"))
-    as_json = bool(getattr(args, "as_json", False))
-    human_res = res if as_json else _decode_certificate_payload_for_human(res)
-    emit_envelope(
-        command="certificate-get",
-        ok=ok,
-        payload={"response": human_res},
-        error=None if ok else str(res.get("error") or "CERTIFICATE_GET_FAILED"),
-        detail=res.get("detail"),
-        as_json=as_json,
-    )
-    return 0 if ok else 1
+    try:
+        host = str(getattr(args, "host", "") or "").strip()
+        if not host:
+            emit_envelope(command="certificate-get", ok=False, error="CERTIFICATE_GET_ARGS", payload={"detail": "missing required options: --host"}, as_json=bool(getattr(args, "as_json", False)))
+            return 1
+
+        res = certificate_get(host=host, port=int(args.port), timeout=int(args.timeout))
+        ok = bool(res.get("ok"))
+        as_json = bool(getattr(args, "as_json", False))
+        human_res = res if as_json else _decode_certificate_payload_for_human(res)
+        emit_envelope(
+            command="certificate-get",
+            ok=ok,
+            payload={"response": human_res},
+            error=None if ok else str(res.get("error") or "CERTIFICATE_GET_FAILED"),
+            detail=res.get("detail"),
+            as_json=as_json,
+        )
+        return 0 if ok else 1
+    except Exception as e:
+        emit_envelope(command="certificate-get", ok=False, error="CERTIFICATE_GET_FAILED", detail=exception_detail("cmd_certificate_get.run", e), as_json=bool(getattr(args, "as_json", False)))
+        return 1

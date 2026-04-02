@@ -26,7 +26,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
 
     sp = sub.add_parser("sign-config", help="Sign an unsigned AZT config JSON with admin Ed25519 key")
     sp.add_argument("--in", dest="in_path", required=True, help="Path to unsigned config JSON")
-    sp.add_argument("--key", dest="key_path", required=True, help="Path to admin private key PEM")
+    sp.add_argument("--key", dest="key_path", required=False, default="", help="Path to admin private key PEM")
     sp.add_argument("--out", dest="out_path", required=True, help="Output path for signed config JSON")
     sp.add_argument("--fingerprint", dest="fingerprint", default="", help="Optional signer fingerprint override")
     sp.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
