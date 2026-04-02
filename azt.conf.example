@@ -1,0 +1,46 @@
+# AZT CLI local defaults
+#
+# Copy to ./azt.conf and customize for your environment.
+# Precedence (recommended): CLI flags > device profile > defaults
+
+# Shared defaults for this operator/workstation
+defaults:
+  target: atom-echos3r                # atom-echo | atom-echos3r
+  serial_port: /dev/ttyUSB0
+  http_port: 8080
+  https_port: 8443
+  stream_port: 8081
+  timeout_seconds: 15
+
+  # Per-device naming template: {identity} is replaced at runtime.
+  # Example result with identity="kitchen": "kitchen-mic"
+  mdns_hostname_template: "{identity}-mic"
+  mdns_enabled: true
+
+  tls_bootstrap_enabled: true
+  tls_valid_days: 180
+  tls_reboot_wait_seconds: 8
+
+  ota_channel: main
+  ota_upgrade_path: /api/v0/device/upgrade
+  ota_version_code_mode: timestamp    # timestamp | explicit
+  ota_rollback_floor_mode: same       # same | explicit
+
+  json_output: false
+
+  # Uncomment and set when needed (no universal sensible defaults):
+  # host: 192.168.1.113
+  # admin_key_path: client/tools/provisioned/admin-admin/private_key.pem
+  # admin_creds_dir: client/tools/provisioned/admin-admin
+  # recorder_creds_dir: client/tools/provisioned/decode-recorder
+  # wifi_ssid: "YourWiFi"
+  # wifi_password: "YourPassword"
+  # authorized_listener_ips:
+  #   - 192.168.1.73
+  # time_servers:
+  #   - pool.ntp.org
+  # audio_preamp_gain: 4              # 1..8
+  # audio_adc_gain: 32                # 0..255
+  # ca_key_path: client/tools/pki/ca_private_key.pem
+  # ca_cert_path: client/tools/pki/ca_cert.pem
+

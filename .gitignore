@@ -29,6 +29,7 @@ client/tools/keys/*
 # Local secrets
 .secrets/*.env
 !.secrets/*.example.env
+azt.conf
 
 # Generated local test/provisioning artifacts
 client/tools/provisioned/

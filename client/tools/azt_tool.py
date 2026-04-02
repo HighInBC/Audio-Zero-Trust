@@ -15,6 +15,7 @@ if str(CLIENT_ROOT) not in sys.path:
 from tools.azt_cli import argparsing as cli_argparsing
 from tools.azt_cli import handler_map as cli_handler_map
 from tools.azt_cli.output import emit_envelope, exception_detail
+from tools.azt_sdk import config as sdk_config
 from tools.azt_sdk.services import operations_service as ops
 
 
@@ -418,7 +419,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
     try:
+        sdk_config.apply_runtime_defaults(args, repo_root=REPO_ROOT)
         return int(args.func(args))
     except Exception as e:
         if bool(getattr(args, "as_json", False)):

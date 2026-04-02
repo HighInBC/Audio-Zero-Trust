@@ -19,6 +19,9 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument("--config", default="azt.conf", help="Path to local AZT config file (default: ./azt.conf)")
+    p.add_argument("--no-config", action="store_true", help="Disable auto-loading defaults from config file")
+
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
     sp = sub.add_parser("sign-config", help="Sign an unsigned AZT config JSON with admin Ed25519 key")
