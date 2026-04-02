@@ -9,8 +9,27 @@ from tools.azt_sdk.services.provisioning_service import configure_device
 
 def run(args: argparse.Namespace) -> int:
     try:
-        admin_dir = args.admin_creds_dir
-        recorder_dir = args.recorder_creds_dir or admin_dir
+        admin_dir = (args.admin_creds_dir or "").strip()
+        recorder_dir = (args.recorder_creds_dir or "").strip() or admin_dir
+
+        missing: list[str] = []
+        if not admin_dir:
+            missing.append("--admin-creds-dir")
+        if not (getattr(args, "identity", "") or "").strip():
+            missing.append("--identity")
+        if not (getattr(args, "wifi_ssid", "") or "").strip():
+            missing.append("--wifi-ssid")
+        if not (getattr(args, "wifi_password", "") or "").strip():
+            missing.append("--wifi-password")
+        if missing:
+            emit_envelope(
+                command="configure-device",
+                ok=False,
+                error="CONFIGURE_DEVICE_ARGS",
+                payload={"detail": f"missing required options: {', '.join(missing)}"},
+                as_json=bool(getattr(args, "as_json", False)),
+            )
+            return 1
         ota_ver_raw = (getattr(args, "ota_version_code", "") or "").strip().lower()
         ota_ver = None
         if ota_ver_raw:
