@@ -1,0 +1,8 @@
+# Audio-Zero-Trust client/tooling Python dependencies
+platformio
+cryptography
+pyserial
+PyYAML
+requests
+intelhex
+argon2-cffi
