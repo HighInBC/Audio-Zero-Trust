@@ -174,7 +174,17 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
 
     if_version = int(args.if_version)
     if if_version < 0:
-        st = ops.get_json(f"http://{args.host}:{int(args.port)}/api/v0/config/state", timeout=int(args.timeout))
+        try:
+            st = ops.get_json(f"http://{args.host}:{int(args.port)}/api/v0/config/state", timeout=int(args.timeout))
+        except Exception as e:
+            emit_envelope(
+                command="config-patch",
+                ok=False,
+                error="CONFIG_PATCH_STATE_FETCH_FAILED",
+                payload={"detail": exception_detail("config_patch.state_get", e, context={"host": args.host, "port": int(args.port)})},
+                as_json=bool(getattr(args, "as_json", False)),
+            )
+            return 1
         if not st.get("ok"):
             emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_STATE_FETCH_FAILED", payload={"state": st}, as_json=bool(getattr(args, "as_json", False)))
             return 1
