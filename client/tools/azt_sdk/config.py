@@ -56,6 +56,14 @@ def _set_if_unset(args: argparse.Namespace, arg_name: str, value: Any) -> None:
         setattr(args, arg_name, value)
 
 
+def _set_if_matches(args: argparse.Namespace, arg_name: str, value: Any, defaults: set[Any]) -> None:
+    if not _has_attr(args, arg_name):
+        return
+    cur = getattr(args, arg_name)
+    if cur in defaults:
+        setattr(args, arg_name, value)
+
+
 def _expand_template(template: str, args: argparse.Namespace) -> str:
     identity = str(getattr(args, "identity", "") or "").strip()
     device_label = str(getattr(args, "device_label", "") or "").strip()
@@ -91,9 +99,9 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         if "host" in conf_defaults:
             _set_if_unset(args, "host", str(conf_defaults["host"]))
         if "http_port" in conf_defaults:
-            _set_if_unset(args, "port", int(conf_defaults["http_port"]))
+            _set_if_matches(args, "port", int(conf_defaults["http_port"]), {8080})
         if "timeout_seconds" in conf_defaults:
-            _set_if_unset(args, "timeout", int(conf_defaults["timeout_seconds"]))
+            _set_if_matches(args, "timeout", int(conf_defaults["timeout_seconds"]), {10, 15, 45})
 
     if command == "tls-bootstrap" and "https_port" in conf_defaults:
         _set_if_unset(args, "https_port", int(conf_defaults["https_port"]))
@@ -107,7 +115,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
 
     if command in {"erase-device", "flash-device", "configure-device", "ip-detect", "provision-unit"}:
         if "serial_port" in conf_defaults:
-            _set_if_unset(args, "port", str(conf_defaults["serial_port"]))
+            _set_if_matches(args, "port", str(conf_defaults["serial_port"]), {"", "/dev/ttyUSB0"})
 
     if command in {"erase-device", "flash-device", "ota-bundle-create"} and "target" in conf_defaults:
         _set_if_unset(args, "target", str(conf_defaults["target"]))
@@ -119,13 +127,16 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
             ("wifi_ssid", "wifi_ssid"),
             ("wifi_password", "wifi_password"),
             ("host", "host"),
-            ("tls_valid_days", "tls_valid_days"),
-            ("tls_reboot_wait_seconds", "tls_reboot_wait_seconds"),
             ("audio_preamp_gain", "audio_preamp_gain"),
             ("audio_adc_gain", "audio_adc_gain"),
         ]:
             if ck in conf_defaults:
                 _set_if_unset(args, an, conf_defaults[ck])
+
+        if "tls_valid_days" in conf_defaults:
+            _set_if_matches(args, "tls_valid_days", int(conf_defaults["tls_valid_days"]), {180})
+        if "tls_reboot_wait_seconds" in conf_defaults:
+            _set_if_matches(args, "tls_reboot_wait_seconds", int(conf_defaults["tls_reboot_wait_seconds"]), {8})
 
         if "mdns_enabled" in conf_defaults:
             cfg_enabled = bool(conf_defaults["mdns_enabled"])
