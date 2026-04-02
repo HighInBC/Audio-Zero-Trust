@@ -113,6 +113,8 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command in {"apply-config", "config-patch", "certificate-issue", "key-match-check", "reboot-device", "tls-cert-issue", "tls-bootstrap", "ota-bundle-create"}:
         if "admin_key_path" in conf_defaults:
             _set_if_unset(args, "key_path", str(conf_defaults["admin_key_path"]))
+        elif "admin_creds_dir" in conf_defaults and _is_unset(args, "key_path"):
+            _set_if_unset(args, "key_path", str(Path(str(conf_defaults["admin_creds_dir"])) / "private_key.pem"))
 
     if command in {"erase-device", "flash-device", "configure-device", "ip-detect", "provision-unit"}:
         if "serial_port" in conf_defaults:
