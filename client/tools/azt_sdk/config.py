@@ -83,6 +83,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         "state-get",
         "attestation-get",
         "certificate-get",
+        "certificate-issue",
         "certificate-post",
         "key-match-check",
         "reboot-device",
