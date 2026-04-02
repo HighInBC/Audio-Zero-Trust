@@ -53,6 +53,11 @@ def cmd_apply_config(args: argparse.Namespace) -> int:
         emit_envelope(command="apply-config", ok=False, error="APPLY_CONFIG_ARGS", payload={"detail": "host, --in and --key are required (or use --interactive)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
+    key_path = Path(str(args.key_path))
+    if not key_path.exists() or key_path.is_dir():
+        emit_envelope(command="apply-config", ok=False, error="APPLY_CONFIG_ARGS", payload={"detail": f"--key must point to a private key PEM file: {args.key_path}"}, as_json=bool(getattr(args, "as_json", False)))
+        return 1
+
     ok, payload = ops.apply_config(
         in_path=args.in_path,
         key_path=args.key_path,
