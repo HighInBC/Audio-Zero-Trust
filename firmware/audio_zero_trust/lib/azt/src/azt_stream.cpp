@@ -349,6 +349,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   uint32_t pending_dropped_frames = 0;
   uint32_t contiguous_drop_frames = 0;
   bool disconnected_for_stall = false;
+  const bool started_with_certificate = state.device_certificate_serial.length() > 0;
 
   TelemetryAccumulator telem{};
   int drop_test_remaining = drop_test_frames;
@@ -359,6 +360,10 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   while (client.connected() &&
          (!finite_stream || static_cast<uint64_t>(esp_timer_get_time()) < deadline)) {
     const uint64_t t1 = static_cast<uint64_t>(esp_timer_get_time());
+
+    if (started_with_certificate && state.device_certificate_serial.length() == 0) {
+      break;
+    }
 
     const uint64_t ingress_dropped = mic_ring_take_dropped_newest(*mic_ring);
     if (ingress_dropped > 0) {
