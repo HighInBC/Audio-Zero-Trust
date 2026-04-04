@@ -96,6 +96,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         "tls-bootstrap",
         "mdns-fqdn-get",
         "ota-bundle-post",
+        "certificate-revoke",
     }:
         if "host" in conf_defaults:
             _set_if_unset(args, "host", str(conf_defaults["host"]))
@@ -110,7 +111,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command == "stream-redirect-check" and "stream_port" in conf_defaults:
         _set_if_unset(args, "stream_port", int(conf_defaults["stream_port"]))
 
-    if command in {"apply-config", "config-patch", "certificate-issue", "key-match-check", "reboot-device", "tls-cert-issue", "tls-bootstrap", "ota-bundle-create"}:
+    if command in {"apply-config", "config-patch", "certificate-issue", "certificate-revoke", "key-match-check", "reboot-device", "tls-cert-issue", "tls-bootstrap", "ota-bundle-create"}:
         if "admin_key_path" in conf_defaults:
             _set_if_unset(args, "key_path", str(conf_defaults["admin_key_path"]))
         elif "admin_creds_dir" in conf_defaults and _is_unset(args, "key_path"):

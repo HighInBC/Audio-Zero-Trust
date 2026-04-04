@@ -23,7 +23,8 @@ def run(args: argparse.Namespace) -> int:
                 command="certificate-revoke",
                 ok=False,
                 error="CERTIFICATE_REVOKE_ARGS",
-                payload={"detail": f"missing required options: {', '.join(missing)}"},
+                detail=f"missing required options: {', '.join(missing)}",
+                payload={"missing": missing},
                 as_json=bool(getattr(args, "as_json", False)),
             )
             return 1
@@ -34,7 +35,8 @@ def run(args: argparse.Namespace) -> int:
                 command="certificate-revoke",
                 ok=False,
                 error="CERTIFICATE_REVOKE_ARGS",
-                payload={"detail": f"--key must be a PEM file, got directory: {key_path}"},
+                detail=f"--key must be a PEM file, got directory: {key_path}",
+                payload={"key_path": key_path},
                 as_json=bool(getattr(args, "as_json", False)),
             )
             return 1
