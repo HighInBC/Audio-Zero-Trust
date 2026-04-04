@@ -125,7 +125,15 @@ def emit_envelope(*, command: str, ok: bool, payload: dict[str, Any] | None = No
             print(_paint("detail:", "danger" if not env["ok"] else "info", sys.stdout))
             print(json.dumps(env["detail"], indent=2))
 
-    msgs = env.get("payload", {}).get("messages")
+    payload_obj = env.get("payload", {}) if isinstance(env.get("payload"), dict) else {}
+    human_obj = payload_obj.get("human") if isinstance(payload_obj.get("human"), dict) else {}
+    machine_obj = payload_obj.get("machine") if isinstance(payload_obj.get("machine"), dict) else payload_obj
+
+    summary = human_obj.get("summary") if isinstance(human_obj.get("summary"), str) else ""
+    if summary:
+        print(_paint(summary, "info" if env["ok"] else "danger", sys.stdout))
+
+    msgs = machine_obj.get("messages") if isinstance(machine_obj, dict) else None
     if isinstance(msgs, list):
         for m in msgs:
             if not isinstance(m, dict):
@@ -137,7 +145,3 @@ def emit_envelope(*, command: str, ok: bool, payload: dict[str, Any] | None = No
             code = str(m.get("code") or "").strip()
             line = f"{code}: {text}" if code else text
             emit_level(level, line, stream=sys.stderr if level in ("caution", "danger") else sys.stdout)
-
-    if env.get("payload"):
-        print(_paint("payload:", "info", sys.stdout))
-        print(json.dumps(env["payload"], indent=2))

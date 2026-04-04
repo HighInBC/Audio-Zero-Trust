@@ -44,6 +44,15 @@ def _is_valid_mdns_hostname(host: str) -> bool:
     return bool(_MDNS_HOST_RE.fullmatch(h))
 
 
+def _sdk_result(code: int, ok: bool, err: str | None, machine: dict | None, summary: str) -> tuple[int, bool, str | None, dict]:
+    machine_obj = dict(machine or {})
+    human_obj = {"summary": summary}
+    out = {"machine": machine_obj, "human": human_obj}
+    if isinstance(machine_obj.get("messages"), list):
+        out["messages"] = machine_obj.get("messages")
+    return code, ok, err, out
+
+
 def configure_device(
     *,
     admin_creds_dir: str,
@@ -104,16 +113,22 @@ def configure_device(
     admin_pub_b64 = ed25519_public_b64_from_private_key(priv_path)
     fp = ed25519_fp_hex_from_private_key(priv_path)
 
+    def ok_result(code: int, machine: dict, summary: str) -> tuple[int, bool, str | None, dict]:
+        return _sdk_result(code, True, None, machine, summary)
+
+    def fail_result(code: int, err_code: str, machine: dict, summary: str) -> tuple[int, bool, str | None, dict]:
+        return _sdk_result(code, False, err_code, machine, summary)
+
     # Input validation for protocol-facing fields.
     wifi_mode = (wifi_mode or "sta").strip().lower()
     if wifi_mode not in {"sta", "ap"}:
-        return 19, False, "INVALID_WIFI_MODE", {"detail": wifi_mode}
+        return fail_result(19, "INVALID_WIFI_MODE", {"detail": wifi_mode}, "Invalid Wi-Fi mode. Use sta or ap.")
     if wifi_mode == "sta":
         if not (wifi_ssid or "").strip() or not (wifi_password or "").strip():
-            return 20, False, "INVALID_WIFI_STA", {"detail": "wifi_ssid and wifi_password required for sta mode"}
+            return fail_result(20, "INVALID_WIFI_STA", {"detail": "wifi_ssid and wifi_password required for sta mode"}, "STA mode requires Wi-Fi SSID and password.")
     else:
         if not (wifi_ap_ssid or "").strip() or len((wifi_ap_password or "").strip()) < 8:
-            return 21, False, "INVALID_WIFI_AP", {"detail": "wifi_ap_ssid and wifi_ap_password(min 8) required for ap mode"}
+            return fail_result(21, "INVALID_WIFI_AP", {"detail": "wifi_ap_ssid and wifi_ap_password(min 8) required for ap mode"}, "AP mode requires AP SSID and password (min 8 chars).")
 
     ota_signer_public_key_pem = (ota_signer_public_key_pem or "").strip()
     mdns_hostname = (mdns_hostname or "").strip().lower()
@@ -302,16 +317,16 @@ def configure_device(
     if state0 is None or serial_required:
         if not allow_serial_bootstrap:
             if serial_required:
-                return 9, False, "SERIAL_REQUIRED_FOR_OTA_CONTROLS", {
+                return fail_result(9, "SERIAL_REQUIRED_FOR_OTA_CONTROLS", {
                     **common,
                     "detail": "serial bootstrap required for OTA floor controls",
                     "where": "provisioning_service.configure_device.serial_gate",
-                }
-            return 9, False, "HTTP_STATE_UNREACHABLE_SERIAL_DISABLED", {
+                }, "Serial bootstrap is required for OTA floor/signer controls.")
+            return fail_result(9, "HTTP_STATE_UNREACHABLE_SERIAL_DISABLED", {
                 **common,
                 "detail": "HTTP state unreachable and serial bootstrap not allowed",
                 "where": "provisioning_service.configure_device.serial_gate",
-            }
+            }, "Device state is unreachable over HTTP and serial bootstrap is disabled.")
 
         ok_serial, ip_from_serial, serial_detail = serial_apply_signed_config(
             port,
@@ -320,7 +335,7 @@ def configure_device(
             timeout_s=max(20, int(ip_timeout)),
         )
         if not ok_serial:
-            return 7, False, "SERIAL_BOOTSTRAP_FAILED", {**common, "serial_detail": serial_detail}
+            return fail_result(7, "SERIAL_BOOTSTRAP_FAILED", {**common, "serial_detail": serial_detail}, "Serial bootstrap failed.")
 
         if ip_from_serial:
             device_ip = ip_from_serial
@@ -329,7 +344,7 @@ def configure_device(
 
         if not device_ip:
             # Serial apply succeeded; do not fail purely because IP extraction missed a log format variant.
-            return 0, True, None, {
+            return ok_result(0, {
                 **common,
                 "path": "serial-bootstrap",
                 "state_after": None,
@@ -342,7 +357,7 @@ def configure_device(
                     }
                 ],
                 "detail": "device IP not detected from serial output; provide --ip for deterministic postcheck",
-            }
+            }, "Configuration applied over serial, but IP was not detected from serial logs.")
 
         # Phase 2: if TLS was deferred until IP was known, issue TLS material now and apply signed config again.
         if bool(tls_bootstrap) and tls_deferred_until_ip:
@@ -383,12 +398,12 @@ def configure_device(
                 time.sleep(2.0 + i)
 
             if not ok_phase2:
-                return 10, False, "SERIAL_TLS_PHASE2_FAILED", {
+                return fail_result(10, "SERIAL_TLS_PHASE2_FAILED", {
                     **common,
                     "ip": device_ip,
                     "phase2_attempts": phase2_attempts,
                     "serial_detail": phase2_detail,
-                }
+                }, "TLS phase-2 apply over serial failed.")
             if ip_phase2:
                 device_ip = ip_phase2
                 common["ip"] = device_ip
@@ -427,7 +442,7 @@ def configure_device(
 
         if state1 is None:
             # Serial apply already succeeded; avoid hard-failing on transient network/API startup race.
-            return 0, True, None, {
+            return ok_result(0, {
                 **common,
                 "path": "serial-bootstrap",
                 "state_after": None,
@@ -441,30 +456,40 @@ def configure_device(
                     }
                 ],
                 "postcheck_target": postcheck_target,
-            }
+            }, "Configuration applied over serial, but post-check endpoint was temporarily unreachable.")
 
         ok = state1.get("admin_fingerprint_hex") == fp
-        return (0 if ok else 6), ok, (None if ok else "POSTCHECK_FP_MISMATCH"), {
+        return ok_result(0, {
             **common,
             "path": "serial-bootstrap",
             "state_after": state1,
-        }
+        }, "Configuration applied successfully via serial bootstrap.") if ok else fail_result(6, "POSTCHECK_FP_MISMATCH", {
+            **common,
+            "path": "serial-bootstrap",
+            "state_after": state1,
+        }, "Post-check failed: admin fingerprint mismatch.")
 
     state_name = state0.get("state")
     state_fp = str(state0.get("admin_fingerprint_hex") or "")
     if state_name != "UNSET_ADMIN":
         if state_fp == fp:
-            return 0, True, None, {**common, "path": "http-existing", "state": state_name, "state_before": state0}
-        return 5, False, "MISSING_ADMIN_KEY_ARTIFACT", {**common, "state": state_name, "fingerprint": state_fp}
+            return ok_result(0, {**common, "path": "http-existing", "state": state_name, "state_before": state0}, "Device already configured with this admin key.")
+        return fail_result(5, "MISSING_ADMIN_KEY_ARTIFACT", {**common, "state": state_name, "fingerprint": state_fp}, "Device is managed by a different admin key.")
 
     r1 = http_json("POST", base + "/api/v0/config", signed)
     r2 = http_json("POST", base + "/api/v0/config", signed)
     state1 = http_json("GET", base + "/api/v0/config/state")
     ok = state1.get("admin_fingerprint_hex") == fp
-    return (0 if ok else 6), ok, (None if ok else "POSTCHECK_FP_MISMATCH"), {
+    return ok_result(0, {
         **common,
         "path": "http",
         "state_after": state1,
         "initial_signed_result": r1,
         "signed_result": r2,
-    }
+    }, "Configuration applied successfully over HTTP.") if ok else fail_result(6, "POSTCHECK_FP_MISMATCH", {
+        **common,
+        "path": "http",
+        "state_after": state1,
+        "initial_signed_result": r1,
+        "signed_result": r2,
+    }, "Post-check failed: admin fingerprint mismatch.")
