@@ -298,12 +298,20 @@ def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: 
     upload_res = None
     cert_ser = cert_serial.strip() or issue_id
     if not no_upload_device_cert:
+        cert_challenge = get_json(f"{base}/api/v0/device/certificate/challenge", timeout=timeout)
+        if not cert_challenge.get("ok"):
+            return False, "ERR_DEVICE_CERT_CHALLENGE", {"challenge": cert_challenge}
+        cert_nonce = str(cert_challenge.get("nonce") or "")
+        if not cert_nonce:
+            return False, "ERR_DEVICE_CERT_CHALLENGE", {"detail": "missing nonce"}
+
         cert_payload = {
             "device_sign_public_key_b64": state_dev_pub,
             "device_sign_fingerprint_hex": state_dev_fp,
             "device_chip_id_hex": str(state.get("device_chip_id_hex") or ""),
             "admin_signer_fingerprint_hex": signer_fp,
             "certificate_serial": cert_ser,
+            "nonce": cert_nonce,
         }
         cert_payload_raw = json.dumps(cert_payload, separators=(",", ":")).encode("utf-8")
         cert_sig_raw = sign_bytes(keyp.read_bytes(), cert_payload_raw)

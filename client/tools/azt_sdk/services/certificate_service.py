@@ -89,6 +89,13 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
     if auto_decode:
         authorized_consumers.append("auto-decode")
 
+    cert_challenge = get_json(f"{b}/api/v0/device/certificate/challenge", timeout=timeout)
+    if not bool(cert_challenge.get("ok")):
+        return False, "CERTIFICATE_CHALLENGE_FAILED", {"challenge_response": cert_challenge}
+    cert_nonce = str(cert_challenge.get("nonce") or "")
+    if not cert_nonce:
+        return False, "CERTIFICATE_CHALLENGE_FAILED", {"detail": "missing nonce in challenge response"}
+
     payload = {
         "certificate_version": 1,
         "certificate_type": "device_key_binding",
@@ -102,6 +109,7 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
         "issued_at_utc": issued_at_utc,
         "valid_until_utc": valid_until_utc,
         "certificate_serial": cert_serial,
+        "nonce": cert_nonce,
         "signature_algorithm": "ed25519",
     }
     payload_raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -123,6 +131,7 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
     return True, None, {
         "certificate": cert_doc,
         "certificate_serial": cert_serial,
+        "nonce": cert_nonce,
         "attestation_source": att_source,
         "post_response": post_res,
     }

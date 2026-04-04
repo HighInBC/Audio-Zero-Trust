@@ -40,6 +40,13 @@ static const char* kOtaSignerPublicKeyPem = "6n6Ge+vZPN6HC+09FrDdBTlaEzQ0di799Fu
 // Reboot challenge state (single active nonce).
 static String g_reboot_nonce = "";
 static uint32_t g_reboot_nonce_expires_ms = 0;
+
+// Certificate/TLS challenge state (single active nonce per operation).
+static String g_cert_nonce = "";
+static uint32_t g_cert_nonce_expires_ms = 0;
+static String g_tls_cert_nonce = "";
+static uint32_t g_tls_cert_nonce_expires_ms = 0;
+
 static constexpr uint32_t kRebootNonceTtlMs = 10000;
 
 static String json_quote(const String& in) {
@@ -61,6 +68,32 @@ static String json_quote(const String& in) {
   }
   out += "\"";
   return out;
+}
+
+
+static String issue_single_use_nonce(String& out_nonce, uint32_t& out_expires_ms, uint32_t ttl_ms) {
+  uint8_t rnd[16] = {0};
+  esp_fill_random(rnd, sizeof(rnd));
+  out_nonce = hex_lower(rnd, sizeof(rnd));
+  out_expires_ms = millis() + ttl_ms;
+  return out_nonce;
+}
+
+static bool validate_active_nonce(const String& provided,
+                                  String& expected,
+                                  uint32_t& expires_ms,
+                                  uint32_t now_ms) {
+  if (expected.length() == 0 || expires_ms == 0 || static_cast<int32_t>(now_ms - expires_ms) > 0) {
+    expected = "";
+    expires_ms = 0;
+    return false;
+  }
+  return provided.length() > 0 && provided == expected;
+}
+
+static void consume_nonce(String& expected, uint32_t& expires_ms) {
+  expected = "";
+  expires_ms = 0;
 }
 
 static String wrap_pem(const char* begin_label, const char* end_label, const uint8_t* der, size_t der_len) {
@@ -1112,10 +1145,7 @@ HttpDispatchResult dispatch_request(const String& method,
       return r;
     }
 
-    uint8_t rnd[16] = {0};
-    esp_fill_random(rnd, sizeof(rnd));
-    g_reboot_nonce = hex_lower(rnd, sizeof(rnd));
-    g_reboot_nonce_expires_ms = millis() + kRebootNonceTtlMs;
+    (void)issue_single_use_nonce(g_reboot_nonce, g_reboot_nonce_expires_ms, kRebootNonceTtlMs);
 
     r.code = 200;
     r.content_type = "application/json";
@@ -1147,16 +1177,14 @@ HttpDispatchResult dispatch_request(const String& method,
     String signer_fp = String((const char*)(doc["signer_fingerprint_hex"] | ""));
 
     uint32_t now_ms = millis();
-    if (g_reboot_nonce.length() == 0 || g_reboot_nonce_expires_ms == 0 || static_cast<int32_t>(now_ms - g_reboot_nonce_expires_ms) > 0) {
-      g_reboot_nonce = "";
-      g_reboot_nonce_expires_ms = 0;
+    if (!validate_active_nonce(nonce, g_reboot_nonce, g_reboot_nonce_expires_ms, now_ms)) {
       r.code = 401;
       r.content_type = "application/json";
       r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_CHALLENGE_EXPIRED\"}";
       return r;
     }
 
-    if (nonce.length() == 0 || nonce != g_reboot_nonce || sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.admin_fingerprint_hex) {
+    if (sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.admin_fingerprint_hex) {
       r.code = 401;
       r.content_type = "application/json";
       r.body = "{\"ok\":false,\"error\":\"ERR_REBOOT_AUTH\"}";
@@ -1176,8 +1204,7 @@ HttpDispatchResult dispatch_request(const String& method,
     }
 
     // Consume nonce on first successful use (single-use challenge).
-    g_reboot_nonce = "";
-    g_reboot_nonce_expires_ms = 0;
+    consume_nonce(g_reboot_nonce, g_reboot_nonce_expires_ms);
 
     r.code = 200;
     r.content_type = "application/json";
@@ -1258,6 +1285,21 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
+  if (method == "GET" && path == "/api/v0/device/certificate/challenge") {
+    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_AUTH_NOT_READY\"}";
+      return r;
+    }
+    (void)issue_single_use_nonce(g_cert_nonce, g_cert_nonce_expires_ms, kRebootNonceTtlMs);
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"op\":\"device_certificate\",\"nonce\":" + json_quote(g_cert_nonce) +
+             ",\"ttl_ms\":" + String(static_cast<unsigned long>(kRebootNonceTtlMs)) + "}";
+    return r;
+  }
+
   if (method == "POST" && path == "/api/v0/device/certificate") {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, body);
@@ -1302,6 +1344,15 @@ HttpDispatchResult dispatch_request(const String& method,
     String rec_fp = String((const char*)(payload_doc["recording_fingerprint_hex"] | ""));
     String admin_fp = String((const char*)(payload_doc["admin_signer_fingerprint_hex"] | ""));
     String cert_serial = String((const char*)(payload_doc["certificate_serial"] | ""));
+    String cert_nonce = String((const char*)(payload_doc["nonce"] | ""));
+
+    uint32_t cert_now_ms = millis();
+    if (!validate_active_nonce(cert_nonce, g_cert_nonce, g_cert_nonce_expires_ms, cert_now_ms)) {
+      r.code = 401;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CERT_CHALLENGE_EXPIRED\"}";
+      r.content_type = "application/json";
+      return r;
+    }
 
     if (dev_pub != state.device_sign_public_key_b64 || dev_fp != state.device_sign_fingerprint_hex || chip_id != state.device_chip_id_hex) {
       r.code = 400;
@@ -1370,6 +1421,8 @@ HttpDispatchResult dispatch_request(const String& method,
     }
     p.end();
 
+    consume_nonce(g_cert_nonce, g_cert_nonce_expires_ms);
+
     r.code = 200;
     r.body = "{\"ok\":true,\"stored\":true,\"certificate_serial\":\"" + cert_serial + "\"}";
     r.content_type = "application/json";
@@ -1401,6 +1454,21 @@ HttpDispatchResult dispatch_request(const String& method,
              ",\"tls_certificate_serial\":" + json_quote(state.tls_certificate_serial) +
              ",\"tls_san_hosts_csv\":" + json_quote(state.tls_san_hosts_csv) + "}";
     r.content_type = "application/json";
+    return r;
+  }
+
+  if (method == "GET" && path == "/api/v0/tls/cert/challenge") {
+    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_TLS_AUTH_NOT_READY\"}";
+      return r;
+    }
+    (void)issue_single_use_nonce(g_tls_cert_nonce, g_tls_cert_nonce_expires_ms, kRebootNonceTtlMs);
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"op\":\"tls_cert\",\"nonce\":" + json_quote(g_tls_cert_nonce) +
+             ",\"ttl_ms\":" + String(static_cast<unsigned long>(kRebootNonceTtlMs)) + "}";
     return r;
   }
 
@@ -1454,6 +1522,15 @@ HttpDispatchResult dispatch_request(const String& method,
     String tls_srv_cert = String((const char*)(payload_doc["tls_server_certificate_pem"] | ""));
     String tls_srv_key = String((const char*)(payload_doc["tls_server_private_key_pem"] | ""));
     String tls_ca_cert = String((const char*)(payload_doc["tls_ca_certificate_pem"] | ""));
+    String tls_nonce = String((const char*)(payload_doc["nonce"] | ""));
+
+    uint32_t tls_now_ms = millis();
+    if (!validate_active_nonce(tls_nonce, g_tls_cert_nonce, g_tls_cert_nonce_expires_ms, tls_now_ms)) {
+      r.code = 401;
+      r.body = "{\"ok\":false,\"error\":\"ERR_TLS_CHALLENGE_EXPIRED\"}";
+      r.content_type = "application/json";
+      return r;
+    }
 
     if (dev_fp != state.device_sign_fingerprint_hex || chip_id != state.device_chip_id_hex || admin_fp != state.admin_fingerprint_hex) {
       r.code = 401;
@@ -1502,6 +1579,8 @@ HttpDispatchResult dispatch_request(const String& method,
     state.tls_server_cert_configured = true;
     state.tls_ca_cert_configured = tls_ca_cert.length() > 0;
     state.tls_certificate_serial = cert_serial;
+
+    consume_nonce(g_tls_cert_nonce, g_tls_cert_nonce_expires_ms);
 
     r.code = 200;
     r.body = "{\"ok\":true,\"stored\":true,\"tls_certificate_serial\":" + json_quote(cert_serial) + "}";

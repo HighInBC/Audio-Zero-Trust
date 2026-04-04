@@ -164,6 +164,14 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
     ca_key, ca_cert, _, active_ca_cert_path = _load_ca_signer(ca_key_path=ca_key_path, ca_cert_path=ca_cert_path)
 
     b = base_url(host=host, port=port, scheme=scheme)
+    tls_challenge_url = f"{b}/api/v0/tls/cert/challenge"
+    tls_challenge = get_json(tls_challenge_url, timeout=timeout)
+    if not tls_challenge.get("ok"):
+        raise RuntimeError(f"tls cert challenge failed at {tls_challenge_url}: {tls_challenge}")
+    tls_nonce = str(tls_challenge.get("nonce") or "")
+    if not tls_nonce:
+        raise RuntimeError("tls cert challenge response missing nonce")
+
     csr_url = f"{b}/api/v0/tls/csr"
     csr_res = get_json(csr_url, timeout=timeout)
     if not csr_res.get("ok"):
@@ -231,6 +239,7 @@ def tls_cert_issue_and_install(*, host: str, port: int, timeout: int, admin_key_
         "tls_server_certificate_pem": server_cert_pem,
         "tls_server_private_key_pem": server_key_pem,
         "tls_ca_certificate_pem": ca_cert_pem,
+        "nonce": tls_nonce,
     }
     payload_raw = json.dumps(payload_obj, separators=(",", ":")).encode("utf-8")
     sig_b64 = base64.b64encode(admin_priv.sign(payload_raw)).decode("ascii")
