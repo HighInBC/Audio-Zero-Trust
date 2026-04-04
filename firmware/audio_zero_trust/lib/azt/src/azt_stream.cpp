@@ -194,6 +194,15 @@ static bool format_utc_iso8601(time_t t, String& out) {
   return true;
 }
 
+static bool is_active_certificate_serial(const String& cert_serial) {
+  if (cert_serial.length() == 0) return false;
+  Preferences p;
+  if (!p.begin("aztcfg", true)) return false;
+  String stored = p.getString("dev_cert_sn", "");
+  p.end();
+  return stored.length() > 0 && stored == cert_serial;
+}
+
 static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETKEYBYTES]) {
   Preferences p;
   p.begin("aztcfg", true);
@@ -349,7 +358,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   uint32_t pending_dropped_frames = 0;
   uint32_t contiguous_drop_frames = 0;
   bool disconnected_for_stall = false;
-  const bool started_with_certificate = state.device_certificate_serial.length() > 0;
+  const String started_certificate_serial = state.device_certificate_serial;
+  const bool started_with_certificate = started_certificate_serial.length() > 0;
 
   TelemetryAccumulator telem{};
   int drop_test_remaining = drop_test_frames;
@@ -361,7 +371,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
          (!finite_stream || static_cast<uint64_t>(esp_timer_get_time()) < deadline)) {
     const uint64_t t1 = static_cast<uint64_t>(esp_timer_get_time());
 
-    if (started_with_certificate && state.device_certificate_serial.length() == 0) {
+    if (started_with_certificate && !is_active_certificate_serial(started_certificate_serial)) {
       break;
     }
 
