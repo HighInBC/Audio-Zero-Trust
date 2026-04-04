@@ -14,8 +14,11 @@ struct AppState {
   String recording_pubkey_pem;
   String recording_fingerprint_hex;
   String device_label;
+  String wifi_mode = "sta";  // sta | ap
   String wifi_ssid;
   String wifi_pass;
+  String wifi_ap_ssid;
+  String wifi_ap_pass;
   String authorized_listener_ips_csv;
   String time_servers_csv;
   bool mdns_enabled = false;

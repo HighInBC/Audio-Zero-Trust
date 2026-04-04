@@ -6,7 +6,12 @@ from cryptography.hazmat.primitives import serialization
 from tools.azt_client.crypto import load_private_key_auto
 
 
-def make_unsigned_config(identity: str, admin_pub_b64: str, admin_fp: str, wifi_ssid: str, wifi_password: str) -> dict:
+def make_unsigned_config(identity: str, admin_pub_b64: str, admin_fp: str, wifi_ssid: str, wifi_password: str, wifi_mode: str = "sta", wifi_ap_ssid: str = "", wifi_ap_password: str = "") -> dict:
+    wifi_mode = (wifi_mode or "sta").strip().lower()
+    if wifi_mode == "ap":
+        wifi_obj = {"mode": "ap", "ap_ssid": wifi_ap_ssid or wifi_ssid, "ap_password": wifi_ap_password or wifi_password}
+    else:
+        wifi_obj = {"mode": "sta", "ssid": wifi_ssid, "password": wifi_password}
     return {
         "config_version": 1,
         "device_label": identity,
@@ -16,7 +21,7 @@ def make_unsigned_config(identity: str, admin_pub_b64: str, admin_fp: str, wifi_
             "fingerprint_alg": "sha256-raw-ed25519-pub",
             "fingerprint_hex": admin_fp,
         },
-        "wifi": {"ssid": wifi_ssid, "password": wifi_password},
+        "wifi": wifi_obj,
         "time": {"server": "pool.ntp.org"},
         "audio": {"sample_rate_hz": 16000, "channels": 1, "sample_width_bytes": 2, "preamp_gain": 2, "adc_gain": 248},
     }

@@ -138,12 +138,24 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
 
     wifi_ssid = (getattr(args, "wifi_ssid", "") or "").strip()
     wifi_pass = (getattr(args, "wifi_pass", "") or "").strip()
-    if wifi_ssid or wifi_pass:
+    wifi_mode = (getattr(args, "wifi_mode", "") or "").strip().lower()
+    wifi_ap_ssid = (getattr(args, "wifi_ap_ssid", "") or "").strip()
+    wifi_ap_password = (getattr(args, "wifi_ap_password", "") or "").strip()
+    if wifi_mode not in {"", "sta", "ap"}:
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "--wifi-mode must be sta or ap"}, as_json=bool(getattr(args, "as_json", False)))
+        return 1
+    if wifi_ssid or wifi_pass or wifi_mode or wifi_ap_ssid or wifi_ap_password:
         pw = _ensure_obj(patch_obj, "wifi")
+        if wifi_mode:
+            pw["mode"] = wifi_mode
         if wifi_ssid:
             pw["ssid"] = wifi_ssid
         if wifi_pass:
             pw["pass"] = wifi_pass
+        if wifi_ap_ssid:
+            pw["ap_ssid"] = wifi_ap_ssid
+        if wifi_ap_password:
+            pw["ap_password"] = wifi_ap_password
 
     auth_ips = [str(x).strip() for x in (getattr(args, "authorized_listener_ips", []) or []) if str(x).strip()]
     if auth_ips:

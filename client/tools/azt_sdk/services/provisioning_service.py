@@ -51,6 +51,9 @@ def configure_device(
     identity: str,
     wifi_ssid: str,
     wifi_password: str,
+    wifi_mode: str = "sta",
+    wifi_ap_ssid: str = "",
+    wifi_ap_password: str = "",
     authorized_listener_ips: list[str],
     time_servers: list[str],
     no_time: bool,
@@ -102,6 +105,16 @@ def configure_device(
     fp = ed25519_fp_hex_from_private_key(priv_path)
 
     # Input validation for protocol-facing fields.
+    wifi_mode = (wifi_mode or "sta").strip().lower()
+    if wifi_mode not in {"sta", "ap"}:
+        return 19, False, "INVALID_WIFI_MODE", {"detail": wifi_mode}
+    if wifi_mode == "sta":
+        if not (wifi_ssid or "").strip() or not (wifi_password or "").strip():
+            return 20, False, "INVALID_WIFI_STA", {"detail": "wifi_ssid and wifi_password required for sta mode"}
+    else:
+        if not (wifi_ap_ssid or "").strip() or len((wifi_ap_password or "").strip()) < 8:
+            return 21, False, "INVALID_WIFI_AP", {"detail": "wifi_ap_ssid and wifi_ap_password(min 8) required for ap mode"}
+
     ota_signer_public_key_pem = (ota_signer_public_key_pem or "").strip()
     mdns_hostname = (mdns_hostname or "").strip().lower()
     if ota_version_code is not None and ota_version_code < 0:
@@ -141,7 +154,7 @@ def configure_device(
         if detected_ip:
             device_ip = detected_ip
 
-    unsigned_cfg = make_bootstrap(identity, admin_pub_b64, fp, wifi_ssid, wifi_password)
+    unsigned_cfg = make_bootstrap(identity, admin_pub_b64, fp, wifi_ssid, wifi_password, wifi_mode=wifi_mode, wifi_ap_ssid=wifi_ap_ssid, wifi_ap_password=wifi_ap_password)
     if authorized_listener_ips:
         unsigned_cfg["authorized_listener_ips"] = authorized_listener_ips
 
@@ -257,6 +270,8 @@ def configure_device(
         "recorder_creds_dir": str(recorder_dir),
         "admin_fingerprint_hex": fp,
         "recorder_fingerprint_hex": rec_fp,
+        "wifi_mode": wifi_mode,
+        "wifi_ap_ssid": (wifi_ap_ssid if wifi_mode == "ap" else ""),
         "authorized_listener_ips": authorized_listener_ips,
         "time_servers": resolved_time_servers,
         "no_time": no_time,

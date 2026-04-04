@@ -153,18 +153,36 @@ static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETK
   return olen == crypto_sign_ed25519_SECRETKEYBYTES;
 }
 
-static bool parse_wifi_values_variant(JsonVariant w, String& ssid, String& pass) {
+static bool parse_wifi_values_variant(JsonVariant w, String& mode, String& ssid, String& pass, String& ap_ssid, String& ap_pass) {
   if (w.isNull() || !w.is<JsonObject>()) return false;
-  const char* s = w["ssid"] | "";
-  const char* p = w["password"] | "";
-  if (strlen(s) == 0 || strlen(p) == 0) return false;
-  ssid = String(s);
-  pass = String(p);
+  String m = String((const char*)(w["mode"] | ""));
+  m.trim();
+  m.toLowerCase();
+  if (m.length() == 0) m = "sta";
+  if (m != "sta" && m != "ap") return false;
+
+  if (m == "sta") {
+    const char* s = w["ssid"] | "";
+    const char* p = w["password"] | w["pass"] | "";
+    if (strlen(s) == 0 || strlen(p) == 0) return false;
+    ssid = String(s);
+    pass = String(p);
+    ap_ssid = String((const char*)(w["ap_ssid"] | ""));
+    ap_pass = String((const char*)(w["ap_password"] | w["ap_pass"] | ""));
+  } else {
+    const char* s = w["ap_ssid"] | w["ssid"] | "";
+    const char* p = w["ap_password"] | w["ap_pass"] | w["password"] | w["pass"] | "";
+    if (strlen(s) == 0 || strlen(p) < 8) return false;
+    ap_ssid = String(s);
+    ap_pass = String(p);
+  }
+
+  mode = m;
   return true;
 }
 
-bool parse_wifi_values(JsonDocument& doc, String& ssid, String& pass) {
-  return parse_wifi_values_variant(doc["wifi"], ssid, pass);
+bool parse_wifi_values(JsonDocument& doc, String& mode, String& ssid, String& pass, String& ap_ssid, String& ap_pass) {
+  return parse_wifi_values_variant(doc["wifi"], mode, ssid, pass, ap_ssid, ap_pass);
 }
 
 static bool is_valid_ipv4_str(const String& s) {
@@ -419,10 +437,10 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     return r;
   }
 
-  String new_wifi_ssid, new_wifi_pass;
-  if (!parse_wifi_values(doc, new_wifi_ssid, new_wifi_pass)) {
+  String new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass;
+  if (!parse_wifi_values(doc, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass)) {
      r.code = 400;
-     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid wifi object (ssid/password required)\"}";
+     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid wifi object\"}";
      return r;
    }
 
@@ -613,7 +631,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
     state.audio_preamp_gain = new_audio_preamp_gain;
     state.audio_adc_gain = new_audio_adc_gain;
-    if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_ssid, new_wifi_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+    if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
       r.code = 500;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
       return r;
@@ -721,7 +739,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   state.audio_preamp_gain = new_audio_preamp_gain;
   state.audio_adc_gain = new_audio_adc_gain;
-  if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_ssid, new_wifi_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+  if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
     r.code = 500;
     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
     return r;
@@ -870,8 +888,11 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   String new_recording_pem = state.recording_pubkey_pem;
   String new_recording_fp = state.recording_fingerprint_hex;
   String new_device_label = state.device_label;
+  String new_wifi_mode = state.wifi_mode;
   String new_wifi_ssid = state.wifi_ssid;
   String new_wifi_pass = state.wifi_pass;
+  String new_wifi_ap_ssid = state.wifi_ap_ssid;
+  String new_wifi_ap_pass = state.wifi_ap_pass;
   String auth_ips_csv = state.authorized_listener_ips_csv;
   String time_servers_csv = state.time_servers_csv;
   bool new_mdns_enabled = state.mdns_enabled;
@@ -900,9 +921,9 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   }
 
   if (!patch["wifi"].isNull()) {
-    if (!parse_wifi_values_variant(patch["wifi"], new_wifi_ssid, new_wifi_pass)) {
+    if (!parse_wifi_values_variant(patch["wifi"], new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass)) {
       r.code = 400;
-      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid wifi object (ssid/password required)\"}";
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid wifi object\"}";
       return r;
     }
   }
@@ -976,8 +997,11 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
                          new_recording_pem,
                          new_recording_fp,
                          new_device_label,
+                         new_wifi_mode,
                          new_wifi_ssid,
                          new_wifi_pass,
+                         new_wifi_ap_ssid,
+                         new_wifi_ap_pass,
                          true,
                          auth_ips_csv,
                          time_servers_csv,
@@ -1494,7 +1518,7 @@ HttpDispatchResult dispatch_request(const String& method,
 
   if (method == "GET" && path == "/api/v0/config/state") {
     String status = !state.managed ? "UNSET_ADMIN" : (state.signed_config_ready ? "MANAGED" : "PENDING_SIGNED_CONFIG");
-    bool wifi_cfg = state.wifi_ssid.length() > 0 && state.wifi_pass.length() > 0;
+    bool wifi_cfg = (state.wifi_mode == "ap") ? (state.wifi_ap_ssid.length() > 0 && state.wifi_ap_pass.length() >= 8) : (state.wifi_ssid.length() > 0 && state.wifi_pass.length() > 0);
     bool recording_key_cfg = state.recording_pubkey_pem.length() > 0 && state.recording_fingerprint_hex.length() == 64;
     String ota_active_pem = state.ota_signer_override_public_key_pem.length() > 0 ? state.ota_signer_override_public_key_pem : String(kOtaSignerPublicKeyPem);
     String ota_active_fp;

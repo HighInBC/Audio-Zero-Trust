@@ -132,8 +132,11 @@ static bool ensure_device_keypair(AppState& state) {
   state.recording_pubkey_pem = "";
   state.recording_fingerprint_hex = "";
   state.device_label = "";
+  state.wifi_mode = "sta";
   state.wifi_ssid = "";
   state.wifi_pass = "";
+  state.wifi_ap_ssid = "";
+  state.wifi_ap_pass = "";
   state.authorized_listener_ips_csv = "";
   state.time_servers_csv = "";
   state.mdns_enabled = false;
@@ -210,8 +213,14 @@ void load_config_state(AppState& state) {
   state.recording_pubkey_pem = g_prefs.getString("rec_pem", "");
   state.recording_fingerprint_hex = g_prefs.getString("rec_fp", "");
   state.device_label = g_prefs.getString("dev_label", "");
+  state.wifi_mode = g_prefs.getString("wifi_mode", "sta");
+  state.wifi_mode.trim();
+  state.wifi_mode.toLowerCase();
+  if (state.wifi_mode != "sta" && state.wifi_mode != "ap") state.wifi_mode = "sta";
   state.wifi_ssid = g_prefs.getString("wifi_ssid", "");
   state.wifi_pass = g_prefs.getString("wifi_pass", "");
+  state.wifi_ap_ssid = g_prefs.getString("wifi_ap_ssid", "");
+  state.wifi_ap_pass = g_prefs.getString("wifi_ap_pass", "");
   state.authorized_listener_ips_csv = g_prefs.getString("auth_ips", "");
   state.time_servers_csv = g_prefs.getString("time_srv", "");
   state.mdns_enabled = g_prefs.getBool("mdns_en", false);
@@ -295,8 +304,11 @@ bool save_config_state(AppState& state,
                        const String& recording_pem,
                        const String& recording_fp,
                        const String& device_label,
+                       const String& wifi_mode,
                        const String& wifi_ssid,
                        const String& wifi_pass,
+                       const String& wifi_ap_ssid,
+                       const String& wifi_ap_pass,
                        bool signed_ok,
                        const String& authorized_listener_ips_csv,
                        const String& time_servers_csv,
@@ -313,8 +325,11 @@ bool save_config_state(AppState& state,
   ok = ok && g_prefs.putString("rec_pem", recording_pem) > 0;
   ok = ok && g_prefs.putString("rec_fp", recording_fp) > 0;
   ok = ok && g_prefs.putString("dev_label", device_label) > 0;
+  ok = ok && g_prefs.putString("wifi_mode", wifi_mode) > 0;
   ok = ok && g_prefs.putString("wifi_ssid", wifi_ssid) > 0;
   ok = ok && g_prefs.putString("wifi_pass", wifi_pass) > 0;
+  ok = ok && g_prefs.putString("wifi_ap_ssid", wifi_ap_ssid) > 0;
+  ok = ok && g_prefs.putString("wifi_ap_pass", wifi_ap_pass) > 0;
   if (authorized_listener_ips_csv.length() > 0) {
     ok = ok && g_prefs.putString("auth_ips", authorized_listener_ips_csv) > 0;
   } else {
@@ -343,8 +358,11 @@ bool save_config_state(AppState& state,
     state.recording_pubkey_pem = recording_pem;
     state.recording_fingerprint_hex = recording_fp;
     state.device_label = device_label;
+    state.wifi_mode = wifi_mode;
     state.wifi_ssid = wifi_ssid;
     state.wifi_pass = wifi_pass;
+    state.wifi_ap_ssid = wifi_ap_ssid;
+    state.wifi_ap_pass = wifi_ap_pass;
     state.authorized_listener_ips_csv = authorized_listener_ips_csv;
     state.time_servers_csv = time_servers_csv;
     state.mdns_enabled = mdns_enabled;
@@ -358,8 +376,11 @@ bool save_config_state(AppState& state,
                        const String& admin_pem,
                        const String& admin_fp,
                        const String& device_label,
+                       const String& wifi_mode,
                        const String& wifi_ssid,
                        const String& wifi_pass,
+                       const String& wifi_ap_ssid,
+                       const String& wifi_ap_pass,
                        bool signed_ok,
                        const String& authorized_listener_ips_csv,
                        const String& time_servers_csv,
@@ -371,8 +392,11 @@ bool save_config_state(AppState& state,
                            admin_pem,
                            admin_fp,
                            device_label,
+                           wifi_mode,
                            wifi_ssid,
                            wifi_pass,
+                           wifi_ap_ssid,
+                           wifi_ap_pass,
                            signed_ok,
                            authorized_listener_ips_csv,
                            time_servers_csv,
@@ -388,8 +412,11 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   g_prefs.remove("admin_fp");
   g_prefs.remove("rec_pem");
   g_prefs.remove("rec_fp");
+  g_prefs.remove("wifi_mode");
   g_prefs.remove("wifi_ssid");
   g_prefs.remove("wifi_pass");
+  g_prefs.remove("wifi_ap_ssid");
+  g_prefs.remove("wifi_ap_pass");
   g_prefs.remove("auth_ips");
   g_prefs.remove("time_srv");
   g_prefs.remove("mdns_en");
@@ -416,8 +443,11 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.recording_pubkey_pem = "";
   state.recording_fingerprint_hex = "";
   state.device_label = "";
+  state.wifi_mode = "sta";
   state.wifi_ssid = "";
   state.wifi_pass = "";
+  state.wifi_ap_ssid = "";
+  state.wifi_ap_pass = "";
   state.authorized_listener_ips_csv = "";
   state.time_servers_csv = "";
   state.mdns_enabled = false;

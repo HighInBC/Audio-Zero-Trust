@@ -135,8 +135,8 @@ def find_artifacts_for_fingerprint(fp_hex: str) -> list[Path]:
     return sorted(out)
 
 
-def make_bootstrap(identity: str, pub_pem: str, fp: str, wifi_ssid: str, wifi_password: str) -> dict:
-    return make_unsigned_config(identity, pub_pem, fp, wifi_ssid, wifi_password)
+def make_bootstrap(identity: str, pub_pem: str, fp: str, wifi_ssid: str, wifi_password: str, wifi_mode: str = "sta", wifi_ap_ssid: str = "", wifi_ap_password: str = "") -> dict:
+    return make_unsigned_config(identity, pub_pem, fp, wifi_ssid, wifi_password, wifi_mode=wifi_mode, wifi_ap_ssid=wifi_ap_ssid, wifi_ap_password=wifi_ap_password)
 
 
 def detect_device_ip_from_serial(port: str, baud: int = 115200, timeout_s: int = 20) -> str | None:

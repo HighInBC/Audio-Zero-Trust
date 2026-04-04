@@ -306,19 +306,25 @@ static bool connect_wifi_with_state(AppState& state, const char* src, const char
   return false;
 }
 
-void setup_wifi(AppState& state) {
-  WiFi.persistent(false);
-
-#if defined(AZT_WIFI_FORCE_AP) && (AZT_WIFI_FORCE_AP == 1)
-  String suffix = state.device_chip_id_hex;
-  suffix.replace(":", "");
-  suffix.toLowerCase();
-  String ssid_suffix = suffix.length() >= 6 ? suffix.substring(suffix.length() - 6) : suffix;
-  if (ssid_suffix.length() == 0) ssid_suffix = "device";
-  String pass_suffix = suffix.length() >= 8 ? suffix.substring(suffix.length() - 8) : suffix;
-  while (pass_suffix.length() < 8) pass_suffix += "0";
-  String ap_ssid = String("azt-mic-") + ssid_suffix;
-  String ap_pass = String("azt") + pass_suffix;
+static bool setup_wifi_ap_mode(AppState& state, const char* src, const String& ap_ssid_in, const String& ap_pass_in) {
+  String ap_ssid = ap_ssid_in;
+  String ap_pass = ap_pass_in;
+  if (ap_ssid.length() == 0) {
+    String suffix = state.device_chip_id_hex;
+    suffix.replace(":", "");
+    suffix.toLowerCase();
+    String ssid_suffix = suffix.length() >= 6 ? suffix.substring(suffix.length() - 6) : suffix;
+    if (ssid_suffix.length() == 0) ssid_suffix = "device";
+    ap_ssid = String("azt-mic-") + ssid_suffix;
+  }
+  if (ap_pass.length() < 8) {
+    String suffix = state.device_chip_id_hex;
+    suffix.replace(":", "");
+    suffix.toLowerCase();
+    String pass_suffix = suffix.length() >= 8 ? suffix.substring(suffix.length() - 8) : suffix;
+    while (pass_suffix.length() < 8) pass_suffix += "0";
+    ap_pass = String("azt") + pass_suffix;
+  }
 
   WiFi.mode(WIFI_AP);
   delay(100);
@@ -326,23 +332,31 @@ void setup_wifi(AppState& state) {
   IPAddress ap_gw(10, 0, 0, 1);
   IPAddress ap_mask(255, 255, 255, 0);
   const bool ap_cfg_ok = WiFi.softAPConfig(ap_ip, ap_gw, ap_mask);
-  if (!ap_cfg_ok) {
-    Serial.printf("AZT_WIFI_AP_CFG_FAIL src=explicit-ap-test\n");
-  }
+  if (!ap_cfg_ok) Serial.printf("AZT_WIFI_AP_CFG_FAIL src=%s\n", src);
 
   if (WiFi.softAP(ap_ssid.c_str(), ap_pass.c_str())) {
     IPAddress ip = WiFi.softAPIP();
-    state.wifi_last_connect_source = "explicit-ap-test";
+    state.wifi_ap_ssid = ap_ssid;
+    state.wifi_ap_pass = ap_pass;
+    state.wifi_last_connect_source = String(src);
     state.wifi_last_status = static_cast<int>(WL_CONNECTED);
-    Serial.printf("AZT_WIFI_AP_OK src=explicit-ap-test ssid=%s pass=%s ip=%u.%u.%u.%u\n",
-                  ap_ssid.c_str(), ap_pass.c_str(), ip[0], ip[1], ip[2], ip[3]);
-  } else {
-    state.wifi_last_connect_source = "explicit-ap-test";
-    state.wifi_last_status = static_cast<int>(WL_CONNECT_FAILED);
-    Serial.printf("AZT_WIFI_AP_FAIL src=explicit-ap-test ssid=%s\n", ap_ssid.c_str());
+    Serial.printf("AZT_WIFI_AP_OK src=%s ssid=%s ip=%u.%u.%u.%u\n", src, ap_ssid.c_str(), ip[0], ip[1], ip[2], ip[3]);
+    return true;
   }
-  return;
-#endif
+  state.wifi_last_connect_source = String(src);
+  state.wifi_last_status = static_cast<int>(WL_CONNECT_FAILED);
+  Serial.printf("AZT_WIFI_AP_FAIL src=%s ssid=%s\n", src, ap_ssid.c_str());
+  return false;
+}
+
+void setup_wifi(AppState& state) {
+  WiFi.persistent(false);
+
+  if (state.wifi_mode == "ap") {
+    (void)setup_wifi_ap_mode(state, "state-ap", state.wifi_ap_ssid, state.wifi_ap_pass);
+    maybe_maintain_mdns(state);
+    return;
+  }
 
   WiFi.mode(WIFI_STA);
 
@@ -373,6 +387,10 @@ void setup_wifi(AppState& state) {
 }
 
 void maybe_maintain_wifi(AppState& state) {
+  if (state.wifi_mode == "ap") {
+    maybe_maintain_mdns(state);
+    return;
+  }
   static uint32_t last_check_ms = 0;
   static String last_ssid;
   static String last_pass;

@@ -17,10 +17,17 @@ def run(args: argparse.Namespace) -> int:
             missing.append("--admin-creds-dir")
         if not (getattr(args, "identity", "") or "").strip():
             missing.append("--identity")
-        if not (getattr(args, "wifi_ssid", "") or "").strip():
-            missing.append("--wifi-ssid")
-        if not (getattr(args, "wifi_password", "") or "").strip():
-            missing.append("--wifi-password")
+        wifi_mode = (getattr(args, "wifi_mode", "sta") or "sta").strip().lower()
+        if wifi_mode == "ap":
+            if not (getattr(args, "wifi_ap_ssid", "") or "").strip():
+                missing.append("--wifi-ap-ssid")
+            if len((getattr(args, "wifi_ap_password", "") or "").strip()) < 8:
+                missing.append("--wifi-ap-password (min 8 chars)")
+        else:
+            if not (getattr(args, "wifi_ssid", "") or "").strip():
+                missing.append("--wifi-ssid")
+            if not (getattr(args, "wifi_password", "") or "").strip():
+                missing.append("--wifi-password")
         if missing:
             emit_envelope(
                 command="configure-device",
@@ -76,6 +83,9 @@ def run(args: argparse.Namespace) -> int:
             identity=args.identity,
             wifi_ssid=args.wifi_ssid,
             wifi_password=args.wifi_password,
+            wifi_mode=(getattr(args, "wifi_mode", "sta") or "sta"),
+            wifi_ap_ssid=(getattr(args, "wifi_ap_ssid", "") or ""),
+            wifi_ap_password=(getattr(args, "wifi_ap_password", "") or ""),
             authorized_listener_ips=list(args.authorized_listener_ip or []),
             time_servers=list(args.time_server or []),
             no_time=bool(args.no_time),
