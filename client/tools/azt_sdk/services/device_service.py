@@ -233,6 +233,54 @@ def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: in
     return ok, {"status": status, "location": location, "url": req_url}
 
 
+def _verify_stream_header_cert_gate(preface: bytes) -> tuple[bool, str]:
+    if not preface.startswith(b"AZT1\n"):
+        return False, "ERR_STREAM_MAGIC"
+    off = 5
+    nl = preface.find(b"\n", off)
+    if nl < 0:
+        return False, "ERR_STREAM_HEADER_JSON"
+    plain_line = preface[off:nl]
+    sig_nl = preface.find(b"\n", nl + 1)
+    if sig_nl < 0:
+        return False, "ERR_STREAM_HEADER_SIG_LINE"
+    sig_line = preface[nl + 1:sig_nl]
+
+    try:
+        plain = json.loads(plain_line.decode("utf-8"))
+    except Exception:
+        return False, "ERR_STREAM_HEADER_JSON"
+
+    cert_doc = plain.get("device_certificate")
+    if not isinstance(cert_doc, dict):
+        return False, "ERR_STREAM_CERT_REQUIRED"
+    if not isinstance(cert_doc.get("certificate_payload_b64"), str) or not cert_doc.get("certificate_payload_b64"):
+        return False, "ERR_STREAM_CERT_REQUIRED"
+
+    signer_b64 = plain.get("this_header_signing_key_b64")
+    if not isinstance(signer_b64, str) or not signer_b64:
+        return False, "ERR_STREAM_HEADER_SIGNER_KEY"
+
+    try:
+        pub = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(signer_b64, validate=True))
+        sig = base64.b64decode(sig_line, validate=True)
+        pub.verify(sig, plain_line)
+    except Exception:
+        return False, "ERR_STREAM_HEADER_SIG_VERIFY"
+
+    try:
+        cert_payload_raw = base64.b64decode(cert_doc["certificate_payload_b64"], validate=True)
+        cert_payload = json.loads(cert_payload_raw.decode("utf-8"))
+        header_serial = plain.get("device_certificate_serial")
+        if isinstance(header_serial, str) and header_serial:
+            if cert_payload.get("certificate_serial") != header_serial:
+                return False, "ERR_STREAM_CERT_SERIAL"
+    except Exception:
+        return False, "ERR_STREAM_CERT_SCHEMA"
+
+    return True, ""
+
+
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{b}/stream"
@@ -242,6 +290,9 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 
     out_file = None
     resolved_out = ""
+    preface_buf = bytearray()
+    preface_checked = bool(probe)
+    preface_required_bytes = 4096
     if not probe and out_path:
       p = Path(out_path)
       p.parent.mkdir(parents=True, exist_ok=True)
@@ -272,6 +323,28 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
         for chunk in r.iter_content(chunk_size=4096):
             if chunk:
                 total += len(chunk)
+                if not preface_checked:
+                    preface_buf.extend(chunk)
+                    # Need at least first two lines: plaintext header + signature line.
+                    if len(preface_buf) >= 12:
+                        first_nl = preface_buf.find(b"\n", 5)
+                        second_nl = preface_buf.find(b"\n", first_nl + 1) if first_nl >= 0 else -1
+                        if second_nl >= 0 or len(preface_buf) >= preface_required_bytes:
+                            ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf))
+                            if not ok_hdr:
+                                return False, {
+                                    "error": err_hdr,
+                                    "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                                    "bytes": total,
+                                    "out": resolved_out,
+                                    "url": url,
+                                }
+                            preface_checked = True
+                            if out_file is not None and len(preface_buf) > 0:
+                                out_file.write(preface_buf)
+                            preface_buf.clear()
+                    continue
+
                 if out_file is not None:
                     out_file.write(chunk)
             if seconds is not None and (time.time() - start >= seconds):
@@ -294,6 +367,19 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
         r.close()
         if out_file is not None:
             out_file.close()
+    if not preface_checked and not probe:
+        ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf))
+        if not ok_hdr:
+            return False, {
+                "error": err_hdr,
+                "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                "bytes": total,
+                "out": resolved_out,
+                "url": url,
+            }
+        if out_file is not None and len(preface_buf) > 0:
+            out_file.write(preface_buf)
+
     elapsed = time.time() - start
     payload = {"bytes": total, "seconds": elapsed, "requested_seconds": seconds, "url": url}
     if resolved_out:
