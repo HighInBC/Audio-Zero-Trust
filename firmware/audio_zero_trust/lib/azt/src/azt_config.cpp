@@ -326,10 +326,17 @@ bool save_config_state(AppState& state,
   ok = ok && g_prefs.putString("rec_fp", recording_fp) > 0;
   ok = ok && g_prefs.putString("dev_label", device_label) > 0;
   ok = ok && g_prefs.putString("wifi_mode", wifi_mode) > 0;
-  ok = ok && g_prefs.putString("wifi_ssid", wifi_ssid) > 0;
-  ok = ok && g_prefs.putString("wifi_pass", wifi_pass) > 0;
-  ok = ok && g_prefs.putString("wifi_ap_ssid", wifi_ap_ssid) > 0;
-  ok = ok && g_prefs.putString("wifi_ap_pass", wifi_ap_pass) > 0;
+  if (wifi_mode == "ap") {
+    ok = ok && g_prefs.putString("wifi_ap_ssid", wifi_ap_ssid) > 0;
+    ok = ok && g_prefs.putString("wifi_ap_pass", wifi_ap_pass) > 0;
+    g_prefs.remove("wifi_ssid");
+    g_prefs.remove("wifi_pass");
+  } else {
+    ok = ok && g_prefs.putString("wifi_ssid", wifi_ssid) > 0;
+    ok = ok && g_prefs.putString("wifi_pass", wifi_pass) > 0;
+    g_prefs.remove("wifi_ap_ssid");
+    g_prefs.remove("wifi_ap_pass");
+  }
   if (authorized_listener_ips_csv.length() > 0) {
     ok = ok && g_prefs.putString("auth_ips", authorized_listener_ips_csv) > 0;
   } else {
