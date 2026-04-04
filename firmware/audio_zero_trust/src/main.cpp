@@ -4,6 +4,7 @@
 #include <freertos/semphr.h>
 
 #include "azt_app_state.h"
+#include "azt_constants.h"
 #include "azt_config.h"
 #include "azt_device_io.h"
 #include "azt_discovery.h"
@@ -13,12 +14,10 @@
 
 namespace {
 
-static constexpr uint16_t kStreamPort = 8081;
-static constexpr uint16_t kApiTlsPort = 8443;
 
 azt::AppState g_state;
 WiFiServer g_api_server(azt::kHttpPort);
-WiFiServer g_stream_server(kStreamPort);
+WiFiServer g_stream_server(azt::constants::runtime::kStreamPort);
 SemaphoreHandle_t g_state_mu = nullptr;
 TaskHandle_t g_stream_task = nullptr;
 
@@ -33,12 +32,12 @@ void stream_server_task(void*) {
   for (;;) {
     WiFiClient client = g_stream_server.available();
     if (!client) {
-      delay(2);
+      delay(azt::constants::runtime::kIdleLoopDelayMs);
       continue;
     }
 
     azt::AppState snapshot;
-    if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(200)) != pdTRUE) {
+    if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(azt::constants::runtime::kStateLockWaitMsFast)) != pdTRUE) {
       client.stop();
       continue;
     }
@@ -56,10 +55,10 @@ void setup() {
 #if CONFIG_IDF_TARGET_ESP32S3
   // Atom EchoS3R: increase USB serial RX buffer to reduce large-payload ingress stalls.
   // Old target (ESP32 Atom Echo) does not use this path.
-  Serial.setRxBufferSize(8192);
+  Serial.setRxBufferSize(azt::constants::runtime::kUsbRxBufferSize);
 #endif
-  Serial.begin(115200);
-  delay(200);
+  Serial.begin(azt::constants::runtime::kSerialBaud);
+  delay(azt::constants::runtime::kBootDelayMs);
 
   log_boot_marker("setup_start");
 #if CONFIG_IDF_TARGET_ESP32S3
@@ -79,27 +78,27 @@ void setup() {
 
   g_api_server.begin();
   g_stream_server.begin();
-  bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, kApiTlsPort);
+  bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, azt::constants::runtime::kApiTlsPort);
 
   xTaskCreatePinnedToCore(stream_server_task,
                           "azt_stream_server",
-                          8192,
+                          azt::constants::runtime::kTaskStackStreamServer,
                           nullptr,
-                          1,
+                          static_cast<UBaseType_t>(azt::constants::runtime::kTaskPriorityNormal),
                           &g_stream_task,
-                          0);
+                          static_cast<BaseType_t>(azt::constants::runtime::kTaskCore0));
 
-  Serial.printf("AZT_HTTP api_port=%u stream_port=%u\n", azt::kHttpPort, kStreamPort);
+  Serial.printf("AZT_HTTP api_port=%u stream_port=%u\n", azt::kHttpPort, azt::constants::runtime::kStreamPort);
   log_boot_marker("http_server_started");
   if (https_ok) {
-    Serial.printf("AZT_HTTPS api_tls_port=%u\n", kApiTlsPort);
+    Serial.printf("AZT_HTTPS api_tls_port=%u\n", azt::constants::runtime::kApiTlsPort);
   } else {
     Serial.println("AZT_HTTPS disabled (no tls cert/key configured)");
   }
 }
 
 void loop() {
-  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(200)) == pdTRUE) {
+  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(azt::constants::runtime::kStateLockWaitMsFast)) == pdTRUE) {
     // During serial config payload ingestion, reduce background serial chatter and work.
     if (!g_serial_state.config_mode) {
       azt::maybe_maintain_wifi(g_state);
@@ -113,11 +112,11 @@ void loop() {
 
   WiFiClient client = g_api_server.available();
   if (!client) {
-    delay(2);
+    delay(azt::constants::runtime::kIdleLoopDelayMs);
     return;
   }
 
-  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(4000)) != pdTRUE) {
+  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(azt::constants::runtime::kStateLockWaitMsSlow)) != pdTRUE) {
     client.stop();
     return;
   }

@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "azt_audio_ring.h"
+#include "azt_constants.h"
 #include "azt_crypto.h"
 #include "azt_device_io.h"
 #include "azt_stream_header.h"
@@ -277,9 +278,9 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       staleness_s = 0;
     }
   }
-  const uint32_t sample_rate_hz = state.audio_sample_rate_hz > 0 ? state.audio_sample_rate_hz : 16000U;
-  const uint32_t channels = state.audio_channels > 0 ? state.audio_channels : 1U;
-  const uint32_t sample_width_bytes = state.audio_sample_width_bytes > 0 ? state.audio_sample_width_bytes : 2U;
+  const uint32_t sample_rate_hz = state.audio_sample_rate_hz > 0 ? state.audio_sample_rate_hz : constants::audio::kDefaultSampleRateHz;
+  const uint32_t channels = state.audio_channels > 0 ? state.audio_channels : static_cast<uint32_t>(constants::audio::kDefaultChannels);
+  const uint32_t sample_width_bytes = state.audio_sample_width_bytes > 0 ? state.audio_sample_width_bytes : static_cast<uint32_t>(constants::audio::kDefaultSampleWidthBytes);
   const uint32_t bytes_per_frame_sample = std::max<uint32_t>(1U, channels * sample_width_bytes);
   const uint32_t frame_samples = std::max<uint32_t>(1U, static_cast<uint32_t>(kMicFrameBytes / bytes_per_frame_sample));
   const float audio_frame_duration_ms =
@@ -315,9 +316,9 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   TaskHandle_t mic_reader_task = nullptr;
   if (xTaskCreatePinnedToCore(mic_reader_task_entry,
                               "azt_mic_reader",
-                              4096,
+                              constants::runtime::kTaskStackMicReader,
                               mic_ring,
-                              2,
+                              static_cast<UBaseType_t>(constants::runtime::kTaskPriorityMicReader),
                               &mic_reader_task,
                               kStreamPipelineCore) != pdPASS) {
     signer.stop();
@@ -480,7 +481,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   }
 
   mic_ring->stop = true;
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(constants::runtime::kMicReaderShutdownDelayMs));
 
   while (client.connected() && pending_dropped_frames > 0) {
     uint16_t emit = static_cast<uint16_t>(std::min<uint32_t>(pending_dropped_frames, 0xFFFF));
@@ -559,9 +560,9 @@ void handle_stream(WiFiClient& client, int seconds, const AppState& state, bool 
   StreamTaskCtx ctx{&client, seconds, &state, signbench_each_chunk, enable_telemetry, drop_test_frames, xTaskGetCurrentTaskHandle()};
   BaseType_t ok = xTaskCreatePinnedToCore(stream_task_entry,
                                           "azt_stream",
-                                          12288,
+                                          constants::runtime::kTaskStackStreamWorker,
                                           &ctx,
-                                          1,
+                                          static_cast<UBaseType_t>(constants::runtime::kTaskPriorityNormal),
                                           nullptr,
                                           kStreamPipelineCore);
   if (ok != pdPASS) {

@@ -7,23 +7,10 @@
 #include <esp_sntp.h>
 #include <ESPmDNS.h>
 
+#include "azt_constants.h"
+
 namespace azt {
 
-#if CONFIG_IDF_TARGET_ESP32S3
-static constexpr int kEchoBaseI2cSdaPin = 45;
-static constexpr int kEchoBaseI2cSclPin = 0;
-static constexpr int kEchoBaseI2sBckPin = 17;      // SCLK
-static constexpr int kEchoBaseI2sWsPin = 3;        // LRCK
-static constexpr int kEchoBaseI2sDataOutPin = 48;  // DSDIN (host->codec)
-static constexpr int kEchoBaseI2sDataInPin = 4;    // ASDOUT (codec->host)
-#else
-static constexpr int kEchoBaseI2cSdaPin = 25;
-static constexpr int kEchoBaseI2cSclPin = 21;
-static constexpr int kEchoBaseI2sBckPin = 33;
-static constexpr int kEchoBaseI2sWsPin = 19;
-static constexpr int kEchoBaseI2sDataOutPin = 22;
-static constexpr int kEchoBaseI2sDataInPin = 23;
-#endif
 
 bool has_wifi_credentials(const AppState& state) {
   return state.wifi_ssid.length() > 0 && state.wifi_pass.length() > 0;
@@ -130,7 +117,7 @@ static bool i2c_write_reg(uint8_t addr, uint8_t reg, uint8_t val) {
 static void setup_i2s_echo_base_std() {
   i2s_config_t cfg{};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX);
-  cfg.sample_rate = 16000;
+  cfg.sample_rate = constants::audio::kDefaultSampleRateHz;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
   cfg.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
@@ -142,10 +129,10 @@ static void setup_i2s_echo_base_std() {
   cfg.fixed_mclk = 0;
 
   i2s_pin_config_t pins{};
-  pins.bck_io_num = static_cast<gpio_num_t>(kEchoBaseI2sBckPin);
-  pins.ws_io_num = static_cast<gpio_num_t>(kEchoBaseI2sWsPin);
-  pins.data_out_num = static_cast<gpio_num_t>(kEchoBaseI2sDataOutPin);
-  pins.data_in_num = static_cast<gpio_num_t>(kEchoBaseI2sDataInPin);
+  pins.bck_io_num = static_cast<gpio_num_t>(constants::pins::kEchoBaseI2sBck);
+  pins.ws_io_num = static_cast<gpio_num_t>(constants::pins::kEchoBaseI2sWs);
+  pins.data_out_num = static_cast<gpio_num_t>(constants::pins::kEchoBaseI2sDataOut);
+  pins.data_in_num = static_cast<gpio_num_t>(constants::pins::kEchoBaseI2sDataIn);
 
   i2s_driver_install(kI2SPort, &cfg, 0, nullptr);
   i2s_set_pin(kI2SPort, &pins);
@@ -156,7 +143,7 @@ static void setup_i2s_echo_base_std() {
 static void setup_i2s_internal_pdm() {
   i2s_config_t cfg{};
   cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM);
-  cfg.sample_rate = 16000;
+  cfg.sample_rate = constants::audio::kDefaultSampleRateHz;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
   cfg.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
   cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
@@ -168,10 +155,10 @@ static void setup_i2s_internal_pdm() {
   cfg.fixed_mclk = 0;
 
   i2s_pin_config_t pins{};
-  pins.bck_io_num = static_cast<gpio_num_t>(kEchoBaseI2sWsPin);
-  pins.ws_io_num = static_cast<gpio_num_t>(kEchoBaseI2sBckPin);
+  pins.bck_io_num = static_cast<gpio_num_t>(constants::pins::kEchoBaseI2sWs);
+  pins.ws_io_num = static_cast<gpio_num_t>(constants::pins::kEchoBaseI2sBck);
   pins.data_out_num = I2S_PIN_NO_CHANGE;
-  pins.data_in_num = static_cast<gpio_num_t>(kEchoBaseI2sDataInPin);
+  pins.data_in_num = static_cast<gpio_num_t>(constants::pins::kEchoBaseI2sDataIn);
 
   i2s_driver_install(kI2SPort, &cfg, 0, nullptr);
   i2s_set_pin(kI2SPort, &pins);
@@ -179,9 +166,9 @@ static void setup_i2s_internal_pdm() {
 }
 
 static void es8311_init_for_echo_base(const AppState& state) {
-  const uint8_t a = 0x18;
+  const uint8_t a = constants::audio::kEs8311I2cAddress;
   i2c_write_reg(a, 0x00, 0x1F);
-  delay(20);
+  delay(constants::audio::kCodecResetDelayMs);
   i2c_write_reg(a, 0x00, 0x00);
   i2c_write_reg(a, 0x00, 0x80);
   i2c_write_reg(a, 0x01, 0xBF);
@@ -195,8 +182,8 @@ static void es8311_init_for_echo_base(const AppState& state) {
   i2c_write_reg(a, 0x09, 0x10);
   i2c_write_reg(a, 0x0A, 0x10);
   i2c_write_reg(a, 0x14, 0x1A);
-  i2c_write_reg(a, 0x16, state.audio_preamp_gain);
-  i2c_write_reg(a, 0x17, state.audio_adc_gain);
+  i2c_write_reg(a, constants::audio::kEs8311RegPreampGain, state.audio_preamp_gain);
+  i2c_write_reg(a, constants::audio::kEs8311RegAdcGain, state.audio_adc_gain);
   i2c_write_reg(a, 0x0D, 0x01);
   i2c_write_reg(a, 0x0E, 0x02);
   i2c_write_reg(a, 0x12, 0x00);
@@ -207,18 +194,18 @@ static void es8311_init_for_echo_base(const AppState& state) {
 
 void setup_audio_input(AppState& state) {
   // Probe Echo Base (ES8311 on Atom host I2C pins).
-  Wire.begin(kEchoBaseI2cSdaPin, kEchoBaseI2cSclPin, 100000U);
-  delay(10);
-  const bool has_echo = i2c_ping_addr(0x18);
+  Wire.begin(constants::pins::kEchoBaseI2cSda, constants::pins::kEchoBaseI2cScl, constants::audio::kEchoBaseI2cClockHz);
+  delay(constants::audio::kEchoBaseProbeDelayMs);
+  const bool has_echo = i2c_ping_addr(constants::audio::kEs8311I2cAddress);
   state.audio_echo_base_detected = has_echo;
 
   if (has_echo) {
     es8311_init_for_echo_base(state);
     setup_i2s_echo_base_std();
     state.audio_input_source = "echo_base";
-    state.audio_sample_rate_hz = 16000;
-    state.audio_channels = 1;
-    state.audio_sample_width_bytes = 2;
+    state.audio_sample_rate_hz = constants::audio::kDefaultSampleRateHz;
+    state.audio_channels = constants::audio::kDefaultChannels;
+    state.audio_sample_width_bytes = constants::audio::kDefaultSampleWidthBytes;
     Serial.printf("AZT_AUDIO source=echo_base preamp=%u adc=%u rate=%lu ch=%u sw=%u\n", state.audio_preamp_gain, state.audio_adc_gain, static_cast<unsigned long>(state.audio_sample_rate_hz), static_cast<unsigned>(state.audio_channels), static_cast<unsigned>(state.audio_sample_width_bytes));
     return;
   }
@@ -233,9 +220,9 @@ void setup_audio_input(AppState& state) {
 #else
   setup_i2s_internal_pdm();
   state.audio_input_source = "internal_pdm";
-  state.audio_sample_rate_hz = 16000;
-  state.audio_channels = 1;
-  state.audio_sample_width_bytes = 2;
+  state.audio_sample_rate_hz = constants::audio::kDefaultSampleRateHz;
+  state.audio_channels = constants::audio::kDefaultChannels;
+  state.audio_sample_width_bytes = constants::audio::kDefaultSampleWidthBytes;
   Serial.printf("AZT_AUDIO source=internal_pdm rate=%lu ch=%u sw=%u\n", static_cast<unsigned long>(state.audio_sample_rate_hz), static_cast<unsigned>(state.audio_channels), static_cast<unsigned>(state.audio_sample_width_bytes));
 #endif
 }
@@ -321,6 +308,42 @@ static bool connect_wifi_with_state(AppState& state, const char* src, const char
 
 void setup_wifi(AppState& state) {
   WiFi.persistent(false);
+
+#if defined(AZT_WIFI_FORCE_AP) && (AZT_WIFI_FORCE_AP == 1)
+  String suffix = state.device_chip_id_hex;
+  suffix.replace(":", "");
+  suffix.toLowerCase();
+  String ssid_suffix = suffix.length() >= 6 ? suffix.substring(suffix.length() - 6) : suffix;
+  if (ssid_suffix.length() == 0) ssid_suffix = "device";
+  String pass_suffix = suffix.length() >= 8 ? suffix.substring(suffix.length() - 8) : suffix;
+  while (pass_suffix.length() < 8) pass_suffix += "0";
+  String ap_ssid = String("azt-mic-") + ssid_suffix;
+  String ap_pass = String("azt") + pass_suffix;
+
+  WiFi.mode(WIFI_AP);
+  delay(100);
+  IPAddress ap_ip(10, 0, 0, 1);
+  IPAddress ap_gw(10, 0, 0, 1);
+  IPAddress ap_mask(255, 255, 255, 0);
+  const bool ap_cfg_ok = WiFi.softAPConfig(ap_ip, ap_gw, ap_mask);
+  if (!ap_cfg_ok) {
+    Serial.printf("AZT_WIFI_AP_CFG_FAIL src=explicit-ap-test\n");
+  }
+
+  if (WiFi.softAP(ap_ssid.c_str(), ap_pass.c_str())) {
+    IPAddress ip = WiFi.softAPIP();
+    state.wifi_last_connect_source = "explicit-ap-test";
+    state.wifi_last_status = static_cast<int>(WL_CONNECTED);
+    Serial.printf("AZT_WIFI_AP_OK src=explicit-ap-test ssid=%s pass=%s ip=%u.%u.%u.%u\n",
+                  ap_ssid.c_str(), ap_pass.c_str(), ip[0], ip[1], ip[2], ip[3]);
+  } else {
+    state.wifi_last_connect_source = "explicit-ap-test";
+    state.wifi_last_status = static_cast<int>(WL_CONNECT_FAILED);
+    Serial.printf("AZT_WIFI_AP_FAIL src=explicit-ap-test ssid=%s\n", ap_ssid.c_str());
+  }
+  return;
+#endif
+
   WiFi.mode(WIFI_STA);
 
   bool has_creds = has_wifi_credentials(state);

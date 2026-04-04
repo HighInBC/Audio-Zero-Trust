@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <esp_system.h>
 
+#include "azt_constants.h"
 #include "azt_crypto.h"
 
 namespace azt {
@@ -444,8 +445,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.audio_channels = 1;
   state.audio_sample_width_bytes = 2;
 #endif
-  state.audio_preamp_gain = 2;
-  state.audio_adc_gain = 248;
+  state.audio_preamp_gain = constants::audio::kDefaultPreampGain;
+  state.audio_adc_gain = constants::audio::kDefaultAdcGain;
 
   return true;
 }

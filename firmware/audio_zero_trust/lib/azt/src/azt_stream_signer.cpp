@@ -1,5 +1,7 @@
 #include "azt_stream_signer.h"
 
+#include "azt_constants.h"
+
 namespace azt {
 
 void StreamSigner::signer_task_entry(void* arg) {
@@ -70,9 +72,9 @@ bool StreamSigner::begin(const unsigned char sign_sk[crypto_sign_ed25519_SECRETK
 
   if (xTaskCreatePinnedToCore(signer_task_entry,
                               "azt_signer",
-                              8192,
+                              constants::runtime::kTaskStackSigner,
                               &ctx_,
-                              1,
+                              static_cast<UBaseType_t>(constants::runtime::kTaskPriorityNormal),
                               &task_,
                               core) != pdPASS) {
     vQueueDelete(out_q_);
@@ -113,13 +115,13 @@ void StreamSigner::stop() {
   if (task) {
     xTaskNotifyGive(task);
     // Wait for signer task to explicitly ack shutdown.
-    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(250));
+    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(constants::runtime::kSignerStopAckWaitMs));
 
     // Defensive: the parent task may receive unrelated notifications; verify
     // the signer task actually exited before reclaiming shared resources.
-    const uint32_t deadline = millis() + 200;
+    const uint32_t deadline = millis() + constants::runtime::kSignerDeleteWaitMs;
     while (eTaskGetState(task) != eDeleted && static_cast<int32_t>(deadline - millis()) > 0) {
-      vTaskDelay(pdMS_TO_TICKS(5));
+      vTaskDelay(pdMS_TO_TICKS(constants::runtime::kSignerDeletePollMs));
     }
     if (eTaskGetState(task) != eDeleted) {
       vTaskDelete(task);

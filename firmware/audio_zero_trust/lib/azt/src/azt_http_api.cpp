@@ -16,6 +16,7 @@
 #include <time.h>
 
 #include "azt_config.h"
+#include "azt_constants.h"
 #include "azt_crypto.h"
 #include "azt_discovery.h"
 #include "azt_stream.h"
@@ -470,18 +471,18 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     }
     if (!audio["preamp_gain"].isNull()) {
       int v = audio["preamp_gain"].as<int>();
-      if (v < 1 || v > 8) {
+      if (v < constants::audio::kPreampGainMin || v > constants::audio::kPreampGainMax) {
         r.code = 400;
-        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 1..8\"}";
+        r.body = String("{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"") + constants::audio::kPreampRangeDetail + "\"}";
         return r;
       }
       new_audio_preamp_gain = static_cast<uint8_t>(v);
     }
     if (!audio["adc_gain"].isNull()) {
       int v = audio["adc_gain"].as<int>();
-      if (v < 0 || v > 255) {
+      if (v < constants::audio::kAdcGainMin || v > constants::audio::kAdcGainMax) {
         r.code = 400;
-        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.adc_gain must be 0..255\"}";
+        r.body = String("{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"") + constants::audio::kAdcRangeDetail + "\"}";
         return r;
       }
       new_audio_adc_gain = static_cast<uint8_t>(v);
@@ -923,18 +924,18 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     }
     if (!pa["preamp_gain"].isNull()) {
       int v = pa["preamp_gain"].as<int>();
-      if (v < 1 || v > 8) {
+      if (v < constants::audio::kPreampGainMin || v > constants::audio::kPreampGainMax) {
         r.code = 400;
-        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.preamp_gain must be 1..8\"}";
+        r.body = String("{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"") + constants::audio::kPreampRangeDetail + "\"}";
         return r;
       }
       new_audio_preamp_gain = static_cast<uint8_t>(v);
     }
     if (!pa["adc_gain"].isNull()) {
       int v = pa["adc_gain"].as<int>();
-      if (v < 0 || v > 255) {
+      if (v < constants::audio::kAdcGainMin || v > constants::audio::kAdcGainMax) {
         r.code = 400;
-        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"audio.adc_gain must be 0..255\"}";
+        r.body = String("{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"") + constants::audio::kAdcRangeDetail + "\"}";
         return r;
       }
       new_audio_adc_gain = static_cast<uint8_t>(v);
@@ -1769,7 +1770,7 @@ bool validate_ota_bundle_header_line(const String& header_line,
   out_meta_sig_b64 = "";
   out_err = "";
 
-  if (header_line.length() < 20 || header_line.length() > 4096) {
+  if (header_line.length() < 20 || header_line.length() > constants::runtime::ota::kHeaderMaxBytes) {
     out_err = "invalid bundle header line";
     return false;
   }
@@ -1911,7 +1912,7 @@ bool ota_read_firmware_chunk(WiFiClient& client,
                              int to_read,
                              int& out_n_read,
                              String& out_err,
-                             uint32_t chunk_timeout_ms = 5000) {
+                             uint32_t chunk_timeout_ms = constants::runtime::ota::kReadChunkTimeoutMs) {
   out_n_read = 0;
   out_err = "";
 
@@ -1965,7 +1966,7 @@ static inline void ota_bc(const char* tag);
 struct OtaEraseTaskCtx {
   const esp_partition_t* part = nullptr;
   size_t total_len = 0;
-  size_t chunk_bytes = 4096;
+  size_t chunk_bytes = constants::runtime::ota::kFlashSectorBytes;
   volatile bool failed = false;
   volatile bool done = false;
   String err;
@@ -2030,7 +2031,7 @@ static void ota_stop_writer(OtaWriterCtx& ctx, QueueHandle_t q, TaskHandle_t wri
   OtaWriteMsg end_msg;
   end_msg.end = true;
   for (int i = 0; i < 10 && !ctx.done; ++i) {
-    xQueueSend(q, &end_msg, pdMS_TO_TICKS(50));
+    xQueueSend(q, &end_msg, pdMS_TO_TICKS(constants::runtime::ota::kQueueStopSendWaitMs));
     ota_kick_wdt();
   }
   uint32_t wait_deadline = millis() + 3000;
@@ -2081,7 +2082,7 @@ bool poison_ota_slot_header(const esp_partition_t* part) {
   // attacker-controlled bytes. If power is cut mid-update, the slot remains
   // non-bootable instead of potentially booting unverified code.
   if (!part) return false;
-  constexpr size_t kHeaderSectorSize = 4096;
+  constexpr size_t kHeaderSectorSize = constants::runtime::ota::kFlashSectorBytes;
   uint8_t zeros[kHeaderSectorSize] = {0};
   if (esp_partition_erase_range(part, 0, kHeaderSectorSize) != ESP_OK) return false;
   return esp_partition_write(part, 0, zeros, kHeaderSectorSize) == ESP_OK;
@@ -2260,7 +2261,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   }
   ota_bc("S3C_LENGTHS_OK");
 
-  constexpr size_t kFlashSector = 4096;
+  constexpr size_t kFlashSector = constants::runtime::ota::kFlashSectorBytes;
   constexpr size_t kEraseChunkBytes = kFlashSector;
   const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
   ota_bc("S3D_PRE_ERASE_LOOP");
@@ -2272,7 +2273,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   TaskHandle_t erase_task = nullptr;
   BaseType_t erase_ok = xTaskCreatePinnedToCore(ota_erase_task,
                                                  "azt_ota_erase",
-                                                 6144,
+                                                 constants::runtime::ota::kTaskStackErase,
                                                  &erase_ctx,
                                                  1,
                                                  &erase_task,
@@ -2281,7 +2282,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     out_err = "failed to start OTA erase task";
     return false;
   }
-  uint32_t erase_wait_deadline = millis() + 90000;
+  uint32_t erase_wait_deadline = millis() + constants::runtime::ota::kEraseWaitMs;
   while (!erase_ctx.done && static_cast<int32_t>(millis() - erase_wait_deadline) < 0) {
     ota_kick_wdt();
   }
@@ -2321,7 +2322,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
 
   // Two-stage OTA path: network reader feeds bounded queue, dedicated writer task drains to flash.
   // Security invariant preserved: first OTA header block is NOT written until SHA-256 verification succeeds.
-  QueueHandle_t ota_q = xQueueCreate(6, sizeof(OtaWriteMsg));
+  QueueHandle_t ota_q = xQueueCreate(constants::runtime::ota::kWriterQueueDepth, sizeof(OtaWriteMsg));
   if (!ota_q) {
     ota_bc("E_Q_CREATE_FAIL");
     mbedtls_sha256_free(&sha);
@@ -2337,7 +2338,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   TaskHandle_t writer_task = nullptr;
   BaseType_t writer_ok = xTaskCreatePinnedToCore(ota_writer_task,
                                                   "azt_ota_writer",
-                                                  8192,
+                                                  constants::runtime::ota::kTaskStackWriter,
                                                   &writer_ctx,
                                                   1,
                                                   &writer_task,
@@ -2368,7 +2369,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
     int to_read = remain_fw > (int)sizeof(buf) ? (int)sizeof(buf) : remain_fw;
     int n = 0;
     String read_err;
-    if (!ota_read_firmware_chunk(client, buf, to_read, n, read_err, 5000) || ota_stream_read_failed(n)) {
+    if (!ota_read_firmware_chunk(client, buf, to_read, n, read_err, constants::runtime::ota::kReadChunkTimeoutMs) || ota_stream_read_failed(n)) {
       mbedtls_sha256_free(&sha);
       writer_ctx.failed = true;
       esp_ota_abort(ota_handle);
@@ -2395,7 +2396,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
       msg.len = static_cast<uint16_t>(static_cast<size_t>(n) - consumed);
       memcpy(msg.data, buf + consumed, msg.len);
 
-      while (xQueueSend(ota_q, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+      while (xQueueSend(ota_q, &msg, pdMS_TO_TICKS(constants::runtime::ota::kQueuePushWaitMs)) != pdTRUE) {
         if (writer_ctx.failed) break;
         q_backpressure_loops++;
         ota_kick_wdt();  // bounded backpressure while queue is full
@@ -2421,7 +2422,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   // Signal writer completion and wait for drain.
   OtaWriteMsg end_msg;
   end_msg.end = true;
-  while (xQueueSend(ota_q, &end_msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+  while (xQueueSend(ota_q, &end_msg, pdMS_TO_TICKS(constants::runtime::ota::kQueuePushWaitMs)) != pdTRUE) {
     if (writer_ctx.failed) break;
     ota_kick_wdt();
   }
