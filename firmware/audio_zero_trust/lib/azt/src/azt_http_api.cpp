@@ -1337,6 +1337,7 @@ HttpDispatchResult dispatch_request(const String& method,
       return r;
     }
 
+    String cert_type = String((const char*)(payload_doc["certificate_type"] | "device_key_binding"));
     String dev_pub = String((const char*)(payload_doc["device_sign_public_key_b64"] | ""));
     String dev_fp = String((const char*)(payload_doc["device_sign_fingerprint_hex"] | ""));
     String chip_id = String((const char*)(payload_doc["device_chip_id_hex"] | ""));
@@ -1350,6 +1351,56 @@ HttpDispatchResult dispatch_request(const String& method,
     if (!validate_active_nonce(cert_nonce, g_cert_nonce, g_cert_nonce_expires_ms, cert_now_ms)) {
       r.code = 401;
       r.body = "{\"ok\":false,\"error\":\"ERR_CERT_CHALLENGE_EXPIRED\"}";
+      r.content_type = "application/json";
+      return r;
+    }
+
+    if (cert_type == "device_key_revocation") {
+      if (state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+        r.code = 500;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CERT_ADMIN_NOT_CONFIGURED\"}";
+        r.content_type = "application/json";
+        return r;
+      }
+      if (admin_fp != state.admin_fingerprint_hex) {
+        r.code = 401;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CERT_ADMIN_MISMATCH\"}";
+        r.content_type = "application/json";
+        return r;
+      }
+      if (!verify_ed25519_signature_b64(state.admin_pubkey_pem, payload_raw, sig_b64)) {
+        r.code = 401;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CERT_SIG_VERIFY\"}";
+        r.content_type = "application/json";
+        return r;
+      }
+      if (cert_serial.length() > 0 && state.device_certificate_serial.length() > 0 && cert_serial != state.device_certificate_serial) {
+        r.code = 409;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CERT_SERIAL_MISMATCH\"}";
+        r.content_type = "application/json";
+        return r;
+      }
+
+      state.device_certificate_serial = "";
+      state.device_certificate_json = "";
+      state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+
+      Preferences p;
+      if (!p.begin("aztcfg", false) || p.putString("disc_json", state.discovery_announcement_json) == 0) {
+        p.end();
+        r.code = 500;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CERT_STORE\"}";
+        r.content_type = "application/json";
+        return r;
+      }
+      p.remove("device_cert");
+      p.remove("dev_cert_sn");
+      p.end();
+
+      consume_nonce(g_cert_nonce, g_cert_nonce_expires_ms);
+
+      r.code = 200;
+      r.body = "{\"ok\":true,\"revoked\":true}";
       r.content_type = "application/json";
       return r;
     }

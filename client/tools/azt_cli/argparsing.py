@@ -329,6 +329,15 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     scertp.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     scertp.set_defaults(func=handlers.cmd_certificate_post)
 
+    screvoke = sub.add_parser("certificate-revoke", help="Revoke device certificate using signed nonce challenge")
+    screvoke.add_argument("--host", required=False, default="", help="Device host/IP")
+    screvoke.add_argument("--key", dest="key_path", required=False, default="", help="Admin signer private key PEM")
+    screvoke.add_argument("--cert-serial", default="", help="Certificate serial to revoke (defaults to device active serial)")
+    screvoke.add_argument("--port", type=int, default=8080, help="Device API port")
+    screvoke.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
+    screvoke.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    screvoke.set_defaults(func=handlers.cmd_certificate_revoke)
+
     skeym = sub.add_parser("key-match-check", help="Check admin key fingerprint matches device state")
     skeym.add_argument("--host", required=False, default="", help="Device host/IP")
     skeym.add_argument("--key", dest="key_path", required=False, default="", help="Admin private key PEM")

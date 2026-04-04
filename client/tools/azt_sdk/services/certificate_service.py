@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
 from tools.azt_client.http import get_json
 from tools.azt_sdk.services.attestation_service import verify_attestation
-from tools.azt_sdk.services.device_service import certificate_post
+from tools.azt_sdk.services.device_service import certificate_post, state_get
 from tools.azt_sdk.services.url_service import base_url
 
 
@@ -49,6 +49,56 @@ def _validate_attestation(*, att: dict, state: dict, host: str, port: int, attes
         return False, "ATTESTATION_RECORDER_FP_MISMATCH", {"attestation_recording_fingerprint_hex": att_rec_fp, "state_recording_fingerprint_hex": st_rec_fp}
 
     return True, None, {}
+
+
+def revoke_certificate(*, host: str, port: int, timeout: int, key_path: str, cert_serial: str = "") -> tuple[bool, str | None, dict]:
+    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    state = state_get(host=host, port=port, timeout=timeout)
+    if not bool(state.get("ok")):
+        return False, "STATE_GET_FAILED", {"state": state}
+
+    signer_fp = ed25519_fp_hex_from_private_key(Path(key_path))
+    state_admin_fp = str(state.get("admin_fingerprint_hex") or "")
+    if signer_fp != state_admin_fp:
+        return False, "KEY_OWNERSHIP_MISMATCH", {"key_fingerprint_hex": signer_fp, "state_admin_fingerprint_hex": state_admin_fp}
+
+    target_serial = (cert_serial or "").strip() or str(state.get("device_certificate_serial") or "")
+
+    cert_challenge = get_json(f"{b}/api/v0/device/certificate/challenge", timeout=timeout)
+    if not bool(cert_challenge.get("ok")):
+        return False, "CERTIFICATE_CHALLENGE_FAILED", {"challenge_response": cert_challenge}
+    cert_nonce = str(cert_challenge.get("nonce") or "")
+    if not cert_nonce:
+        return False, "CERTIFICATE_CHALLENGE_FAILED", {"detail": "missing nonce in challenge response"}
+
+    payload = {
+        "certificate_version": 1,
+        "certificate_type": "device_key_revocation",
+        "admin_signer_fingerprint_hex": state_admin_fp,
+        "certificate_serial": target_serial,
+        "nonce": cert_nonce,
+        "issued_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "signature_algorithm": "ed25519",
+    }
+    payload_raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    priv = load_private_key_auto(Path(key_path), purpose=str(key_path))
+    sig = priv.sign(payload_raw)
+    cert_doc = {
+        "certificate_payload_b64": base64.b64encode(payload_raw).decode("ascii"),
+        "signature_algorithm": "ed25519",
+        "signature_b64": base64.b64encode(sig).decode("ascii"),
+    }
+
+    post_res = certificate_post(host=host, port=port, timeout=timeout, payload=cert_doc)
+    if not bool(post_res.get("ok")):
+        return False, "CERTIFICATE_REVOKE_FAILED", {"post_response": post_res}
+
+    return True, None, {
+        "revoked": True,
+        "certificate_serial": target_serial,
+        "nonce": cert_nonce,
+        "post_response": post_res,
+    }
 
 
 def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, attestation_path: str | None, attestation_max_age_s: int, cert_serial: str, valid_until_utc: str, auto_record: bool = False, auto_decode: bool = False, out_path: str | None = None) -> tuple[bool, str | None, dict]:
