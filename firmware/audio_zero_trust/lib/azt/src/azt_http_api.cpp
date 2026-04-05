@@ -2843,6 +2843,26 @@ static bool ota_httpd_read_line(httpd_req_t* req, int& io_bytes_left, String& ou
   return out_line.length() > 0;
 }
 
+static void drain_request_body_best_effort_httpd(httpd_req_t* req, int max_bytes, uint32_t max_ms = 30000) {
+  if (!req || max_bytes <= 0) return;
+  uint8_t buf[256];
+  const uint32_t start = millis();
+  int remain = max_bytes;
+  while (remain > 0 && static_cast<int32_t>(millis() - start) < static_cast<int32_t>(max_ms)) {
+    int want = ota_next_drain_chunk_size(remain, static_cast<int>(sizeof(buf)));
+    if (want <= 0) break;
+    int n = httpd_req_recv(req, reinterpret_cast<char*>(buf), want);
+    if (n > 0) {
+      remain -= n;
+      ota_kick_wdt();
+      continue;
+    }
+    // Transient timeout/socket state: yield briefly and retry until deadline.
+    vTaskDelay(pdMS_TO_TICKS(2));
+    ota_kick_wdt();
+  }
+}
+
 static bool ota_read_firmware_chunk_httpd(httpd_req_t* req,
                                           uint8_t* buf,
                                           int to_read,
@@ -2892,14 +2912,19 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
   }
 
   int bytes_left = content_len;
+  auto fail_with_drain = [&]() -> bool {
+    drain_request_body_best_effort_httpd(req, bytes_left);
+    return false;
+  };
+
   String header_line;
   if (!ota_httpd_read_line(req, bytes_left, header_line, out_err)) {
-    return false;
+    return fail_with_drain();
   }
 
   OtaBundlePreflight preflight;
   if (!ota_preflight_bundle(header_line, content_len, state, preflight, out_err)) {
-    return false;
+    return fail_with_drain();
   }
   const String ota_version = preflight.ota_version;
   const uint64_t ota_version_code = preflight.ota_version_code;
@@ -2912,11 +2937,11 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
   const esp_partition_t* target_part = esp_ota_get_next_update_partition(nullptr);
   if (!target_part) {
     out_err = "no OTA partition available";
-    return false;
+    return fail_with_drain();
   }
   if (static_cast<size_t>(fw_size) > target_part->size) {
     out_err = "firmware too large for OTA slot";
-    return false;
+    return fail_with_drain();
   }
 
   constexpr size_t kFlashSector = constants::runtime::ota::kFlashSectorBytes;
@@ -2927,7 +2952,7 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
   // during OTA begin/write lifecycle.
   if (!poison_ota_slot_header(target_part)) {
     out_err = "failed to poison OTA slot header";
-    return false;
+    return fail_with_drain();
   }
 
   esp_ota_handle_t ota_handle = 0;
@@ -2936,7 +2961,7 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
   ota_kick_wdt();
   if (begin_err != ESP_OK) {
     out_err = String("ota begin failed: ") + String(static_cast<int>(begin_err));
-    return false;
+    return fail_with_drain();
   }
 
   const size_t first_block_len = std::min<size_t>(static_cast<size_t>(fw_size), kFlashSector);
