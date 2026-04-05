@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 import urllib.error
+import requests
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -18,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519, padding
 
 from tools.azt_client.config import make_signed_config
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
-from tools.azt_client.http import http_json, get_json, urlopen_with_tls
+from tools.azt_client.http import http_json, get_json, urlopen_with_tls, requests_verify_for_url
 from tools.azt_sdk.services import build_service
 from tools.azt_sdk.services.url_service import base_url
 import os
@@ -443,26 +444,29 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
     data = bundle_path.read_bytes()
     base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{base}{upgrade_path}"
-    req = Request(url, data=data, method="POST", headers={"Content-Type": "application/octet-stream"})
     upload_timeout = max(int(timeout), 180)
     try:
-        with urlopen_with_tls(req, timeout=upload_timeout) as r:
-            body = r.read().decode("utf-8", errors="replace")
-            try:
-                parsed = json.loads(body)
-            except json.JSONDecodeError:
-                parsed = body
-            ok = isinstance(parsed, dict) and bool(parsed.get("ok"))
-            return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), {"url": url, "response": parsed, "timeout_seconds": upload_timeout}
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        return False, "ERR_OTA_BUNDLE_HTTP", {
-            "url": url,
-            "http_status": e.code,
-            "response": body,
-            "timeout_seconds": upload_timeout,
-            "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
-        }
+        r = requests.post(
+            url,
+            data=data,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=(15, upload_timeout),
+            verify=requests_verify_for_url(url),
+        )
+        body = r.text
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            parsed = body
+        if r.status_code >= 400:
+            return False, "ERR_OTA_BUNDLE_HTTP", {
+                "url": url,
+                "http_status": r.status_code,
+                "response": parsed,
+                "timeout_seconds": upload_timeout,
+            }
+        ok = isinstance(parsed, dict) and bool(parsed.get("ok"))
+        return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), {"url": url, "response": parsed, "timeout_seconds": upload_timeout}
     except Exception as e:
         return False, "ERR_OTA_BUNDLE_POST", {
             "url": url,
