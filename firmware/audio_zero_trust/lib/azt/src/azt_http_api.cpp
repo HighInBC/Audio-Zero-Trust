@@ -2913,35 +2913,11 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
   }
 
   constexpr size_t kFlashSector = constants::runtime::ota::kFlashSectorBytes;
-  constexpr size_t kEraseChunkBytes = kFlashSector;
-  const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
-  OtaEraseTaskCtx erase_ctx;
-  erase_ctx.part = target_part;
-  erase_ctx.total_len = erase_len;
-  erase_ctx.chunk_bytes = kEraseChunkBytes;
-  TaskHandle_t erase_task = nullptr;
-  BaseType_t erase_ok = xTaskCreatePinnedToCore(ota_erase_task,
-                                                 "azt_ota_erase",
-                                                 constants::runtime::ota::kTaskStackErase,
-                                                 &erase_ctx,
-                                                 1,
-                                                 &erase_task,
-                                                 0);
-  if (erase_ok != pdPASS || erase_task == nullptr) {
-    out_err = "failed to start OTA erase task";
-    return false;
-  }
-  uint32_t erase_wait_deadline = millis() + constants::runtime::ota::kEraseWaitMs;
-  while (!erase_ctx.done && static_cast<int32_t>(millis() - erase_wait_deadline) < 0) ota_kick_wdt();
-  if (!erase_ctx.done) {
-    vTaskDelete(erase_task);
-    out_err = "ota erase task timeout";
-    return false;
-  }
-  if (erase_ctx.failed) {
-    out_err = erase_ctx.err.length() ? erase_ctx.err : "failed to erase OTA slot";
-    return false;
-  }
+  (void)kFlashSector;
+
+  // Avoid long pre-erase stalls before reading request body: they can backpressure
+  // the client upload socket and trigger write timeouts. Let esp_ota handle erase
+  // during OTA begin/write lifecycle.
   if (!poison_ota_slot_header(target_part)) {
     out_err = "failed to poison OTA slot header";
     return false;
@@ -2949,7 +2925,7 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
 
   esp_ota_handle_t ota_handle = 0;
   ota_kick_wdt();
-  esp_err_t begin_err = esp_ota_begin(target_part, OTA_SIZE_UNKNOWN, &ota_handle);
+  esp_err_t begin_err = esp_ota_begin(target_part, static_cast<size_t>(fw_size), &ota_handle);
   ota_kick_wdt();
   if (begin_err != ESP_OK) {
     out_err = String("ota begin failed: ") + String(static_cast<int>(begin_err));
