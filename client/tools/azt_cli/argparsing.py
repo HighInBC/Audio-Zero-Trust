@@ -108,7 +108,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     spost.add_argument("--port", type=int, default=8443, help="Device HTTPS API port")
     spost.add_argument("--in", dest="in_path", default="", help="Input .otabundle file")
     spost.add_argument("--upgrade-path", default="/api/v0/device/upgrade", help="Upgrade endpoint path")
-    spost.add_argument("--timeout", type=int, default=45, help="HTTP timeout seconds")
+    spost.add_argument("--timeout", type=int, default=180, help="HTTP timeout seconds (recommend >=180 during active streaming)")
     spost.add_argument("--interactive", action="store_true", help="Prompt for missing values using [default] prompts")
     spost.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     spost.set_defaults(func=handlers.cmd_ota_bundle_post)

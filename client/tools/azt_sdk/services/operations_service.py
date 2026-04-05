@@ -444,26 +444,29 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
     base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{base}{upgrade_path}"
     req = Request(url, data=data, method="POST", headers={"Content-Type": "application/octet-stream"})
+    upload_timeout = max(int(timeout), 180)
     try:
-        with urlopen_with_tls(req, timeout=timeout) as r:
+        with urlopen_with_tls(req, timeout=upload_timeout) as r:
             body = r.read().decode("utf-8", errors="replace")
             try:
                 parsed = json.loads(body)
             except json.JSONDecodeError:
                 parsed = body
             ok = isinstance(parsed, dict) and bool(parsed.get("ok"))
-            return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), {"url": url, "response": parsed}
+            return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), {"url": url, "response": parsed, "timeout_seconds": upload_timeout}
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         return False, "ERR_OTA_BUNDLE_HTTP", {
             "url": url,
             "http_status": e.code,
             "response": body,
+            "timeout_seconds": upload_timeout,
             "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
         }
     except Exception as e:
         return False, "ERR_OTA_BUNDLE_POST", {
             "url": url,
+            "timeout_seconds": upload_timeout,
             "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
         }
 
