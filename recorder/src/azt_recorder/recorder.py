@@ -298,6 +298,12 @@ class RecordingSession:
                     # normal rollover => immediate next file
                     break
                 except AuthorizationError as e:
+                    code = getattr(e, "code", "")
+                    # Transient startup/endpoint races should not permanently halt the worker.
+                    if code in {"stream_header_line_invalid", "stream_next_header_len_missing", "stream_next_header_bytes_missing"}:
+                        print(f"[record] AUTH_RETRY device={self.ad.device_name} ip={self.ad.source_ip} err={e} backoff={backoff}s")
+                        await asyncio.sleep(backoff)
+                        continue
                     print(f"[record] AUTH_FAIL device={self.ad.device_name} ip={self.ad.source_ip} err={e}; worker halted pending re-authorization")
                     return
                 except Exception as e:
@@ -325,7 +331,17 @@ class RecordingSession:
             # Run blocking network+file write in thread to keep event loop responsive.
             out_path = await asyncio.to_thread(self._stream_to_file, req, base_out_dir, out_path, deadline)
         except Exception as e:
+            # Compatibility fallback: if dedicated stream endpoint is unreachable,
+            # retry once against API TLS endpoint while mixed-firmware rollout is in progress.
             stream_err = e
+            fallback_url = f"{self.ad.api_url}/stream"
+            if fallback_url != url:
+                try:
+                    req2 = urllib.request.Request(fallback_url, method="GET")
+                    out_path = await asyncio.to_thread(self._stream_to_file, req2, base_out_dir, out_path, deadline)
+                    stream_err = None
+                except Exception as e2:
+                    stream_err = e2
         finally:
             # Do not timestamp immediately on stream end.
             # Timestamping is gated by filesystem-observable completion:

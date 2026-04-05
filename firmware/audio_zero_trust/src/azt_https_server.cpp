@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <esp_https_server.h>
 #include <esp_system.h>
+#include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 #include <memory>
 
@@ -86,12 +87,6 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
       path += "?";
       path += q.get();
     }
-  }
-
-  // Compatibility fallback during split rollout: if dedicated stream TLS server
-  // is unavailable, still serve stream on API TLS endpoint.
-  if (path.startsWith("/stream")) {
-    return handle_https_stream(req);
   }
 
   if (method == "GET" && path == "/api/v0/device/upgrade") {
@@ -196,7 +191,9 @@ bool start_https_api_server(AppState* state, SemaphoreHandle_t state_mu, uint16_
   conf.prvtkey_pem = reinterpret_cast<const unsigned char*>(g_key.c_str());
   conf.prvtkey_len = g_key.length() + 1;
 
-  if (httpd_ssl_start(&g_https, &conf) != ESP_OK) {
+  esp_err_t api_start = httpd_ssl_start(&g_https, &conf);
+  if (api_start != ESP_OK) {
+    Serial.printf("AZT_HTTPS api_start_failed err=%d (%s)\n", (int)api_start, esp_err_to_name(api_start));
     g_https = nullptr;
     return false;
   }
@@ -205,13 +202,21 @@ bool start_https_api_server(AppState* state, SemaphoreHandle_t state_mu, uint16_
   get_any.uri = "/*";
   get_any.method = HTTP_GET;
   get_any.handler = handle_https_any;
-  if (httpd_register_uri_handler(g_https, &get_any) != ESP_OK) return false;
+  esp_err_t reg_get = httpd_register_uri_handler(g_https, &get_any);
+  if (reg_get != ESP_OK) {
+    Serial.printf("AZT_HTTPS api_register_get_failed err=%d (%s)\n", (int)reg_get, esp_err_to_name(reg_get));
+    return false;
+  }
 
   httpd_uri_t post_any = {};
   post_any.uri = "/*";
   post_any.method = HTTP_POST;
   post_any.handler = handle_https_any;
-  if (httpd_register_uri_handler(g_https, &post_any) != ESP_OK) return false;
+  esp_err_t reg_post = httpd_register_uri_handler(g_https, &post_any);
+  if (reg_post != ESP_OK) {
+    Serial.printf("AZT_HTTPS api_register_post_failed err=%d (%s)\n", (int)reg_post, esp_err_to_name(reg_post));
+    return false;
+  }
 
   return true;
 }
@@ -236,12 +241,19 @@ bool start_https_stream_server(AppState* state, SemaphoreHandle_t state_mu, uint
   conf.port_secure = port;
   conf.port_insecure = 0;
   conf.httpd.uri_match_fn = httpd_uri_match_wildcard;
+  // Keep stream listener light-weight to reduce RAM pressure.
+  conf.httpd.max_uri_handlers = 2;
+  conf.httpd.max_open_sockets = 2;
+  conf.httpd.lru_purge_enable = true;
+  conf.httpd.stack_size = 6144;
   conf.cacert_pem = reinterpret_cast<const unsigned char*>(g_cert.c_str());
   conf.cacert_len = g_cert.length() + 1;
   conf.prvtkey_pem = reinterpret_cast<const unsigned char*>(g_key.c_str());
   conf.prvtkey_len = g_key.length() + 1;
 
-  if (httpd_ssl_start(&g_https_stream, &conf) != ESP_OK) {
+  esp_err_t stream_start = httpd_ssl_start(&g_https_stream, &conf);
+  if (stream_start != ESP_OK) {
+    Serial.printf("AZT_HTTPS stream_start_failed err=%d (%s)\n", (int)stream_start, esp_err_to_name(stream_start));
     g_https_stream = nullptr;
     return false;
   }
@@ -250,7 +262,11 @@ bool start_https_stream_server(AppState* state, SemaphoreHandle_t state_mu, uint
   get_stream.uri = "/stream*";
   get_stream.method = HTTP_GET;
   get_stream.handler = handle_https_stream;
-  if (httpd_register_uri_handler(g_https_stream, &get_stream) != ESP_OK) return false;
+  esp_err_t reg_stream = httpd_register_uri_handler(g_https_stream, &get_stream);
+  if (reg_stream != ESP_OK) {
+    Serial.printf("AZT_HTTPS stream_register_failed err=%d (%s)\n", (int)reg_stream, esp_err_to_name(reg_stream));
+    return false;
+  }
 
   return true;
 }

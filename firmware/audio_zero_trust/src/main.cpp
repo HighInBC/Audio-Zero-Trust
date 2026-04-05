@@ -77,5 +77,15 @@ void loop() {
 
   azt::handle_serial_control(g_state, g_state_mu, g_serial_state);
 
+  static uint32_t last_stream_retry_ms = 0;
+  uint32_t now = millis();
+  if (!azt::https_stream_server_running() && (now - last_stream_retry_ms) >= 5000U) {
+    last_stream_retry_ms = now;
+    bool ok = azt::start_https_stream_server(&g_state, g_state_mu, azt::constants::runtime::kStreamTlsPort);
+    if (ok) {
+      Serial.printf("AZT_HTTPS stream_tls_port=%u (retry-ok)\n", azt::constants::runtime::kStreamTlsPort);
+    }
+  }
+
   delay(azt::constants::runtime::kIdleLoopDelayMs);
 }
