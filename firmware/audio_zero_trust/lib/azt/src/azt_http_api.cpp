@@ -2957,10 +2957,7 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
 
   esp_ota_handle_t ota_handle = 0;
   ota_kick_wdt();
-  // Keep OTA orchestration incremental under HTTPS load: avoid large up-front erase
-  // work inside esp_ota_begin(fw_size), and let erase/write proceed in smaller
-  // chunks through the queued writer path (aligned with legacy staged behavior).
-  esp_err_t begin_err = esp_ota_begin(target_part, OTA_SIZE_UNKNOWN, &ota_handle);
+  esp_err_t begin_err = esp_ota_begin(target_part, static_cast<size_t>(fw_size), &ota_handle);
   ota_kick_wdt();
   if (begin_err != ESP_OK) {
     out_err = String("ota begin failed: ") + String(static_cast<int>(begin_err));
