@@ -88,6 +88,11 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
     }
   }
 
+  // Compatibility fallback during split rollout: if dedicated stream TLS server
+  // is unavailable, still serve stream on API TLS endpoint.
+  if (path.startsWith("/stream")) {
+    return handle_https_stream(req);
+  }
 
   if (method == "GET" && path == "/api/v0/device/upgrade") {
     httpd_resp_set_status(req, "200 OK");
