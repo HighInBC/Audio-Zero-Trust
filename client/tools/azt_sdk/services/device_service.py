@@ -5,6 +5,8 @@ from urllib.parse import quote
 import base64
 import json
 import urllib.error
+import socket
+import time
 from pathlib import Path
 from urllib.request import Request
 import requests
@@ -33,6 +35,51 @@ def _error_detail(*, where: str, exc: Exception, url: str | None = None, context
     if context:
         out["context"] = context
     return out
+
+
+def _derive_discovery_name_candidates(host: str) -> set[str]:
+    h = (host or "").strip().lower()
+    if not h:
+        return set()
+    label = h.split(".")[0]
+    out = {label}
+    if label.endswith("-mic"):
+        out.add(label[:-4])
+    if label.endswith("-microphone"):
+        out.add(label[:-11])
+    return {x for x in out if x}
+
+
+def _resolve_host_via_discovery(host: str, timeout_s: float = 12.0) -> str | None:
+    candidates = _derive_discovery_name_candidates(host)
+    if not candidates:
+        return None
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("0.0.0.0", 33333))
+        except OSError:
+            return None
+        s.settimeout(0.25)
+        deadline = time.time() + max(0.2, float(timeout_s))
+        while time.time() < deadline:
+            try:
+                data, addr = s.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except Exception:
+                break
+            try:
+                d = json.loads(data.decode("utf-8", errors="strict"))
+            except Exception:
+                continue
+            n = str(d.get("device_name", "")).strip().lower()
+            if n in candidates:
+                return addr[0]
+    finally:
+        s.close()
+    return None
 
 
 def _get_json_safe(*, url: str, timeout: int, where: str, error: str) -> dict:
@@ -362,13 +409,51 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
     try:
         r = requests.get(url, stream=True, timeout=timeout, verify=requests_verify_for_url(url))
     except (requests.RequestException, TimeoutError, OSError) as e:
-        if out_file is not None:
-            out_file.close()
-        return False, {
-            "error": "STREAM_READ_REQUEST_FAILED",
-            "detail": _error_detail(where="device_service.stream_read", exc=e, url=url),
-            "out": resolved_out,
-        }
+        # mDNS can be unavailable on some hosts; for .local names, attempt a
+        # short UDP discovery-based IP resolution fallback and retry once.
+        msg = str(e)
+        host_is_local = (host or "").strip().lower().endswith(".local")
+        if host_is_local and ("NameResolutionError" in msg or "Temporary failure in name resolution" in msg or "Name or service not known" in msg):
+            ip = _resolve_host_via_discovery(host)
+            if ip:
+                retry_base = stream_base_url(host=ip, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+                retry_url = f"{retry_base}/stream"
+                try:
+                    r = requests.get(retry_url, stream=True, timeout=timeout, verify=requests_verify_for_url(retry_url))
+                    url = retry_url
+                except Exception as e2:
+                    if out_file is not None:
+                        out_file.close()
+                    return False, {
+                        "error": "STREAM_READ_REQUEST_FAILED",
+                        "detail": {
+                            "where": "device_service.stream_read",
+                            "primary": _error_detail(where="device_service.stream_read.primary", exc=e, url=url),
+                            "retry": _error_detail(where="device_service.stream_read.discovery_retry", exc=e2, url=retry_url),
+                            "discovery_ip": ip,
+                        },
+                        "out": resolved_out,
+                    }
+            else:
+                if out_file is not None:
+                    out_file.close()
+                return False, {
+                    "error": "STREAM_READ_REQUEST_FAILED",
+                    "detail": {
+                        "where": "device_service.stream_read",
+                        "primary": _error_detail(where="device_service.stream_read.primary", exc=e, url=url),
+                        "discovery_ip": None,
+                    },
+                    "out": resolved_out,
+                }
+        else:
+            if out_file is not None:
+                out_file.close()
+            return False, {
+                "error": "STREAM_READ_REQUEST_FAILED",
+                "detail": _error_detail(where="device_service.stream_read", exc=e, url=url),
+                "out": resolved_out,
+            }
     except Exception as e:
         if out_file is not None:
             out_file.close()
