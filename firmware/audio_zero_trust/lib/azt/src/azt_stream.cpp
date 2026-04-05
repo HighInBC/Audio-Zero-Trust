@@ -18,6 +18,10 @@
 #include "azt_stream_signer.h"
 #include "azt_stream_transport.h"
 
+#ifndef AZT_STREAM_SUMMARY_LOG
+#define AZT_STREAM_SUMMARY_LOG 0
+#endif
+
 namespace azt {
 
 static constexpr float kRecommendedDecodeGain = 4.0f;
@@ -533,6 +537,7 @@ static void handle_stream_impl(StreamTransport& client, int seconds, const AppSt
   const double busy_pct = (100.0 * static_cast<double>(process_us)) / static_cast<double>(total_us);
   MicIngressStats ingress = mic_ring_snapshot_stats(*mic_ring);
 
+#if AZT_STREAM_SUMMARY_LOG
   if (signbench_each_chunk) {
     const double sign_pct = (100.0 * static_cast<double>(sign_us)) / static_cast<double>(total_us);
     Serial.printf(
@@ -567,6 +572,10 @@ static void handle_stream_impl(StreamTransport& client, int seconds, const AppSt
         static_cast<unsigned long long>(ingress.i2s_empty),
         static_cast<unsigned>(mic_ring->high_water));
   }
+#else
+  (void)busy_pct;
+  (void)ingress;
+#endif
 
   delete mic_ring;
 }
