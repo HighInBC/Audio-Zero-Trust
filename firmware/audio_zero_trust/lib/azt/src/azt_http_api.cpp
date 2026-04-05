@@ -2280,6 +2280,133 @@ void drain_request_body_best_effort(WiFiClient& client, int max_bytes, uint32_t 
   }
 }
 
+
+
+struct OtaBundlePreflight {
+  String ota_version;
+  uint64_t ota_version_code = 0;
+  bool has_rollback_floor_code = false;
+  uint64_t ota_rollback_floor_code = 0;
+  int fw_size = 0;
+  String fw_sha;
+  int bytes_left = 0;
+};
+
+static bool ota_preflight_bundle(const String& header_line,
+                                 int content_len,
+                                 AppState& state,
+                                 OtaBundlePreflight& out,
+                                 String& out_err) {
+  String signer_fp;
+  String meta_b64;
+  String meta_sig_b64;
+  if (!validate_ota_bundle_header_line(header_line, signer_fp, meta_b64, meta_sig_b64, out_err)) {
+    return false;
+  }
+
+  String trusted_pem = state.ota_signer_override_public_key_pem.length() > 0
+                         ? state.ota_signer_override_public_key_pem
+                         : String(kOtaSignerPublicKeyPem);
+  String trusted_fp;
+  std::vector<uint8_t> trusted_pub;
+  if (!b64_decode_vec(trusted_pem, trusted_pub) || trusted_pub.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
+    out_err = "trusted ota signer key invalid";
+    return false;
+  }
+  uint8_t trusted_h[32] = {0};
+  if (!sha256_bytes(trusted_pub.data(), trusted_pub.size(), trusted_h)) {
+    out_err = "trusted ota signer hash failed";
+    return false;
+  }
+  trusted_fp = hex_lower(trusted_h, sizeof(trusted_h));
+  if (trusted_fp != signer_fp) {
+    out_err = "signer fingerprint not trusted";
+    return false;
+  }
+
+  std::vector<uint8_t> meta_raw;
+  if (!b64_decode_vec(meta_b64, meta_raw) || meta_raw.empty()) {
+    out_err = "meta_b64 invalid";
+    return false;
+  }
+  if (!verify_ed25519_signature_b64(trusted_pem, meta_raw, meta_sig_b64)) {
+    out_err = "meta signature verify failed";
+    return false;
+  }
+
+  JsonDocument meta;
+  if (deserializeJson(meta, meta_raw.data(), meta_raw.size())) {
+    out_err = "meta json parse failed";
+    return false;
+  }
+
+  String ota_target = String((const char*)(meta["target"] | ""));
+#if CONFIG_IDF_TARGET_ESP32S3
+  const char* expected_target = "atom-echos3r";
+#else
+  const char* expected_target = "atom-echo";
+#endif
+  if (ota_target.length() == 0) {
+    out_err = "missing target in bundle metadata";
+    return false;
+  }
+  if (!ota_target.equalsIgnoreCase(expected_target)) {
+    out_err = String("target mismatch: bundle=") + ota_target + " device=" + expected_target;
+    return false;
+  }
+
+  out.ota_version = String((const char*)(meta["version"] | ""));
+  String vc_err;
+  if (!parse_u64_meta_field(meta, "version_code", out.ota_version_code, vc_err) || out.ota_version_code == 0) {
+    out_err = vc_err.length() ? vc_err : "invalid version_code";
+    return false;
+  }
+
+  String rf_err;
+  if (!meta["rollback_floor_code"].isNull()) {
+    out.has_rollback_floor_code = true;
+    if (!parse_u64_meta_field(meta, "rollback_floor_code", out.ota_rollback_floor_code, rf_err)) {
+      out_err = rf_err;
+      return false;
+    }
+  } else {
+    out_err = "missing rollback_floor_code (required for OTA bundle acceptance; set --rollback-floor-code, e.g. 'same')";
+    return false;
+  }
+
+  if (out.ota_version_code < state.ota_min_allowed_version_code) {
+    out_err = "version_code below rollback floor";
+    return false;
+  }
+
+  uint64_t current_version_code = state.last_ota_version_code;
+  if (current_version_code == 0 && state.last_ota_version.length() > 0) {
+    char* end = nullptr;
+    unsigned long long parsed = strtoull(state.last_ota_version.c_str(), &end, 10);
+    if (end && *end == '\0') {
+      current_version_code = static_cast<uint64_t>(parsed);
+    }
+  }
+  if (current_version_code > 0 && out.ota_version_code == current_version_code) {
+    out_err = "version_code equals current version";
+    return false;
+  }
+
+  if (!validate_ota_firmware_meta(meta, out.fw_size, out.fw_sha, out_err)) {
+    return false;
+  }
+
+  if (!validate_ota_bundle_payload_lengths(content_len,
+                                           static_cast<int>(header_line.length()),
+                                           out.fw_size,
+                                           out.bytes_left,
+                                           out_err)) {
+    return false;
+  }
+
+  return true;
+}
+
 static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, AppState& state, String& out_err) {
   out_err = "";
   ota_bc("S0_ENTER");
@@ -2763,114 +2890,17 @@ bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, App
     return false;
   }
 
-  String signer_fp;
-  String meta_b64;
-  String meta_sig_b64;
-  if (!validate_ota_bundle_header_line(header_line, signer_fp, meta_b64, meta_sig_b64, out_err)) {
+  OtaBundlePreflight preflight;
+  if (!ota_preflight_bundle(header_line, content_len, state, preflight, out_err)) {
     return false;
   }
-
-  String trusted_pem = state.ota_signer_override_public_key_pem.length() > 0
-                         ? state.ota_signer_override_public_key_pem
-                         : String(kOtaSignerPublicKeyPem);
-  String trusted_fp;
-  std::vector<uint8_t> trusted_pub;
-  if (!b64_decode_vec(trusted_pem, trusted_pub) || trusted_pub.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
-    out_err = "trusted ota signer key invalid";
-    return false;
-  }
-  uint8_t trusted_h[32] = {0};
-  if (!sha256_bytes(trusted_pub.data(), trusted_pub.size(), trusted_h)) {
-    out_err = "trusted ota signer hash failed";
-    return false;
-  }
-  trusted_fp = hex_lower(trusted_h, sizeof(trusted_h));
-  if (trusted_fp != signer_fp) {
-    out_err = "signer fingerprint not trusted";
-    return false;
-  }
-
-  std::vector<uint8_t> meta_raw;
-  if (!b64_decode_vec(meta_b64, meta_raw) || meta_raw.empty()) {
-    out_err = "meta_b64 invalid";
-    return false;
-  }
-  if (!verify_ed25519_signature_b64(trusted_pem, meta_raw, meta_sig_b64)) {
-    out_err = "meta signature verify failed";
-    return false;
-  }
-
-  JsonDocument meta;
-  if (deserializeJson(meta, meta_raw.data(), meta_raw.size())) {
-    out_err = "meta json parse failed";
-    return false;
-  }
-
-  String ota_target = String((const char*)(meta["target"] | ""));
-#if CONFIG_IDF_TARGET_ESP32S3
-  const char* expected_target = "atom-echos3r";
-#else
-  const char* expected_target = "atom-echo";
-#endif
-  if (ota_target.length() == 0) {
-    out_err = "missing target in bundle metadata";
-    return false;
-  }
-  if (!ota_target.equalsIgnoreCase(expected_target)) {
-    out_err = String("target mismatch: bundle=") + ota_target + " device=" + expected_target;
-    return false;
-  }
-
-  String ota_version = String((const char*)(meta["version"] | ""));
-  uint64_t ota_version_code = 0;
-  String vc_err;
-  if (!parse_u64_meta_field(meta, "version_code", ota_version_code, vc_err) || ota_version_code == 0) {
-    out_err = vc_err.length() ? vc_err : "invalid version_code";
-    return false;
-  }
-  bool has_rollback_floor_code = false;
-  uint64_t ota_rollback_floor_code = 0;
-  String rf_err;
-  if (!meta["rollback_floor_code"].isNull()) {
-    has_rollback_floor_code = true;
-    if (!parse_u64_meta_field(meta, "rollback_floor_code", ota_rollback_floor_code, rf_err)) {
-      out_err = rf_err;
-      return false;
-    }
-  } else {
-    out_err = "missing rollback_floor_code (required for OTA bundle acceptance; set --rollback-floor-code, e.g. 'same')";
-    return false;
-  }
-
-  if (ota_version_code < state.ota_min_allowed_version_code) {
-    out_err = "version_code below rollback floor";
-    return false;
-  }
-
-  uint64_t current_version_code = state.last_ota_version_code;
-  if (current_version_code == 0 && state.last_ota_version.length() > 0) {
-    char* end = nullptr;
-    unsigned long long parsed = strtoull(state.last_ota_version.c_str(), &end, 10);
-    if (end && *end == '\0') current_version_code = static_cast<uint64_t>(parsed);
-  }
-  if (current_version_code > 0 && ota_version_code == current_version_code) {
-    out_err = "version_code equals current version";
-    return false;
-  }
-
-  int fw_size = 0;
-  String fw_sha;
-  if (!validate_ota_firmware_meta(meta, fw_size, fw_sha, out_err)) {
-    return false;
-  }
-
-  if (!validate_ota_bundle_payload_lengths(content_len,
-                                           static_cast<int>(header_line.length()),
-                                           fw_size,
-                                           bytes_left,
-                                           out_err)) {
-    return false;
-  }
+  const String ota_version = preflight.ota_version;
+  const uint64_t ota_version_code = preflight.ota_version_code;
+  const bool has_rollback_floor_code = preflight.has_rollback_floor_code;
+  const uint64_t ota_rollback_floor_code = preflight.ota_rollback_floor_code;
+  const int fw_size = preflight.fw_size;
+  const String fw_sha = preflight.fw_sha;
+  bytes_left = preflight.bytes_left;
 
   const esp_partition_t* target_part = esp_ota_get_next_update_partition(nullptr);
   if (!target_part) {
