@@ -32,6 +32,17 @@ def run(args: argparse.Namespace) -> int:
             )
             return 1
 
+        key_path = (getattr(args, "key_path", "") or "").strip()
+        if out_path and not key_path:
+            emit_envelope(
+                command=command_name,
+                ok=False,
+                error="STREAM_READ_ARGS",
+                detail="trusted recording requires --key <admin_private_key.pem>",
+                as_json=bool(getattr(args, "as_json", False)),
+            )
+            return 1
+
         ok, payload = stream_read(
             host=args.host,
             port=int(args.port),
@@ -39,6 +50,7 @@ def run(args: argparse.Namespace) -> int:
             timeout=int(args.timeout),
             out_path=(out_path or None),
             probe=probe,
+            key_path=(key_path or None),
         )
         emit_envelope(
             command=command_name,

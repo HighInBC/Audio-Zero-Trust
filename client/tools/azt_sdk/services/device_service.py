@@ -12,6 +12,8 @@ import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
+from tools.azt_client.crypto import load_private_key_auto
+
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
 import os
 
@@ -233,7 +235,7 @@ def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: in
     return ok, {"status": status, "location": location, "url": req_url}
 
 
-def _verify_stream_header_cert_gate(preface: bytes) -> tuple[bool, str]:
+def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519PublicKey) -> tuple[bool, str]:
     if not preface.startswith(b"AZT1\n"):
         return False, "ERR_STREAM_MAGIC"
     off = 5
@@ -271,22 +273,50 @@ def _verify_stream_header_cert_gate(preface: bytes) -> tuple[bool, str]:
     try:
         cert_payload_raw = base64.b64decode(cert_doc["certificate_payload_b64"], validate=True)
         cert_payload = json.loads(cert_payload_raw.decode("utf-8"))
-        header_serial = plain.get("device_certificate_serial")
-        if isinstance(header_serial, str) and header_serial:
-            if cert_payload.get("certificate_serial") != header_serial:
-                return False, "ERR_STREAM_CERT_SERIAL"
+        cert_sig_b64 = cert_doc.get("signature_b64")
+        if not isinstance(cert_sig_b64, str) or not cert_sig_b64:
+            return False, "ERR_STREAM_CERT_SIG"
+        cert_sig = base64.b64decode(cert_sig_b64, validate=True)
     except Exception:
         return False, "ERR_STREAM_CERT_SCHEMA"
+
+    try:
+        admin_pub.verify(cert_sig, cert_payload_raw)
+    except Exception:
+        return False, "ERR_STREAM_CERT_SIG_VERIFY"
+
+    # Binding checks
+    if cert_payload.get("device_sign_public_key_b64") != signer_b64:
+        return False, "ERR_STREAM_CERT_BINDING"
+    header_serial = plain.get("device_certificate_serial")
+    if isinstance(header_serial, str) and header_serial:
+        if cert_payload.get("certificate_serial") != header_serial:
+            return False, "ERR_STREAM_CERT_SERIAL"
 
     return True, ""
 
 
-def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool) -> tuple[bool, dict]:
+def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{b}/stream"
     total = 0
     import time
     from pathlib import Path
+
+    admin_pub = None
+    if not probe:
+        if not key_path:
+            return False, {"error": "STREAM_READ_ARGS", "detail": "trusted recording requires key_path"}
+        try:
+            priv = load_private_key_auto(Path(str(key_path)), purpose=str(key_path))
+            if not isinstance(priv, ed25519.Ed25519PrivateKey):
+                return False, {"error": "STREAM_READ_KEY", "detail": "admin key must be Ed25519 private key"}
+            admin_pub = priv.public_key()
+        except Exception as e:
+            return False, {
+                "error": "STREAM_READ_KEY",
+                "detail": _error_detail(where="device_service.stream_read.key", exc=e),
+            }
 
     out_file = None
     resolved_out = ""
@@ -330,7 +360,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                         first_nl = preface_buf.find(b"\n", 5)
                         second_nl = preface_buf.find(b"\n", first_nl + 1) if first_nl >= 0 else -1
                         if second_nl >= 0 or len(preface_buf) >= preface_required_bytes:
-                            ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf))
+                            ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
                             if not ok_hdr:
                                 return False, {
                                     "error": err_hdr,
@@ -368,7 +398,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
         if out_file is not None:
             out_file.close()
     if not preface_checked and not probe:
-        ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf))
+        ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
         if not ok_hdr:
             return False, {
                 "error": err_hdr,
