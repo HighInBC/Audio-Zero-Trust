@@ -17,36 +17,13 @@ namespace {
 
 azt::AppState g_state;
 WiFiServer g_api_server(azt::kHttpPort);
-WiFiServer g_stream_server(azt::constants::runtime::kStreamPort);
 SemaphoreHandle_t g_state_mu = nullptr;
-TaskHandle_t g_stream_task = nullptr;
 
 azt::SerialControlState g_serial_state;
 
 void log_boot_marker(const char* msg) {
   if (!msg) return;
   Serial.printf("[Serial] %s\n", msg);
-}
-
-void stream_server_task(void*) {
-  for (;;) {
-    WiFiClient client = g_stream_server.available();
-    if (!client) {
-      delay(azt::constants::runtime::kIdleLoopDelayMs);
-      continue;
-    }
-
-    azt::AppState snapshot;
-    if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(azt::constants::runtime::kStateLockWaitMsFast)) != pdTRUE) {
-      client.stop();
-      continue;
-    }
-    snapshot = g_state;
-    xSemaphoreGive(g_state_mu);
-
-    azt::handle_client_stream_only(client, snapshot);
-    client.stop();
-  }
 }
 
 }  // namespace
@@ -77,18 +54,9 @@ void setup() {
   azt::setup_audio_input(g_state);
 
   g_api_server.begin();
-  g_stream_server.begin();
   bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, azt::constants::runtime::kApiTlsPort);
 
-  xTaskCreatePinnedToCore(stream_server_task,
-                          "azt_stream_server",
-                          azt::constants::runtime::kTaskStackStreamServer,
-                          nullptr,
-                          static_cast<UBaseType_t>(azt::constants::runtime::kTaskPriorityNormal),
-                          &g_stream_task,
-                          static_cast<BaseType_t>(azt::constants::runtime::kTaskCore0));
-
-  Serial.printf("AZT_HTTP api_port=%u stream_port=%u\n", azt::kHttpPort, azt::constants::runtime::kStreamPort);
+  Serial.printf("AZT_HTTP api_port=%u\n", azt::kHttpPort);
   log_boot_marker("http_server_started");
   if (https_ok) {
     Serial.printf("AZT_HTTPS api_tls_port=%u\n", azt::constants::runtime::kApiTlsPort);

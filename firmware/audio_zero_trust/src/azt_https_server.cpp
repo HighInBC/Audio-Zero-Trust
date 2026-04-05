@@ -8,6 +8,8 @@
 #include <memory>
 
 #include "azt_http_api.h"
+#include "azt_stream.h"
+#include "azt_stream_transport.h"
 
 namespace {
 String json_escape_for_error(const String& in) {
@@ -54,76 +56,23 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
   }
 
   if (path.startsWith("/stream")) {
-    // HTTPS stream proxy: preserve existing stream behavior by relaying to internal
-    // stream server (port 8081) instead of reimplementing stream pipeline here.
-    WiFiClient upstream;
-    upstream.setTimeout(5000);
-    if (!upstream.connect(WiFi.localIP(), 8081)) {
-      httpd_resp_set_status(req, "502 Bad Gateway");
+    if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(4000)) != pdTRUE) {
+      httpd_resp_set_status(req, "503 Service Unavailable");
       httpd_resp_set_type(req, "application/json");
-      httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_STREAM_UPSTREAM_CONNECT\"}");
+      httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_STATE_LOCK\"}");
       return ESP_OK;
     }
+    AppState state_snapshot = *g_state;
+    xSemaphoreGive(g_state_mu);
 
-    String req_line = String("GET ") + path + " HTTP/1.1\r\nHost: " + WiFi.localIP().toString() +
-                      "\r\nConnection: close\r\n\r\n";
-    upstream.print(req_line);
+    int seconds = parse_seconds_from_path(path);
+    bool sigbench = parse_signbench_from_path(path);
+    bool telemetry = path.indexOf("telemetry=1") >= 0;
+    int drop_test_frames = parse_drop_test_frames_from_path(path);
 
-    String status_line = upstream.readStringUntil('\n');
-    status_line.trim();
-    int status_code = 200;
-    if (status_line.startsWith("HTTP/")) {
-      int sp1 = status_line.indexOf(' ');
-      if (sp1 > 0) {
-        int sp2 = status_line.indexOf(' ', sp1 + 1);
-        String sc = (sp2 > sp1) ? status_line.substring(sp1 + 1, sp2) : status_line.substring(sp1 + 1);
-        status_code = sc.toInt();
-        if (status_code <= 0) status_code = 500;
-      }
-    }
-
-    String content_type = "application/octet-stream";
-    int content_len = -1;
-    while (upstream.connected()) {
-      String h = upstream.readStringUntil('\n');
-      if (h == "\r" || h.length() == 0) break;
-      String hs = h;
-      hs.trim();
-      if (hs.startsWith("Content-Type:")) {
-        content_type = hs.substring(String("Content-Type:").length());
-        content_type.trim();
-      } else if (hs.startsWith("Content-Length:")) {
-        String v = hs.substring(String("Content-Length:").length());
-        v.trim();
-        content_len = v.toInt();
-      }
-    }
-
-    String status = String(status_code) + (status_code == 200 ? " OK" : " Error");
-    httpd_resp_set_status(req, status.c_str());
-    httpd_resp_set_type(req, content_type.c_str());
-
-    uint8_t buf[1024];
-    int remaining = content_len;
-    while (upstream.connected() || upstream.available()) {
-      int want = sizeof(buf);
-      if (remaining >= 0 && remaining < want) want = remaining;
-      int n = upstream.read(reinterpret_cast<uint8_t*>(buf), static_cast<size_t>(want));
-      if (n > 0) {
-        if (httpd_resp_send_chunk(req, reinterpret_cast<const char*>(buf), n) != ESP_OK) {
-          upstream.stop();
-          return ESP_OK;
-        }
-        if (remaining >= 0) {
-          remaining -= n;
-          if (remaining <= 0) break;
-        }
-      } else {
-        vTaskDelay(pdMS_TO_TICKS(1));
-      }
-    }
-    httpd_resp_send_chunk(req, nullptr, 0);
-    upstream.stop();
+    HttpsChunkedStreamTransport transport(req);
+    handle_stream_transport(transport, seconds, state_snapshot, sigbench, telemetry, drop_test_frames);
+    (void)transport.finish();
     return ESP_OK;
   }
 

@@ -16,6 +16,7 @@
 #include "azt_stream_header.h"
 #include "azt_stream_record.h"
 #include "azt_stream_signer.h"
+#include "azt_stream_transport.h"
 
 namespace azt {
 
@@ -233,14 +234,22 @@ void send_json(WiFiClient& client, int code, const String& body) {
   client.print(body);
 }
 
+static void send_json_transport(StreamTransport& transport, int code, const String& body) {
+  String head = String("HTTP/1.1 ") + String(code) + (code == 200 ? " OK\r\n" : " Error\r\n") +
+                "Content-Type: application/json\r\nConnection: close\r\nContent-Length: " +
+                String(body.length()) + "\r\n\r\n";
+  (void)transport.write_text(head.c_str());
+  (void)transport.write_text(body.c_str());
+}
+
 static constexpr BaseType_t kStreamPipelineCore = 1;
 static constexpr BaseType_t kSignerCore = 0;
 
-static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
+static void handle_stream_impl(StreamTransport& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
   if (!state.signed_config_ready ||
       state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64 ||
       state.recording_pubkey_pem.length() == 0 || state.recording_fingerprint_hex.length() != 64) {
-    send_json(client, 403,
+    send_json_transport(client, 403,
               "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"stream disabled until signed config with admin_key and recording_key is installed\"}");
     return;
   }
@@ -249,7 +258,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   bool signbench_enabled = false;
 
   if (sodium_init() < 0 || !load_device_sign_sk(sign_sk)) {
-    send_json(client, 500,
+    send_json_transport(client, 500,
               "{\"ok\":false,\"error\":\"ERR_DEVICE_SIGN_KEY\",\"detail\":\"device signing key unavailable\"}");
     return;
   }
@@ -260,16 +269,16 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
 
   StreamSigner signer;
   if (!signer.begin(sign_sk, xTaskGetCurrentTaskHandle(), kSignerCore)) {
-    send_json(client, 500,
+    send_json_transport(client, 500,
               "{\"ok\":false,\"error\":\"ERR_RUNTIME\",\"detail\":\"failed to start signer task\"}");
     return;
   }
 
-  client.print("HTTP/1.1 200 OK\r\n");
-  client.print("Content-Type: application/octet-stream\r\n");
-  client.print("Cache-Control: no-store\r\n");
-  client.print("Connection: close\r\n");
-  client.print("Transfer-Encoding: chunked\r\n\r\n");
+  client.write_text("HTTP/1.1 200 OK\r\n");
+  client.write_text("Content-Type: application/octet-stream\r\n");
+  client.write_text("Cache-Control: no-store\r\n");
+  client.write_text("Connection: close\r\n");
+  client.write_text("Transfer-Encoding: chunked\r\n\r\n");
 
   StreamCtx sc{};
   std::vector<uint8_t> prefix;
@@ -304,12 +313,12 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
                            staleness_s,
                            audio_frame_duration_ms,
                            prefix)) {
-    client.print("0\r\n\r\n");
+    client.write_text("0\r\n\r\n");
     client.flush();
     return;
   }
   if (!send_chunked(client, prefix.data(), prefix.size())) {
-    client.print("0\r\n\r\n");
+    client.write_text("0\r\n\r\n");
     client.flush();
     return;
   }
@@ -317,7 +326,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   MicRing* mic_ring = new MicRing();
   if (!mic_ring) {
     signer.stop();
-    send_json(client, 500,
+    send_json_transport(client, 500,
               "{\"ok\":false,\"error\":\"ERR_RUNTIME\",\"detail\":\"failed to allocate mic ring\"}");
     return;
   }
@@ -332,7 +341,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
                               kStreamPipelineCore) != pdPASS) {
     signer.stop();
     delete mic_ring;
-    send_json(client, 500,
+    send_json_transport(client, 500,
               "{\"ok\":false,\"error\":\"ERR_RUNTIME\",\"detail\":\"failed to start mic reader task\"}");
     return;
   }
@@ -405,7 +414,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     }
 
     while (pending_dropped_frames > 0) {
-      int afw_notice = client.availableForWrite();
+      int afw_notice = client.available_for_write();
       if (should_defer_drop_notice_for_backpressure(afw_notice, 64)) break;
       uint16_t emit = static_cast<uint16_t>(std::min<uint32_t>(pending_dropped_frames, 0xFFFF));
       if (!encrypt_dropped_frames_block_and_chain(sc, emit, rec)) break;
@@ -414,7 +423,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       dropped_notice_blocks++;
     }
 
-    int afw = client.availableForWrite();
+    int afw = client.available_for_write();
     if (is_low_write_capacity(afw, 32)) {
       bool stalled = apply_drop_and_check_stall(1, frame_samples, pending_dropped_frames, dropped_frames_total, contiguous_drop_frames, kMaxContiguousDropMs, sample_rate_hz);
       StreamLoopDecision d = evaluate_stream_loop_branch(false, false, true, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
@@ -506,7 +515,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     dropped_notice_blocks++;
   }
 
-  client.print("0\r\n\r\n");
+  client.write_text("0\r\n\r\n");
   client.flush();
 
   signer.stop();
@@ -566,9 +575,19 @@ struct StreamTaskCtx {
 
 static void stream_task_entry(void* arg) {
   StreamTaskCtx* ctx = reinterpret_cast<StreamTaskCtx*>(arg);
-  handle_stream_impl(*ctx->client, ctx->seconds, *ctx->state, ctx->signbench_each_chunk, ctx->enable_telemetry, ctx->drop_test_frames);
+  WiFiClientStreamTransport transport(*ctx->client);
+  handle_stream_impl(transport, ctx->seconds, *ctx->state, ctx->signbench_each_chunk, ctx->enable_telemetry, ctx->drop_test_frames);
   xTaskNotifyGive(ctx->parent);
   vTaskDelete(nullptr);
+}
+
+void handle_stream_transport(StreamTransport& transport,
+                             int seconds,
+                             const AppState& state,
+                             bool signbench_each_chunk,
+                             bool enable_telemetry,
+                             int drop_test_frames) {
+  handle_stream_impl(transport, seconds, state, signbench_each_chunk, enable_telemetry, drop_test_frames);
 }
 
 void handle_stream(WiFiClient& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {

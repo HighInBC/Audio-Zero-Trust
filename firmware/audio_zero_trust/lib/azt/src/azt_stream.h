@@ -1,10 +1,12 @@
 #pragma once
 
 #include <WiFiClient.h>
+#include <esp_http_server.h>
 
 #include <vector>
 
 #include "azt_app_state.h"
+#include "azt_stream_transport.h"
 
 namespace azt {
 
@@ -80,6 +82,13 @@ TelemetrySnapshotV1 telemetry_snapshot_from_acc(const TelemetryAccumulator& acc)
 void telemetry_reset(TelemetryAccumulator& acc);
 
 void send_json(WiFiClient& client, int code, const String& body);
+void handle_stream_transport(StreamTransport& transport,
+                             int seconds,
+                             const AppState& state,
+                             bool signbench_each_chunk = false,
+                             bool enable_telemetry = false,
+                             int drop_test_frames = 0);
+
 void handle_stream(WiFiClient& client,
                    int seconds,
                    const AppState& state,
