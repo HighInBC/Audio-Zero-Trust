@@ -235,65 +235,94 @@ def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: in
     return ok, {"status": status, "location": location, "url": req_url}
 
 
-def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519PublicKey) -> tuple[bool, str]:
+def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519PublicKey) -> tuple[bool, str, dict]:
+    detail: dict = {
+        "where": "device_service.stream_read.preface_gate",
+        "preface_bytes": len(preface),
+    }
     if not preface.startswith(b"AZT1\n"):
-        return False, "ERR_STREAM_MAGIC"
+        detail["got_prefix_hex"] = preface[:16].hex()
+        detail["got_prefix_text"] = preface[:16].decode("utf-8", errors="replace")
+        if preface.startswith(b"HTTP/"):
+            return False, "ERR_STREAM_NESTED_HTTP_PREFACE", detail
+        return False, "ERR_STREAM_MAGIC", detail
     off = 5
     nl = preface.find(b"\n", off)
     if nl < 0:
-        return False, "ERR_STREAM_HEADER_JSON"
+        detail["missing"] = "header_line_newline"
+        return False, "ERR_STREAM_HEADER_JSON", detail
     plain_line = preface[off:nl]
     sig_nl = preface.find(b"\n", nl + 1)
     if sig_nl < 0:
-        return False, "ERR_STREAM_HEADER_SIG_LINE"
+        detail["missing"] = "signature_line_newline"
+        return False, "ERR_STREAM_HEADER_SIG_LINE", detail
     sig_line = preface[nl + 1:sig_nl]
 
     try:
         plain = json.loads(plain_line.decode("utf-8"))
-    except Exception:
-        return False, "ERR_STREAM_HEADER_JSON"
+    except Exception as e:
+        detail["header_line_preview"] = plain_line[:80].decode("utf-8", errors="replace")
+        detail["exception_type"] = type(e).__name__
+        detail["message"] = str(e)
+        return False, "ERR_STREAM_HEADER_JSON", detail
 
     cert_doc = plain.get("device_certificate")
     if not isinstance(cert_doc, dict):
-        return False, "ERR_STREAM_CERT_REQUIRED"
+        detail["missing"] = "device_certificate"
+        return False, "ERR_STREAM_CERT_REQUIRED", detail
     if not isinstance(cert_doc.get("certificate_payload_b64"), str) or not cert_doc.get("certificate_payload_b64"):
-        return False, "ERR_STREAM_CERT_REQUIRED"
+        detail["missing"] = "device_certificate.certificate_payload_b64"
+        return False, "ERR_STREAM_CERT_REQUIRED", detail
 
     signer_b64 = plain.get("this_header_signing_key_b64")
     if not isinstance(signer_b64, str) or not signer_b64:
-        return False, "ERR_STREAM_HEADER_SIGNER_KEY"
+        detail["missing"] = "this_header_signing_key_b64"
+        return False, "ERR_STREAM_HEADER_SIGNER_KEY", detail
 
     try:
         pub = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(signer_b64, validate=True))
         sig = base64.b64decode(sig_line, validate=True)
         pub.verify(sig, plain_line)
-    except Exception:
-        return False, "ERR_STREAM_HEADER_SIG_VERIFY"
+    except Exception as e:
+        detail["exception_type"] = type(e).__name__
+        detail["message"] = str(e)
+        return False, "ERR_STREAM_HEADER_SIG_VERIFY", detail
 
     try:
         cert_payload_raw = base64.b64decode(cert_doc["certificate_payload_b64"], validate=True)
         cert_payload = json.loads(cert_payload_raw.decode("utf-8"))
         cert_sig_b64 = cert_doc.get("signature_b64")
         if not isinstance(cert_sig_b64, str) or not cert_sig_b64:
-            return False, "ERR_STREAM_CERT_SIG"
+            detail["missing"] = "device_certificate.signature_b64"
+            return False, "ERR_STREAM_CERT_SIG", detail
         cert_sig = base64.b64decode(cert_sig_b64, validate=True)
-    except Exception:
-        return False, "ERR_STREAM_CERT_SCHEMA"
+    except Exception as e:
+        detail["exception_type"] = type(e).__name__
+        detail["message"] = str(e)
+        return False, "ERR_STREAM_CERT_SCHEMA", detail
 
     try:
         admin_pub.verify(cert_sig, cert_payload_raw)
-    except Exception:
-        return False, "ERR_STREAM_CERT_SIG_VERIFY"
+    except Exception as e:
+        detail["exception_type"] = type(e).__name__
+        detail["message"] = str(e)
+        return False, "ERR_STREAM_CERT_SIG_VERIFY", detail
 
     # Binding checks
     if cert_payload.get("device_sign_public_key_b64") != signer_b64:
-        return False, "ERR_STREAM_CERT_BINDING"
+        detail["binding_field"] = "device_sign_public_key_b64"
+        return False, "ERR_STREAM_CERT_BINDING", detail
     header_serial = plain.get("device_certificate_serial")
     if isinstance(header_serial, str) and header_serial:
-        if cert_payload.get("certificate_serial") != header_serial:
-            return False, "ERR_STREAM_CERT_SERIAL"
+        cert_serial = cert_payload.get("certificate_serial")
+        if cert_serial != header_serial:
+            detail["header_certificate_serial"] = header_serial
+            detail["payload_certificate_serial"] = cert_serial
+            return False, "ERR_STREAM_CERT_SERIAL", detail
 
-    return True, ""
+    detail["certificate_serial"] = cert_payload.get("certificate_serial")
+    detail["header_certificate_serial"] = plain.get("device_certificate_serial")
+    return True, "", detail
 
 
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
@@ -322,7 +351,8 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
     resolved_out = ""
     preface_buf = bytearray()
     preface_checked = bool(probe)
-    preface_required_bytes = 4096
+    # AZT header JSON can be large; allow enough bytes before forcing preface parse.
+    preface_required_bytes = 16384
     if not probe and out_path:
       p = Path(out_path)
       p.parent.mkdir(parents=True, exist_ok=True)
@@ -360,11 +390,15 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                         first_nl = preface_buf.find(b"\n", 5)
                         second_nl = preface_buf.find(b"\n", first_nl + 1) if first_nl >= 0 else -1
                         if second_nl >= 0 or len(preface_buf) >= preface_required_bytes:
-                            ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
+                            ok_hdr, err_hdr, gate_detail = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
                             if not ok_hdr:
                                 return False, {
                                     "error": err_hdr,
-                                    "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                                    "detail": {
+                                        "where": "device_service.stream_read.preface_gate",
+                                        "summary": "stream rejected before write: missing/invalid certificate or header signature",
+                                        "gate": gate_detail,
+                                    },
                                     "bytes": total,
                                     "out": resolved_out,
                                     "url": url,
@@ -398,11 +432,15 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
         if out_file is not None:
             out_file.close()
     if not preface_checked and not probe:
-        ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
+        ok_hdr, err_hdr, gate_detail = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
         if not ok_hdr:
             return False, {
                 "error": err_hdr,
-                "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                "detail": {
+                    "where": "device_service.stream_read.preface_gate.final",
+                    "summary": "stream rejected before write: missing/invalid certificate or header signature",
+                    "gate": gate_detail,
+                },
                 "bytes": total,
                 "out": resolved_out,
                 "url": url,

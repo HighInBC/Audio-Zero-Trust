@@ -55,7 +55,8 @@ def run(args: argparse.Namespace) -> int:
         emit_envelope(
             command=command_name,
             ok=ok,
-            error=None if ok else "STREAM_READ_EMPTY",
+            error=None if ok else str(payload.get("error") or "STREAM_READ_EMPTY"),
+            detail=None if ok else payload.get("detail"),
             payload=payload,
             as_json=bool(getattr(args, "as_json", False)),
         )

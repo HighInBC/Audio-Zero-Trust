@@ -277,7 +277,7 @@ static void maybe_maintain_mdns(AppState& state) {
     mdns_started = true;
     last_host = desired;
     state.mdns_hostname = desired;
-    MDNS.addService("http", "tcp", 8080);
+    MDNS.addService("https", "tcp", constants::runtime::kApiTlsPort);
     Serial.printf("AZT_MDNS_OK host=%s.local\n", desired.c_str());
   } else {
     Serial.printf("AZT_MDNS_FAIL host=%s\n", desired.c_str());

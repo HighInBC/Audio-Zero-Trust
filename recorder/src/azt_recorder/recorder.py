@@ -39,13 +39,22 @@ def make_azt_filename(common_name: str, ts_local: datetime, device_id: str = "")
 
 
 class AuthorizationError(RuntimeError):
-    pass
+    def __init__(self, code: str, *, where: str, context: dict | None = None):
+        self.code = code
+        self.where = where
+        self.context = context or {}
+        super().__init__(self.__str__())
+
+    def __str__(self) -> str:
+        if self.context:
+            return f"{self.code} where={self.where} context={json.dumps(self.context, sort_keys=True)}"
+        return f"{self.code} where={self.where}"
 
 
 def _readline_limited(resp, max_len: int = 1 << 20) -> bytes:
     line = resp.readline(max_len + 1)
     if not line or not line.endswith(b"\n") or len(line) > max_len:
-        raise AuthorizationError("stream_header_line_invalid")
+        raise AuthorizationError("stream_header_line_invalid", where="recorder._readline_limited", context={"line_len": len(line), "max_len": max_len, "has_newline": bool(line.endswith(b"\n"))})
     return line
 
 
@@ -55,7 +64,7 @@ def _preflight_stream_header(resp, expected_device_fp_hex: str) -> tuple[bytes, 
     magic = _readline_limited(resp, max_len=16)
     prefix.extend(magic)
     if magic != b"AZT1\n":
-        raise AuthorizationError("stream_magic_invalid")
+        raise AuthorizationError("stream_magic_invalid", where="recorder._preflight_stream_header", context={"got_magic_hex": magic[:8].hex()})
 
     header_line = _readline_limited(resp)
     sig_line = _readline_limited(resp)
@@ -66,34 +75,34 @@ def _preflight_stream_header(resp, expected_device_fp_hex: str) -> tuple[bytes, 
     try:
         plain = json.loads(header_raw.decode("utf-8"))
     except Exception as e:
-        raise AuthorizationError("stream_header_json_invalid") from e
+        raise AuthorizationError("stream_header_json_invalid", where="recorder._preflight_stream_header", context={"exception_type": type(e).__name__, "message": str(e), "header_preview": header_raw[:96].decode("utf-8", errors="replace")}) from e
 
     pub_b64 = str(plain.get("this_header_signing_key_b64") or "")
     fp_hex = str(plain.get("this_header_signing_key_fingerprint_hex") or "").lower().strip()
     if not pub_b64 or len(fp_hex) != 64:
-        raise AuthorizationError("stream_header_signing_key_missing")
+        raise AuthorizationError("stream_header_signing_key_missing", where="recorder._preflight_stream_header", context={"has_pub_b64": bool(pub_b64), "fingerprint_len": len(fp_hex)})
 
     try:
         pub_raw = base64.b64decode(pub_b64)
     except Exception as e:
-        raise AuthorizationError("stream_header_signing_key_b64_invalid") from e
+        raise AuthorizationError("stream_header_signing_key_b64_invalid", where="recorder._preflight_stream_header", context={"exception_type": type(e).__name__, "message": str(e)}) from e
     calc_fp = hashlib.sha256(pub_raw).hexdigest()
     if calc_fp != fp_hex:
-        raise AuthorizationError("stream_header_signing_key_fp_mismatch")
+        raise AuthorizationError("stream_header_signing_key_fp_mismatch", where="recorder._preflight_stream_header", context={"declared_fp": fp_hex, "calculated_fp": calc_fp})
 
     expected = expected_device_fp_hex.lower().strip()
     if fp_hex != expected:
-        raise AuthorizationError("stream_header_signing_key_not_authorized")
+        raise AuthorizationError("stream_header_signing_key_not_authorized", where="recorder._preflight_stream_header", context={"expected_fp": expected, "header_fp": fp_hex})
 
     try:
         sig_raw = base64.b64decode(sig_line.strip())
         ed25519.Ed25519PublicKey.from_public_bytes(pub_raw).verify(sig_raw, header_raw)
     except Exception as e:
-        raise AuthorizationError("stream_header_signature_invalid") from e
+        raise AuthorizationError("stream_header_signature_invalid", where="recorder._preflight_stream_header", context={"exception_type": type(e).__name__, "message": str(e)}) from e
 
     len_bytes = resp.read(2)
     if len(len_bytes) != 2:
-        raise AuthorizationError("stream_next_header_len_missing")
+        raise AuthorizationError("stream_next_header_len_missing", where="recorder._preflight_stream_header", context={"bytes_read": len(len_bytes)})
     prefix.extend(len_bytes)
     n = int.from_bytes(len_bytes, "big")
     if n == 0xFFFF:
@@ -102,7 +111,7 @@ def _preflight_stream_header(resp, expected_device_fp_hex: str) -> tuple[bytes, 
     else:
         enc = resp.read(n)
         if len(enc) != n:
-            raise AuthorizationError("stream_next_header_bytes_missing")
+            raise AuthorizationError("stream_next_header_bytes_missing", where="recorder._preflight_stream_header", context={"expected": n, "actual": len(enc)})
         prefix.extend(enc)
 
     return bytes(prefix), plain

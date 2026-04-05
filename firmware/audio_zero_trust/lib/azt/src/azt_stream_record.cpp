@@ -7,6 +7,9 @@
 namespace azt {
 
 bool send_chunked(StreamTransport& transport, const uint8_t* data, size_t len) {
+  if (transport.uses_http_chunk_transport()) {
+    return transport.write_bytes(data, len);
+  }
   char hdr[20];
   snprintf(hdr, sizeof(hdr), "%x\r\n", static_cast<unsigned>(len));
   if (!transport.write_text(hdr)) return false;

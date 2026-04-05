@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <WiFiServer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -8,7 +7,6 @@
 #include "azt_config.h"
 #include "azt_device_io.h"
 #include "azt_discovery.h"
-#include "azt_http_api.h"
 #include "azt_serial_control.h"
 #include "azt_https_server.h"
 
@@ -16,7 +14,6 @@ namespace {
 
 
 azt::AppState g_state;
-WiFiServer g_api_server(azt::kHttpPort);
 SemaphoreHandle_t g_state_mu = nullptr;
 
 azt::SerialControlState g_serial_state;
@@ -46,18 +43,14 @@ void setup() {
 
   xSemaphoreTake(g_state_mu, portMAX_DELAY);
   azt::load_config_state(g_state);
-  g_state.discovery_announcement_json = azt::build_discovery_announcement_json(g_state, azt::kHttpPort);
+  g_state.discovery_announcement_json = azt::build_discovery_announcement_json(g_state, azt::constants::runtime::kApiTlsPort);
   azt::setup_wifi(g_state);
   azt::setup_time_sync(g_state);
   xSemaphoreGive(g_state_mu);
 
   azt::setup_audio_input(g_state);
 
-  g_api_server.begin();
   bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, azt::constants::runtime::kApiTlsPort);
-
-  Serial.printf("AZT_HTTP api_port=%u\n", azt::kHttpPort);
-  log_boot_marker("http_server_started");
   if (https_ok) {
     Serial.printf("AZT_HTTPS api_tls_port=%u\n", azt::constants::runtime::kApiTlsPort);
   } else {
@@ -78,17 +71,5 @@ void loop() {
 
   azt::handle_serial_control(g_state, g_state_mu, g_serial_state);
 
-  WiFiClient client = g_api_server.available();
-  if (!client) {
-    delay(azt::constants::runtime::kIdleLoopDelayMs);
-    return;
-  }
-
-  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(azt::constants::runtime::kStateLockWaitMsSlow)) != pdTRUE) {
-    client.stop();
-    return;
-  }
-  azt::handle_client_api_only(client, g_state);
-  xSemaphoreGive(g_state_mu);
-  client.stop();
+  delay(azt::constants::runtime::kIdleLoopDelayMs);
 }

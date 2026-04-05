@@ -669,7 +669,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
       return r;
     }
-    state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+    state.discovery_announcement_json = build_discovery_announcement_json(state, constants::runtime::kApiTlsPort);
     Preferences p;
     if (p.begin("aztcfg", false)) {
       p.putString("disc_json", state.discovery_announcement_json);
@@ -778,7 +778,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     return r;
   }
 
-  state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+  state.discovery_announcement_json = build_discovery_announcement_json(state, constants::runtime::kApiTlsPort);
   Preferences p;
   if (p.begin("aztcfg", false)) {
     p.putString("disc_json", state.discovery_announcement_json);
@@ -1045,7 +1045,7 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     return r;
   }
 
-  state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+  state.discovery_announcement_json = build_discovery_announcement_json(state, constants::runtime::kApiTlsPort);
   Preferences p;
   if (p.begin("aztcfg", false)) {
     p.putString("disc_json", state.discovery_announcement_json);
@@ -1383,7 +1383,7 @@ HttpDispatchResult dispatch_request(const String& method,
 
       state.device_certificate_serial = "";
       state.device_certificate_json = "";
-      state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+      state.discovery_announcement_json = build_discovery_announcement_json(state, constants::runtime::kApiTlsPort);
 
       Preferences p;
       if (!p.begin("aztcfg", false) || p.putString("disc_json", state.discovery_announcement_json) == 0) {
@@ -1457,7 +1457,7 @@ HttpDispatchResult dispatch_request(const String& method,
 
     state.device_certificate_serial = cert_serial;
     state.device_certificate_json = cert_json;
-    state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
+    state.discovery_announcement_json = build_discovery_announcement_json(state, constants::runtime::kApiTlsPort);
 
     Preferences p;
     if (!p.begin("aztcfg", false) ||

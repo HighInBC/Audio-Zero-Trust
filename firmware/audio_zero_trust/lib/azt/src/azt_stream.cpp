@@ -235,11 +235,7 @@ void send_json(WiFiClient& client, int code, const String& body) {
 }
 
 static void send_json_transport(StreamTransport& transport, int code, const String& body) {
-  String head = String("HTTP/1.1 ") + String(code) + (code == 200 ? " OK\r\n" : " Error\r\n") +
-                "Content-Type: application/json\r\nConnection: close\r\nContent-Length: " +
-                String(body.length()) + "\r\n\r\n";
-  (void)transport.write_text(head.c_str());
-  (void)transport.write_text(body.c_str());
+  (void)transport.send_json_error(code, body);
 }
 
 static constexpr BaseType_t kStreamPipelineCore = 1;
@@ -274,11 +270,17 @@ static void handle_stream_impl(StreamTransport& client, int seconds, const AppSt
     return;
   }
 
-  client.write_text("HTTP/1.1 200 OK\r\n");
-  client.write_text("Content-Type: application/octet-stream\r\n");
-  client.write_text("Cache-Control: no-store\r\n");
-  client.write_text("Connection: close\r\n");
-  client.write_text("Transfer-Encoding: chunked\r\n\r\n");
+  // Only raw WiFiClient stream transport should emit manual HTTP framing.
+  // HTTPS httpd transport already owns HTTP status/headers/chunk framing.
+  if (client.needs_manual_http_headers() && !client.uses_http_chunk_transport()) {
+    client.write_text("HTTP/1.1 200 OK\r\n");
+    client.write_text("Content-Type: application/octet-stream\r\n");
+    client.write_text("Cache-Control: no-store\r\n");
+    client.write_text("Connection: close\r\n");
+    client.write_text("Transfer-Encoding: chunked\r\n\r\n");
+  } else if (client.needs_manual_http_headers() && client.uses_http_chunk_transport()) {
+    Serial.println("AZT_STREAM_WARN transport_conflict manual_headers_with_chunk_transport");
+  }
 
   StreamCtx sc{};
   std::vector<uint8_t> prefix;
@@ -313,13 +315,17 @@ static void handle_stream_impl(StreamTransport& client, int seconds, const AppSt
                            staleness_s,
                            audio_frame_duration_ms,
                            prefix)) {
-    client.write_text("0\r\n\r\n");
-    client.flush();
+    if (client.needs_manual_http_headers()) {
+      client.write_text("0\r\n\r\n");
+      client.flush();
+    }
     return;
   }
   if (!send_chunked(client, prefix.data(), prefix.size())) {
-    client.write_text("0\r\n\r\n");
-    client.flush();
+    if (client.needs_manual_http_headers()) {
+      client.write_text("0\r\n\r\n");
+      client.flush();
+    }
     return;
   }
 
@@ -515,8 +521,10 @@ static void handle_stream_impl(StreamTransport& client, int seconds, const AppSt
     dropped_notice_blocks++;
   }
 
-  client.write_text("0\r\n\r\n");
-  client.flush();
+  if (client.needs_manual_http_headers()) {
+    client.write_text("0\r\n\r\n");
+    client.flush();
+  }
 
   signer.stop();
 
@@ -564,7 +572,7 @@ static void handle_stream_impl(StreamTransport& client, int seconds, const AppSt
 }
 
 struct StreamTaskCtx {
-  WiFiClient* client;
+  StreamTransport* transport;
   int seconds;
   const AppState* state;
   bool signbench_each_chunk;
@@ -575,8 +583,7 @@ struct StreamTaskCtx {
 
 static void stream_task_entry(void* arg) {
   StreamTaskCtx* ctx = reinterpret_cast<StreamTaskCtx*>(arg);
-  WiFiClientStreamTransport transport(*ctx->client);
-  handle_stream_impl(transport, ctx->seconds, *ctx->state, ctx->signbench_each_chunk, ctx->enable_telemetry, ctx->drop_test_frames);
+  handle_stream_impl(*ctx->transport, ctx->seconds, *ctx->state, ctx->signbench_each_chunk, ctx->enable_telemetry, ctx->drop_test_frames);
   xTaskNotifyGive(ctx->parent);
   vTaskDelete(nullptr);
 }
@@ -587,11 +594,7 @@ void handle_stream_transport(StreamTransport& transport,
                              bool signbench_each_chunk,
                              bool enable_telemetry,
                              int drop_test_frames) {
-  handle_stream_impl(transport, seconds, state, signbench_each_chunk, enable_telemetry, drop_test_frames);
-}
-
-void handle_stream(WiFiClient& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
-  StreamTaskCtx ctx{&client, seconds, &state, signbench_each_chunk, enable_telemetry, drop_test_frames, xTaskGetCurrentTaskHandle()};
+  StreamTaskCtx ctx{&transport, seconds, &state, signbench_each_chunk, enable_telemetry, drop_test_frames, xTaskGetCurrentTaskHandle()};
   BaseType_t ok = xTaskCreatePinnedToCore(stream_task_entry,
                                           "azt_stream",
                                           constants::runtime::kTaskStackStreamWorker,
@@ -600,11 +603,16 @@ void handle_stream(WiFiClient& client, int seconds, const AppState& state, bool 
                                           nullptr,
                                           kStreamPipelineCore);
   if (ok != pdPASS) {
-    send_json(client, 500,
+    send_json_transport(transport, 500,
               "{\"ok\":false,\"error\":\"ERR_RUNTIME\",\"detail\":\"failed to start stream task\"}");
     return;
   }
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+}
+
+void handle_stream(WiFiClient& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
+  WiFiClientStreamTransport transport(client);
+  handle_stream_transport(transport, seconds, state, signbench_each_chunk, enable_telemetry, drop_test_frames);
 }
 
 }  // namespace azt
