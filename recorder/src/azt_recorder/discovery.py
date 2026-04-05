@@ -28,6 +28,8 @@ class DiscoveryProtocol(asyncio.DatagramProtocol):
                 admin_key_fingerprint_hex=str(d.get("admin_key_fingerprint_hex", "")).lower(),
                 device_name=str(d.get("device_name", "")),
                 http_port=int(d.get("http_port", 0)),
+                api_tls_port=int(d.get("api_tls_port", d.get("http_port", 0))),
+                stream_tls_port=int(d.get("stream_tls_port", d.get("http_port", 0))),
                 certificate_serial=str(d.get("certificate_serial", "")),
                 raw=d,
             )

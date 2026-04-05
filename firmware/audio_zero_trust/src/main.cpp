@@ -51,10 +51,16 @@ void setup() {
   azt::setup_audio_input(g_state);
 
   bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, azt::constants::runtime::kApiTlsPort);
+  bool https_stream_ok = azt::start_https_stream_server(&g_state, g_state_mu, azt::constants::runtime::kStreamTlsPort);
   if (https_ok) {
     Serial.printf("AZT_HTTPS api_tls_port=%u\n", azt::constants::runtime::kApiTlsPort);
   } else {
     Serial.println("AZT_HTTPS disabled (no tls cert/key configured)");
+  }
+  if (https_stream_ok) {
+    Serial.printf("AZT_HTTPS stream_tls_port=%u\n", azt::constants::runtime::kStreamTlsPort);
+  } else {
+    Serial.println("AZT_HTTPS stream disabled");
   }
 }
 

@@ -19,7 +19,7 @@ import os
 
 from tools.azt_client.http import get_json, http_json, urlopen_with_tls, requests_verify_for_url
 from tools.provision_unit import detect_device_ip_from_serial
-from tools.azt_sdk.services.url_service import base_url
+from tools.azt_sdk.services.url_service import base_url, stream_base_url
 
 
 def _error_detail(*, where: str, exc: Exception, url: str | None = None, context: dict | None = None) -> dict:
@@ -215,7 +215,7 @@ def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict
 
 
 def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: int, timeout: int) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = stream_base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     req_url = f"{b}/stream?seconds={seconds}"
     try:
         r = requests.get(req_url, allow_redirects=False, timeout=timeout, verify=requests_verify_for_url(req_url))
@@ -326,7 +326,7 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
 
 
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = stream_base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     url = f"{b}/stream"
     total = 0
     import time

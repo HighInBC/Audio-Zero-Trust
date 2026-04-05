@@ -4,6 +4,8 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
+#include "azt_constants.h"
+
 namespace azt {
 
 static constexpr uint16_t kDiscoveryPort = 33333;
@@ -32,7 +34,7 @@ size_t parse_authorized_listener_ips_csv(const String& csv, IPAddress* out, size
   return n;
 }
 
-String build_discovery_announcement_json(const AppState& state, uint16_t http_port) {
+String build_discovery_announcement_json(const AppState& state, uint16_t api_tls_port) {
   JsonDocument d;
   d["discovery_version"] = 1;
   d["device_type"] = "audio-zero-trust-microphone";
@@ -41,7 +43,11 @@ String build_discovery_announcement_json(const AppState& state, uint16_t http_po
   d["admin_key_fingerprint_hex"] = certified ? state.admin_fingerprint_hex : "";
   d["recording_key_fingerprint_hex"] = state.recording_fingerprint_hex;
   d["device_name"] = state.device_label;
-  d["http_port"] = http_port;
+  // Back-compat field used by older clients/recorders (API endpoint).
+  d["http_port"] = api_tls_port;
+  // Explicit split TLS endpoints for modern clients/recorders.
+  d["api_tls_port"] = api_tls_port;
+  d["stream_tls_port"] = constants::runtime::kStreamTlsPort;
   d["certificate_serial"] = certified ? state.device_certificate_serial : "";
 
   String out;

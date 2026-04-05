@@ -70,7 +70,7 @@ class TrustVerifier:
             return self._cache[ck]
 
         try:
-            env = await asyncio.to_thread(self._fetch_cert_envelope, ad.base_url)
+            env = await asyncio.to_thread(self._fetch_cert_envelope, ad.api_url)
             payload_raw, sig_raw = self._parse_envelope(env)
             self._verify_signature(admin_fp, payload_raw, sig_raw)
             pobj = json.loads(payload_raw.decode("utf-8"))
@@ -155,7 +155,7 @@ class TrustVerifier:
     @staticmethod
     def _verify_device_attestation(ad: DiscoveryAd, cert_payload: dict) -> None:
         nonce = "rec-" + secrets.token_hex(12)
-        att = TrustVerifier._fetch_attestation(ad.base_url, nonce)
+        att = TrustVerifier._fetch_attestation(ad.api_url, nonce)
 
         payload = att.get("payload")
         if not isinstance(payload, dict):

@@ -14,9 +14,17 @@ class DiscoveryAd:
     admin_key_fingerprint_hex: str
     device_name: str
     http_port: int
+    api_tls_port: int
+    stream_tls_port: int
     certificate_serial: str
     raw: dict[str, Any]
 
     @property
-    def base_url(self) -> str:
-        return f"https://{self.source_ip}:{self.http_port}"
+    def api_url(self) -> str:
+        port = self.api_tls_port or self.http_port
+        return f"https://{self.source_ip}:{port}"
+
+    @property
+    def stream_url(self) -> str:
+        port = self.stream_tls_port or self.http_port
+        return f"https://{self.source_ip}:{port}"

@@ -66,6 +66,7 @@ constexpr uint32_t kIdleLoopDelayMs = 2;
 
 constexpr uint16_t kStreamPort = 8081;
 constexpr uint16_t kApiTlsPort = 8443;
+constexpr uint16_t kStreamTlsPort = 8444;
 
 constexpr uint32_t kTaskStackStreamServer = 8192;
 constexpr uint32_t kTaskPriorityNormal = 1;

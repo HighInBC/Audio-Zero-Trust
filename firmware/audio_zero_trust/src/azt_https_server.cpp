@@ -30,10 +30,43 @@ namespace azt {
 
 namespace {
 httpd_handle_t g_https = nullptr;
+httpd_handle_t g_https_stream = nullptr;
 AppState* g_state = nullptr;
 SemaphoreHandle_t g_state_mu = nullptr;
 String g_cert;
 String g_key;
+
+static esp_err_t handle_https_stream(httpd_req_t* req) {
+  if (!req || !g_state || !g_state_mu) return ESP_FAIL;
+  String path = String(req->uri ? req->uri : "");
+  size_t qlen = httpd_req_get_url_query_len(req);
+  if (qlen > 0) {
+    std::unique_ptr<char[]> q(new char[qlen + 1]);
+    if (httpd_req_get_url_query_str(req, q.get(), qlen + 1) == ESP_OK) {
+      path += "?";
+      path += q.get();
+    }
+  }
+
+  if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(4000)) != pdTRUE) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_STATE_LOCK\"}");
+    return ESP_OK;
+  }
+  AppState state_snapshot = *g_state;
+  xSemaphoreGive(g_state_mu);
+
+  int seconds = parse_seconds_from_path(path);
+  bool sigbench = parse_signbench_from_path(path);
+  bool telemetry = path.indexOf("telemetry=1") >= 0;
+  int drop_test_frames = parse_drop_test_frames_from_path(path);
+
+  HttpsChunkedStreamTransport transport(req);
+  handle_stream_transport(transport, seconds, state_snapshot, sigbench, telemetry, drop_test_frames);
+  (void)transport.finish();
+  return ESP_OK;
+}
 
 static esp_err_t handle_https_any(httpd_req_t* req) {
   if (!req || !g_state || !g_state_mu) return ESP_FAIL;
@@ -55,26 +88,6 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
     }
   }
 
-  if (path.startsWith("/stream")) {
-    if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(4000)) != pdTRUE) {
-      httpd_resp_set_status(req, "503 Service Unavailable");
-      httpd_resp_set_type(req, "application/json");
-      httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_STATE_LOCK\"}");
-      return ESP_OK;
-    }
-    AppState state_snapshot = *g_state;
-    xSemaphoreGive(g_state_mu);
-
-    int seconds = parse_seconds_from_path(path);
-    bool sigbench = parse_signbench_from_path(path);
-    bool telemetry = path.indexOf("telemetry=1") >= 0;
-    int drop_test_frames = parse_drop_test_frames_from_path(path);
-
-    HttpsChunkedStreamTransport transport(req);
-    handle_stream_transport(transport, seconds, state_snapshot, sigbench, telemetry, drop_test_frames);
-    (void)transport.finish();
-    return ESP_OK;
-  }
 
   if (method == "GET" && path == "/api/v0/device/upgrade") {
     httpd_resp_set_status(req, "200 OK");
@@ -198,6 +211,45 @@ bool start_https_api_server(AppState* state, SemaphoreHandle_t state_mu, uint16_
   return true;
 }
 
+bool start_https_stream_server(AppState* state, SemaphoreHandle_t state_mu, uint16_t port) {
+  if (g_https_stream) return true;
+  if (!state || !state_mu) return false;
+
+  if (g_cert.length() == 0 || g_key.length() == 0) {
+    Preferences p;
+    if (!p.begin("aztcfg", true)) return false;
+    g_cert = p.getString("tls_srv_cert", "");
+    g_key = p.getString("tls_srv_key", "");
+    p.end();
+    if (g_cert.length() == 0 || g_key.length() == 0) return false;
+  }
+
+  g_state = state;
+  g_state_mu = state_mu;
+
+  httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
+  conf.port_secure = port;
+  conf.port_insecure = 0;
+  conf.httpd.uri_match_fn = httpd_uri_match_wildcard;
+  conf.cacert_pem = reinterpret_cast<const unsigned char*>(g_cert.c_str());
+  conf.cacert_len = g_cert.length() + 1;
+  conf.prvtkey_pem = reinterpret_cast<const unsigned char*>(g_key.c_str());
+  conf.prvtkey_len = g_key.length() + 1;
+
+  if (httpd_ssl_start(&g_https_stream, &conf) != ESP_OK) {
+    g_https_stream = nullptr;
+    return false;
+  }
+
+  httpd_uri_t get_stream = {};
+  get_stream.uri = "/stream*";
+  get_stream.method = HTTP_GET;
+  get_stream.handler = handle_https_stream;
+  if (httpd_register_uri_handler(g_https_stream, &get_stream) != ESP_OK) return false;
+
+  return true;
+}
+
 void stop_https_api_server() {
   if (g_https) {
     httpd_ssl_stop(g_https);
@@ -205,6 +257,14 @@ void stop_https_api_server() {
   }
 }
 
+void stop_https_stream_server() {
+  if (g_https_stream) {
+    httpd_ssl_stop(g_https_stream);
+    g_https_stream = nullptr;
+  }
+}
+
 bool https_api_server_running() { return g_https != nullptr; }
+bool https_stream_server_running() { return g_https_stream != nullptr; }
 
 }  // namespace azt

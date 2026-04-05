@@ -9,8 +9,10 @@ services:
     command: ["--config", "/config/recorder.yaml"]
     environment:
       - TZ=America/Vancouver
+      - SSL_CERT_FILE=/etc/azt/trusted_ca_cert.pem
     volumes:
       - ./config:/config:ro
       - ./data/recordings:/data/recordings
+      - ../client/tools/pki/trusted_ca_cert.pem:/etc/azt/trusted_ca_cert.pem:ro
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

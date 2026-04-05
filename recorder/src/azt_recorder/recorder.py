@@ -317,7 +317,7 @@ class RecordingSession:
         max_seconds = 3600 if self.cfg.hourly_rollover else 86400
         deadline = time.monotonic() + max_seconds
 
-        url = f"{self.ad.base_url}/stream"
+        url = f"{self.ad.stream_url}/stream"
         req = urllib.request.Request(url, method="GET")
 
         stream_err: Exception | None = None
