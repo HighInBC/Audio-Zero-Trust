@@ -57,6 +57,11 @@ def _resolve_host_via_discovery(host: str, timeout_s: float = 12.0) -> str | Non
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_REUSEPORT"):
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except OSError:
+                pass
         try:
             s.bind(("0.0.0.0", 33333))
         except OSError:
