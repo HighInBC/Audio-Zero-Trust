@@ -9,6 +9,21 @@
 
 #include "azt_http_api.h"
 
+namespace {
+String json_escape_for_error(const String& in) {
+  String out = "\"";
+  for (size_t i = 0; i < in.length(); ++i) {
+    char c = in.charAt(i);
+    if (c == '\\' || c == '"') out += '\\';
+    if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else out += c;
+  }
+  out += "\"";
+  return out;
+}
+}  // namespace
+
 namespace azt {
 
 namespace {
@@ -79,7 +94,8 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
 
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_OTA_UPGRADE\"}");
+    String body = String("{\"ok\":false,\"error\":\"ERR_OTA_UPGRADE\",\"detail\":") + json_escape_for_error(err) + "}";
+    httpd_resp_send(req, body.c_str(), body.length());
     return ESP_OK;
   }
 
