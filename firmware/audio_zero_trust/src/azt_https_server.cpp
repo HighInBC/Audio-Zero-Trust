@@ -86,9 +86,7 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
     if (ok) {
       httpd_resp_set_status(req, "200 OK");
       httpd_resp_set_type(req, "application/json");
-      httpd_resp_sendstr(req, "{\"ok\":true,\"upgrade_written\":true,\"reboot_required\":true,\"detail\":\"firmware accepted; reboot to run new image\"}");
-      vTaskDelay(pdMS_TO_TICKS(150));
-      esp_restart();
+      httpd_resp_sendstr(req, "{\"ok\":true,\"upgrade_written\":true,\"reboot_required\":true,\"detail\":\"firmware accepted; run explicit reboot command to apply\"}");
       return ESP_OK;
     }
 
