@@ -105,7 +105,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
 
     spost = sub.add_parser("ota-bundle-post", help="POST one-file OTA bundle to MCU upgrade endpoint")
     spost.add_argument("--host", default="", help="Device host/IP")
-    spost.add_argument("--port", type=int, default=8080, help="Device API port")
+    spost.add_argument("--port", type=int, default=8443, help="Device HTTPS API port")
     spost.add_argument("--in", dest="in_path", default="", help="Input .otabundle file")
     spost.add_argument("--upgrade-path", default="/api/v0/device/upgrade", help="Upgrade endpoint path")
     spost.add_argument("--timeout", type=int, default=45, help="HTTP timeout seconds")

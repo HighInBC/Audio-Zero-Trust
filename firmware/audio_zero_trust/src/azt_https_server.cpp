@@ -9,6 +9,21 @@
 
 #include "azt_http_api.h"
 
+namespace {
+String json_escape_for_error(const String& in) {
+  String out = "\"";
+  for (size_t i = 0; i < in.length(); ++i) {
+    char c = in.charAt(i);
+    if (c == '\\' || c == '"') out += '\\';
+    if (c == '\n') out += "\\n";
+    else if (c == '\r') out += "\\r";
+    else out += c;
+  }
+  out += "\"";
+  return out;
+}
+}  // namespace
+
 namespace azt {
 
 namespace {
@@ -46,10 +61,39 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
     return ESP_OK;
   }
 
-  if (path == "/api/v0/device/upgrade") {
+  if (method == "GET" && path == "/api/v0/device/upgrade") {
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_sendstr(req,
+                      "<!doctype html><html><head><meta charset=\"utf-8\"><title>AZT OTA Upgrade (HTTPS)</title></head><body>"
+                      "<h1>AZT OTA Upgrade (HTTPS)</h1>"
+                      "<p>POST bundle to <code>/api/v0/device/upgrade</code> on this HTTPS endpoint.</p>"
+                      "</body></html>");
+    return ESP_OK;
+  }
+
+  if (method == "POST" && path == "/api/v0/device/upgrade") {
+    String err;
+    if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(4000)) != pdTRUE) {
+      httpd_resp_set_status(req, "503 Service Unavailable");
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_STATE_LOCK\"}");
+      return ESP_OK;
+    }
+    bool ok = handle_ota_upgrade_bundle_post_https(req, req->content_len, *g_state, err);
+    xSemaphoreGive(g_state_mu);
+
+    if (ok) {
+      httpd_resp_set_status(req, "200 OK");
+      httpd_resp_set_type(req, "application/json");
+      httpd_resp_sendstr(req, "{\"ok\":true,\"upgrade_written\":true,\"reboot_required\":true,\"detail\":\"firmware accepted; run explicit reboot command to apply\"}");
+      return ESP_OK;
+    }
+
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_OTA_HTTPS_UNSUPPORTED\",\"detail\":\"OTA upgrade over HTTPS endpoint not implemented yet\"}");
+    String body = String("{\"ok\":false,\"error\":\"ERR_OTA_UPGRADE\",\"detail\":") + json_escape_for_error(err) + "}";
+    httpd_resp_send(req, body.c_str(), body.length());
     return ESP_OK;
   }
 

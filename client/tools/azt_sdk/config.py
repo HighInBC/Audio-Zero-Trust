@@ -100,8 +100,12 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     }:
         if "host" in conf_defaults:
             _set_if_unset(args, "host", str(conf_defaults["host"]))
-        if "http_port" in conf_defaults:
-            _set_if_matches(args, "port", int(conf_defaults["http_port"]), {8080})
+        if command == "ota-bundle-post":
+            if "https_port" in conf_defaults:
+                _set_if_matches(args, "port", int(conf_defaults["https_port"]), {8443, 8080})
+        else:
+            if "http_port" in conf_defaults:
+                _set_if_matches(args, "port", int(conf_defaults["http_port"]), {8080, 8443})
         if "timeout_seconds" in conf_defaults:
             _set_if_matches(args, "timeout", int(conf_defaults["timeout_seconds"]), {10, 15, 45})
 

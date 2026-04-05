@@ -2,6 +2,7 @@
 
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
+#include <esp_http_server.h>
 
 #include "azt_app_state.h"
 
@@ -51,6 +52,12 @@ bool ota_begin_failed(bool begin_ok);
 bool ota_sha_mismatch(const String& got_sha, const String& expected_sha);
 bool ota_end_failed(bool end_ok);
 bool ota_should_abort_on_error(bool has_error);
+
+// HTTPS OTA path (httpd/esp_https_server request body streaming).
+bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req,
+                                          int content_len,
+                                          AppState& state,
+                                          String& out_err);
 
 void handle_client(WiFiClient& client, AppState& state);
 void handle_client_api_only(WiFiClient& client, AppState& state);

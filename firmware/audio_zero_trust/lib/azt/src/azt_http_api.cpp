@@ -2280,6 +2280,133 @@ void drain_request_body_best_effort(WiFiClient& client, int max_bytes, uint32_t 
   }
 }
 
+
+
+struct OtaBundlePreflight {
+  String ota_version;
+  uint64_t ota_version_code = 0;
+  bool has_rollback_floor_code = false;
+  uint64_t ota_rollback_floor_code = 0;
+  int fw_size = 0;
+  String fw_sha;
+  int bytes_left = 0;
+};
+
+static bool ota_preflight_bundle(const String& header_line,
+                                 int content_len,
+                                 AppState& state,
+                                 OtaBundlePreflight& out,
+                                 String& out_err) {
+  String signer_fp;
+  String meta_b64;
+  String meta_sig_b64;
+  if (!validate_ota_bundle_header_line(header_line, signer_fp, meta_b64, meta_sig_b64, out_err)) {
+    return false;
+  }
+
+  String trusted_pem = state.ota_signer_override_public_key_pem.length() > 0
+                         ? state.ota_signer_override_public_key_pem
+                         : String(kOtaSignerPublicKeyPem);
+  String trusted_fp;
+  std::vector<uint8_t> trusted_pub;
+  if (!b64_decode_vec(trusted_pem, trusted_pub) || trusted_pub.size() != crypto_sign_ed25519_PUBLICKEYBYTES) {
+    out_err = "trusted ota signer key invalid";
+    return false;
+  }
+  uint8_t trusted_h[32] = {0};
+  if (!sha256_bytes(trusted_pub.data(), trusted_pub.size(), trusted_h)) {
+    out_err = "trusted ota signer hash failed";
+    return false;
+  }
+  trusted_fp = hex_lower(trusted_h, sizeof(trusted_h));
+  if (trusted_fp != signer_fp) {
+    out_err = "signer fingerprint not trusted";
+    return false;
+  }
+
+  std::vector<uint8_t> meta_raw;
+  if (!b64_decode_vec(meta_b64, meta_raw) || meta_raw.empty()) {
+    out_err = "meta_b64 invalid";
+    return false;
+  }
+  if (!verify_ed25519_signature_b64(trusted_pem, meta_raw, meta_sig_b64)) {
+    out_err = "meta signature verify failed";
+    return false;
+  }
+
+  JsonDocument meta;
+  if (deserializeJson(meta, meta_raw.data(), meta_raw.size())) {
+    out_err = "meta json parse failed";
+    return false;
+  }
+
+  String ota_target = String((const char*)(meta["target"] | ""));
+#if CONFIG_IDF_TARGET_ESP32S3
+  const char* expected_target = "atom-echos3r";
+#else
+  const char* expected_target = "atom-echo";
+#endif
+  if (ota_target.length() == 0) {
+    out_err = "missing target in bundle metadata";
+    return false;
+  }
+  if (!ota_target.equalsIgnoreCase(expected_target)) {
+    out_err = String("target mismatch: bundle=") + ota_target + " device=" + expected_target;
+    return false;
+  }
+
+  out.ota_version = String((const char*)(meta["version"] | ""));
+  String vc_err;
+  if (!parse_u64_meta_field(meta, "version_code", out.ota_version_code, vc_err) || out.ota_version_code == 0) {
+    out_err = vc_err.length() ? vc_err : "invalid version_code";
+    return false;
+  }
+
+  String rf_err;
+  if (!meta["rollback_floor_code"].isNull()) {
+    out.has_rollback_floor_code = true;
+    if (!parse_u64_meta_field(meta, "rollback_floor_code", out.ota_rollback_floor_code, rf_err)) {
+      out_err = rf_err;
+      return false;
+    }
+  } else {
+    out_err = "missing rollback_floor_code (required for OTA bundle acceptance; set --rollback-floor-code, e.g. 'same')";
+    return false;
+  }
+
+  if (out.ota_version_code < state.ota_min_allowed_version_code) {
+    out_err = "version_code below rollback floor";
+    return false;
+  }
+
+  uint64_t current_version_code = state.last_ota_version_code;
+  if (current_version_code == 0 && state.last_ota_version.length() > 0) {
+    char* end = nullptr;
+    unsigned long long parsed = strtoull(state.last_ota_version.c_str(), &end, 10);
+    if (end && *end == '\0') {
+      current_version_code = static_cast<uint64_t>(parsed);
+    }
+  }
+  if (current_version_code > 0 && out.ota_version_code == current_version_code) {
+    out_err = "version_code equals current version";
+    return false;
+  }
+
+  if (!validate_ota_firmware_meta(meta, out.fw_size, out.fw_sha, out_err)) {
+    return false;
+  }
+
+  if (!validate_ota_bundle_payload_lengths(content_len,
+                                           static_cast<int>(header_line.length()),
+                                           out.fw_size,
+                                           out.bytes_left,
+                                           out_err)) {
+    return false;
+  }
+
+  return true;
+}
+
 static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, AppState& state, String& out_err) {
   out_err = "";
   ota_bc("S0_ENTER");
@@ -2684,6 +2811,330 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
   return true;
 }
 
+
+
+static bool ota_httpd_read_line(httpd_req_t* req, int& io_bytes_left, String& out_line, String& out_err) {
+  out_line = "";
+  out_err = "";
+  if (!req) { out_err = "invalid request"; return false; }
+  char ch = 0;
+  while (io_bytes_left > 0) {
+    int n = httpd_req_recv(req, &ch, 1);
+    if (n <= 0) {
+      out_err = "failed to read ota header line";
+      return false;
+    }
+    io_bytes_left -= n;
+    if (ch == '\n') break;
+    out_line += ch;
+    if (out_line.length() > constants::runtime::ota::kHeaderMaxBytes) {
+      out_err = "ota header line too large";
+      return false;
+    }
+    ota_kick_wdt();
+  }
+  out_line.trim();
+  return out_line.length() > 0;
+}
+
+static bool ota_read_firmware_chunk_httpd(httpd_req_t* req,
+                                          uint8_t* buf,
+                                          int to_read,
+                                          int& out_n_read,
+                                          String& out_err,
+                                          uint32_t chunk_timeout_ms = constants::runtime::ota::kReadChunkTimeoutMs) {
+  out_n_read = 0;
+  out_err = "";
+  if (!req || to_read <= 0) {
+    out_err = "invalid read size";
+    return false;
+  }
+
+  uint32_t start_ms = millis();
+  while (out_n_read < to_read) {
+    int n = httpd_req_recv(req, reinterpret_cast<char*>(buf + out_n_read), to_read - out_n_read);
+    if (n > 0) {
+      out_n_read += n;
+      start_ms = millis();
+      ota_kick_wdt();
+      continue;
+    }
+
+    if ((millis() - start_ms) > chunk_timeout_ms) {
+      out_err = "stream read timeout during firmware body";
+      return false;
+    }
+
+    // Timeout / transient socket condition: yield and retry until deadline.
+    ota_kick_wdt();
+  }
+
+  if (out_n_read <= 0) {
+    out_err = "stream read failed during firmware body";
+    return false;
+  }
+  return true;
+}
+
+bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, AppState& state, String& out_err) {
+  out_err = "";
+  ota_bc("S0_ENTER_HTTPS");
+  if (!req || content_len <= 0) {
+    out_err = "invalid ota request";
+    return false;
+  }
+
+  int bytes_left = content_len;
+  String header_line;
+  if (!ota_httpd_read_line(req, bytes_left, header_line, out_err)) {
+    return false;
+  }
+
+  OtaBundlePreflight preflight;
+  if (!ota_preflight_bundle(header_line, content_len, state, preflight, out_err)) {
+    return false;
+  }
+  const String ota_version = preflight.ota_version;
+  const uint64_t ota_version_code = preflight.ota_version_code;
+  const bool has_rollback_floor_code = preflight.has_rollback_floor_code;
+  const uint64_t ota_rollback_floor_code = preflight.ota_rollback_floor_code;
+  const int fw_size = preflight.fw_size;
+  const String fw_sha = preflight.fw_sha;
+  bytes_left = preflight.bytes_left;
+
+  const esp_partition_t* target_part = esp_ota_get_next_update_partition(nullptr);
+  if (!target_part) {
+    out_err = "no OTA partition available";
+    return false;
+  }
+  if (static_cast<size_t>(fw_size) > target_part->size) {
+    out_err = "firmware too large for OTA slot";
+    return false;
+  }
+
+  constexpr size_t kFlashSector = constants::runtime::ota::kFlashSectorBytes;
+  constexpr size_t kEraseChunkBytes = kFlashSector;
+  const size_t erase_len = ((static_cast<size_t>(fw_size) + kFlashSector - 1) / kFlashSector) * kFlashSector;
+  OtaEraseTaskCtx erase_ctx;
+  erase_ctx.part = target_part;
+  erase_ctx.total_len = erase_len;
+  erase_ctx.chunk_bytes = kEraseChunkBytes;
+  TaskHandle_t erase_task = nullptr;
+  BaseType_t erase_ok = xTaskCreatePinnedToCore(ota_erase_task,
+                                                 "azt_ota_erase",
+                                                 constants::runtime::ota::kTaskStackErase,
+                                                 &erase_ctx,
+                                                 1,
+                                                 &erase_task,
+                                                 0);
+  if (erase_ok != pdPASS || erase_task == nullptr) {
+    out_err = "failed to start OTA erase task";
+    return false;
+  }
+  uint32_t erase_wait_deadline = millis() + constants::runtime::ota::kEraseWaitMs;
+  while (!erase_ctx.done && static_cast<int32_t>(millis() - erase_wait_deadline) < 0) ota_kick_wdt();
+  if (!erase_ctx.done) {
+    vTaskDelete(erase_task);
+    out_err = "ota erase task timeout";
+    return false;
+  }
+  if (erase_ctx.failed) {
+    out_err = erase_ctx.err.length() ? erase_ctx.err : "failed to erase OTA slot";
+    return false;
+  }
+  if (!poison_ota_slot_header(target_part)) {
+    out_err = "failed to poison OTA slot header";
+    return false;
+  }
+
+  esp_ota_handle_t ota_handle = 0;
+  ota_kick_wdt();
+  esp_err_t begin_err = esp_ota_begin(target_part, OTA_SIZE_UNKNOWN, &ota_handle);
+  ota_kick_wdt();
+  if (begin_err != ESP_OK) {
+    out_err = String("ota begin failed: ") + String(static_cast<int>(begin_err));
+    return false;
+  }
+
+  const size_t first_block_len = std::min<size_t>(static_cast<size_t>(fw_size), kFlashSector);
+  std::vector<uint8_t> first_block(first_block_len);
+
+  mbedtls_sha256_context sha;
+  mbedtls_sha256_init(&sha);
+  mbedtls_sha256_starts_ret(&sha, 0);
+
+  uint8_t buf[kOtaChunkBytes];
+
+  QueueHandle_t ota_q = xQueueCreate(constants::runtime::ota::kWriterQueueDepth, sizeof(OtaWriteMsg));
+  if (!ota_q) {
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "failed to allocate OTA queue";
+    return false;
+  }
+
+  OtaWriterCtx writer_ctx;
+  writer_ctx.q = ota_q;
+  writer_ctx.handle = ota_handle;
+
+  TaskHandle_t writer_task = nullptr;
+  BaseType_t writer_ok = xTaskCreatePinnedToCore(ota_writer_task,
+                                                  "azt_ota_writer",
+                                                  constants::runtime::ota::kTaskStackWriter,
+                                                  &writer_ctx,
+                                                  1,
+                                                  &writer_task,
+                                                  0);
+  if (writer_ok != pdPASS || writer_task == nullptr) {
+    vQueueDelete(ota_q);
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = "failed to start OTA writer task";
+    return false;
+  }
+
+  int remain_fw = fw_size;
+  size_t fw_offset = 0;
+  while (remain_fw > 0) {
+    if (writer_ctx.failed) {
+      mbedtls_sha256_free(&sha);
+      esp_ota_abort(ota_handle);
+      out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+      ota_stop_writer(writer_ctx, ota_q, writer_task);
+      vQueueDelete(ota_q);
+      return false;
+    }
+
+    int to_read = remain_fw > (int)sizeof(buf) ? (int)sizeof(buf) : remain_fw;
+    int n = 0;
+    String read_err;
+    if (!ota_read_firmware_chunk_httpd(req, buf, to_read, n, read_err, constants::runtime::ota::kReadChunkTimeoutMs) || ota_stream_read_failed(n)) {
+      mbedtls_sha256_free(&sha);
+      writer_ctx.failed = true;
+      esp_ota_abort(ota_handle);
+      out_err = read_err.length() ? read_err : "stream read failed during firmware body";
+      ota_stop_writer(writer_ctx, ota_q, writer_task);
+      vQueueDelete(ota_q);
+      return false;
+    }
+    bytes_left -= n;
+
+    mbedtls_sha256_update_ret(&sha, buf, static_cast<size_t>(n));
+
+    size_t consumed = 0;
+    if (fw_offset < first_block_len) {
+      size_t copy_len = std::min<size_t>(static_cast<size_t>(n), first_block_len - fw_offset);
+      memcpy(first_block.data() + fw_offset, buf, copy_len);
+      consumed += copy_len;
+      fw_offset += copy_len;
+    }
+
+    if (consumed < static_cast<size_t>(n)) {
+      OtaWriteMsg msg;
+      msg.end = false;
+      msg.offset = static_cast<uint32_t>(fw_offset);
+      msg.len = static_cast<uint16_t>(static_cast<size_t>(n) - consumed);
+      memcpy(msg.data, buf + consumed, msg.len);
+
+      while (xQueueSend(ota_q, &msg, pdMS_TO_TICKS(constants::runtime::ota::kQueuePushWaitMs)) != pdTRUE) {
+        if (writer_ctx.failed) break;
+        ota_kick_wdt();
+      }
+      if (writer_ctx.failed) {
+        mbedtls_sha256_free(&sha);
+        esp_ota_abort(ota_handle);
+        out_err = String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err));
+        ota_stop_writer(writer_ctx, ota_q, writer_task);
+        vQueueDelete(ota_q);
+        return false;
+      }
+      fw_offset += msg.len;
+    }
+
+    remain_fw -= n;
+    ota_kick_wdt();
+  }
+
+  OtaWriteMsg end_msg; end_msg.end = true;
+  while (xQueueSend(ota_q, &end_msg, pdMS_TO_TICKS(constants::runtime::ota::kQueuePushWaitMs)) != pdTRUE) {
+    if (writer_ctx.failed) break;
+    ota_kick_wdt();
+  }
+  uint32_t writer_wait_deadline = millis() + 30000;
+  while (!writer_ctx.done && static_cast<int32_t>(millis() - writer_wait_deadline) < 0) ota_kick_wdt();
+  if (!writer_ctx.done || writer_ctx.failed) {
+    mbedtls_sha256_free(&sha);
+    esp_ota_abort(ota_handle);
+    out_err = writer_ctx.failed ? String("ota write failed: ") + String(static_cast<int>(writer_ctx.write_err)) : "ota writer did not drain in time";
+    ota_stop_writer(writer_ctx, ota_q, writer_task);
+    vQueueDelete(ota_q);
+    return false;
+  }
+  vQueueDelete(ota_q);
+
+  uint8_t digest[32] = {0};
+  mbedtls_sha256_finish_ret(&sha, digest);
+  mbedtls_sha256_free(&sha);
+  String got_sha = hex_lower(digest, sizeof(digest));
+  if (ota_sha_mismatch(got_sha, fw_sha)) {
+    esp_ota_abort(ota_handle);
+    out_err = "firmware sha256 mismatch";
+    return false;
+  }
+
+  if (!first_block.empty()) {
+    ota_kick_wdt();
+    esp_err_t hdr_wr_err = esp_ota_write_with_offset(ota_handle, first_block.data(), first_block.size(), 0);
+    ota_kick_wdt();
+    if (hdr_wr_err != ESP_OK) {
+      esp_ota_abort(ota_handle);
+      out_err = String("failed to restore OTA header block: ") + String(static_cast<int>(hdr_wr_err));
+      return false;
+    }
+  }
+
+  ota_kick_wdt();
+  esp_err_t end_err = esp_ota_end(ota_handle);
+  ota_kick_wdt();
+  if (end_err != ESP_OK) {
+    out_err = String("ota end failed: ") + String(static_cast<int>(end_err));
+    return false;
+  }
+
+  ota_kick_wdt();
+  esp_err_t set_err = esp_ota_set_boot_partition(target_part);
+  ota_kick_wdt();
+  if (set_err != ESP_OK) {
+    out_err = String("failed to set boot partition: ") + String(static_cast<int>(set_err));
+    return false;
+  }
+
+  uint8_t drain_buf[256];
+  while (should_drain_trailing_bundle_bytes(bytes_left)) {
+    int want = ota_next_drain_chunk_size(bytes_left, static_cast<int>(sizeof(drain_buf)));
+    int n = httpd_req_recv(req, reinterpret_cast<char*>(drain_buf), want);
+    if (n <= 0) break;
+    bytes_left -= n;
+    ota_kick_wdt();
+  }
+
+  state.last_ota_version = ota_version;
+  state.last_ota_version_code = ota_version_code;
+  uint64_t next_floor = state.ota_min_allowed_version_code;
+  if (has_rollback_floor_code && ota_rollback_floor_code > next_floor) next_floor = ota_rollback_floor_code;
+  state.ota_min_allowed_version_code = next_floor;
+
+  Preferences p;
+  if (p.begin("aztcfg", false)) {
+    p.putString("ota_last_ver", state.last_ota_version);
+    p.putULong64("ota_last_vc", state.last_ota_version_code);
+    p.putULong64("ota_min_vc", state.ota_min_allowed_version_code);
+    p.end();
+  }
+
+  return true;
+}
+
 static bool parse_request_and_headers(WiFiClient& client,
                                       String& method,
                                       String& path,
@@ -2754,34 +3205,9 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
     return;
   }
 
-  if (method == "GET" && path == "/api/v0/device/upgrade") {
-    String html = "<!doctype html><html><head><meta charset=\"utf-8\"><title>AZT OTA Upgrade</title></head><body>"
-                  "<h1>AZT OTA Upgrade</h1>"
-                  "<p>POST multipart firmware bundle to <code>/api/v0/device/upgrade</code>.</p>"
-                  "</body></html>";
-    client.print("HTTP/1.1 200 OK\r\n");
-    client.print("Content-Type: text/html; charset=utf-8\r\n");
-    client.print("Cache-Control: no-store\r\n");
-    client.print("Connection: close\r\n");
-    client.print("Content-Length: ");
-    client.print(html.length());
-    client.print("\r\n\r\n");
-    client.print(html);
-    return;
-  }
-
-  if (method == "POST" && path == "/api/v0/device/upgrade") {
-    Serial.printf("AZT_OTA_POST begin content_len=%d from=%s\n", content_len, remote_ip.c_str());
-    String err;
-    if (handle_ota_upgrade_bundle_post(client, content_len, state, err)) {
-      Serial.printf("AZT_OTA_POST ok\n");
-      send_json(client, 200, "{\"ok\":true,\"upgrade_written\":true,\"reboot_required\":true,\"detail\":\"firmware accepted; reboot to run new image\"}");
-    } else {
-      Serial.printf("AZT_OTA_POST err=%s\n", err.c_str());
-      // Best-effort drain reduces TCP RSTs when rejecting while client is still uploading.
-      drain_request_body_best_effort(client, content_len, 60000);
-      send_json(client, 400, "{\"ok\":false,\"error\":\"ERR_OTA_UPGRADE\",\"detail\":" + json_quote(err) + "}");
-    }
+  if ((method == "GET" || method == "POST") && path == "/api/v0/device/upgrade") {
+    send_json(client, 410,
+              "{\"ok\":false,\"error\":\"ERR_OTA_HTTP_DISABLED\",\"detail\":\"OTA is HTTPS-only; use https://<host>:8443/api/v0/device/upgrade\"}");
     return;
   }
 
