@@ -6,14 +6,18 @@
 
 namespace azt {
 
-bool send_chunked(WiFiClient& client, const uint8_t* data, size_t len) {
+bool send_chunked(StreamTransport& transport, const uint8_t* data, size_t len) {
   char hdr[20];
   snprintf(hdr, sizeof(hdr), "%x\r\n", static_cast<unsigned>(len));
-  if (client.print(hdr) == 0) return false;
-  size_t w = client.write(data, len);
-  if (w != len) return false;
-  if (client.print("\r\n") == 0) return false;
+  if (!transport.write_text(hdr)) return false;
+  if (!transport.write_bytes(data, len)) return false;
+  if (!transport.write_text("\r\n")) return false;
   return true;
+}
+
+bool send_chunked(WiFiClient& client, const uint8_t* data, size_t len) {
+  WiFiClientStreamTransport transport(client);
+  return send_chunked(transport, data, len);
 }
 
 static bool encrypt_payload_and_chain(StreamCtx& sc,

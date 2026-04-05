@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "azt_stream.h"
+#include "azt_stream_transport.h"
 
 namespace azt {
 
@@ -23,6 +24,7 @@ struct TelemetrySnapshotV1 {
 
 void encode_telemetry_snapshot_body_v1(const TelemetrySnapshotV1& t, std::vector<uint8_t>& out);
 
+bool send_chunked(StreamTransport& transport, const uint8_t* data, size_t len);
 bool send_chunked(WiFiClient& client, const uint8_t* data, size_t len);
 
 bool encrypt_audio_chunk_and_chain(StreamCtx& sc,
