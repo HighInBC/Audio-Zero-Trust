@@ -19,4 +19,4 @@ class DiscoveryAd:
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.source_ip}:{self.http_port}"
+        return f"https://{self.source_ip}:{self.http_port}"

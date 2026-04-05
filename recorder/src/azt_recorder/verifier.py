@@ -80,7 +80,7 @@ class TrustVerifier:
             consumers = self._authorized_consumers_from_payload(pobj)
             vr = VerifyResult(True, "certificate_and_attestation_verified", authorized_consumers=consumers)
         except Exception as e:
-            vr = VerifyResult(False, f"certificate_verify_failed:{type(e).__name__}")
+            vr = VerifyResult(False, f"certificate_verify_failed:{type(e).__name__}:{e}")
 
         self._cache[ck] = vr
         return vr
