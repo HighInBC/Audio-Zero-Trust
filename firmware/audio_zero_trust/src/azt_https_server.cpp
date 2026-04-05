@@ -246,6 +246,8 @@ bool start_https_stream_server(AppState* state, SemaphoreHandle_t state_mu, uint
   conf.httpd.max_open_sockets = 2;
   conf.httpd.lru_purge_enable = true;
   conf.httpd.stack_size = 6144;
+  // Critical: second httpd instance needs a distinct control socket port.
+  conf.httpd.ctrl_port = 32769;
   conf.cacert_pem = reinterpret_cast<const unsigned char*>(g_cert.c_str());
   conf.cacert_len = g_cert.length() + 1;
   conf.prvtkey_pem = reinterpret_cast<const unsigned char*>(g_key.c_str());
