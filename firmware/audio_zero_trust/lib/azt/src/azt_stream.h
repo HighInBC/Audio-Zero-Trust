@@ -23,6 +23,11 @@ int parse_seconds_from_path(const String& path);
 bool parse_signbench_from_path(const String& path);
 int parse_drop_test_frames_from_path(const String& path);
 
+// Runtime control: temporarily pause stream signature checkpoint generation
+// (audio flow continues) during heavy operations like OTA writes.
+void set_stream_signature_pause(bool paused);
+bool stream_signature_paused();
+
 // Testable runtime policy helpers.
 uint32_t max_contiguous_drop_frames_for_config(uint32_t frame_samples,
                                                uint32_t max_contiguous_drop_ms = 10000,

@@ -2117,6 +2117,11 @@ static constexpr size_t kOtaChunkBytes = 256;
 
 static inline void ota_bc(const char* tag);
 
+struct OtaSignaturePauseGuard {
+  OtaSignaturePauseGuard() { set_stream_signature_pause(true); }
+  ~OtaSignaturePauseGuard() { set_stream_signature_pause(false); }
+};
+
 struct OtaEraseTaskCtx {
   const esp_partition_t* part = nullptr;
   size_t total_len = 0;
@@ -2410,6 +2415,7 @@ static bool ota_preflight_bundle(const String& header_line,
 static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, AppState& state, String& out_err) {
   out_err = "";
   ota_bc("S0_ENTER");
+  OtaSignaturePauseGuard sig_pause_guard;
 
   String header_line = client.readStringUntil('\n');
   header_line.trim();
@@ -2879,6 +2885,7 @@ static bool ota_read_firmware_chunk_httpd(httpd_req_t* req,
 bool handle_ota_upgrade_bundle_post_https(httpd_req_t* req, int content_len, AppState& state, String& out_err) {
   out_err = "";
   ota_bc("S0_ENTER_HTTPS");
+  OtaSignaturePauseGuard sig_pause_guard;
   if (!req || content_len <= 0) {
     out_err = "invalid ota request";
     return false;

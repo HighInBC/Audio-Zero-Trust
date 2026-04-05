@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <algorithm>
+#include <atomic>
 #include <Preferences.h>
 #include <esp_system.h>
 #include <esp_timer.h>
@@ -29,6 +30,16 @@ static constexpr uint32_t kSigCheckpointMinInterval = 10;
 static constexpr uint32_t kSigCheckpointMaxInterval = 160;
 static constexpr uint32_t kTelemetryIntervalBlocks = 50;
 static constexpr uint32_t kMaxContiguousDropMs = 10000;
+
+static std::atomic<bool> g_stream_signature_pause{false};
+
+void set_stream_signature_pause(bool paused) {
+  g_stream_signature_pause.store(paused, std::memory_order_relaxed);
+}
+
+bool stream_signature_paused() {
+  return g_stream_signature_pause.load(std::memory_order_relaxed);
+}
 
 int parse_seconds_from_path(const String& path) {
   int q = path.indexOf('?');
@@ -460,14 +471,23 @@ static void handle_stream_impl(StreamTransport& client, int seconds, const AppSt
     } else {
       const bool due_checkpoint = (sc.seq % sig_interval) == 0;
       if (due_checkpoint) {
-        if (sig_req_pending) {
+        if (stream_signature_paused()) {
+          // Intentionally skip checkpoint enqueue while paused (e.g. OTA in progress)
+          // to reduce contention on signer/flash paths.
           sig_req_dropped++;
           if (sig_interval < kSigCheckpointMaxInterval) {
             sig_interval = sig_checkpoint_interval_on_missed_response(sig_interval, kSigCheckpointMinInterval, kSigCheckpointMaxInterval);
           }
+        } else {
+          if (sig_req_pending) {
+            sig_req_dropped++;
+            if (sig_interval < kSigCheckpointMaxInterval) {
+              sig_interval = sig_checkpoint_interval_on_missed_response(sig_interval, kSigCheckpointMinInterval, kSigCheckpointMaxInterval);
+            }
+          }
+          signer.submit(sc.seq, v_new);
+          sig_req_pending = true;
         }
-        signer.submit(sc.seq, v_new);
-        sig_req_pending = true;
       }
     }
 
