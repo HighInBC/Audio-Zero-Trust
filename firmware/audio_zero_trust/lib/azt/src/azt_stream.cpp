@@ -361,6 +361,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   bool disconnected_for_stall = false;
   const String started_certificate_serial = state.device_certificate_serial;
   const bool started_with_certificate = started_certificate_serial.length() > 0;
+  const bool started_with_recorder_auth = state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64;
+  const String started_recorder_auth_fp = state.recorder_auth_fingerprint_hex;
 
   TelemetryAccumulator telem{};
   int drop_test_remaining = drop_test_frames;
@@ -374,6 +376,18 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
 
     if (started_with_certificate && !is_active_certificate_serial(started_certificate_serial)) {
       break;
+    }
+
+    // Halt active stream if recorder auth key posture changes mid-stream
+    // (added/removed/rotated), matching certificate revocation behavior.
+    {
+      const bool current_with_recorder_auth = state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64;
+      if (current_with_recorder_auth != started_with_recorder_auth) {
+        break;
+      }
+      if (started_with_recorder_auth && state.recorder_auth_fingerprint_hex != started_recorder_auth_fp) {
+        break;
+      }
     }
 
     const uint64_t ingress_dropped = mic_ring_take_dropped_newest(*mic_ring);
