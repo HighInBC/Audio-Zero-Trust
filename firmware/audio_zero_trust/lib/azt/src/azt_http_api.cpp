@@ -137,11 +137,14 @@ static bool ota_wake_window_allows_ip(const String& remote_ip, uint32_t now_ms) 
 static bool verify_stream_nonce_and_auth(const String& path,
                                          const AppState& state,
                                          String& out_nonce,
-                                         String& out_err) {
+                                         String& out_err,
+                                         String& out_detail) {
   out_nonce = parse_query_param(path, "nonce");
+  out_detail = "";
   uint32_t now_ms = millis();
   if (!validate_active_nonce(out_nonce, g_stream_nonce, g_stream_nonce_expires_ms, now_ms)) {
     out_err = "ERR_STREAM_NONCE_REQUIRED";
+    out_detail = "missing/expired nonce; fetch /api/v0/device/stream/challenge and retry";
     return false;
   }
 
@@ -152,6 +155,7 @@ static bool verify_stream_nonce_and_auth(const String& path,
     String signer_fp = parse_query_param(path, "signer_fp");
     if (sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.recorder_auth_fingerprint_hex) {
       out_err = "ERR_STREAM_AUTH_REQUIRED";
+      out_detail = String("expected signer_fp=") + state.recorder_auth_fingerprint_hex + ", sig_alg=ed25519";
       return false;
     }
     String msg = String("stream:") + out_nonce + ":" + state.device_sign_fingerprint_hex;
@@ -160,6 +164,7 @@ static bool verify_stream_nonce_and_auth(const String& path,
     for (size_t i = 0; i < msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(msg[i]));
     if (!verify_ed25519_signature_b64(state.recorder_auth_pubkey_b64, msg_raw, sig_b64)) {
       out_err = "ERR_STREAM_AUTH_VERIFY";
+      out_detail = "signature verify failed for stream:<nonce>:<device_sign_fp>";
       return false;
     }
   }
@@ -2856,8 +2861,12 @@ void handle_client_stream_only(WiFiClient& client, const AppState& state) {
 
   String stream_nonce;
   String stream_err;
-  if (!verify_stream_nonce_and_auth(path, state, stream_nonce, stream_err)) {
-    send_json(client, 401, "{\"ok\":false,\"error\":" + json_quote(stream_err) + "}");
+  String stream_detail;
+  if (!verify_stream_nonce_and_auth(path, state, stream_nonce, stream_err, stream_detail)) {
+    String body = "{\"ok\":false,\"error\":" + json_quote(stream_err);
+    if (stream_detail.length() > 0) body += ",\"detail\":" + json_quote(stream_detail);
+    body += "}";
+    send_json(client, 401, body);
     return;
   }
 

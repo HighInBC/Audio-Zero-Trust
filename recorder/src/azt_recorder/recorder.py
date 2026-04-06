@@ -15,6 +15,7 @@ import tarfile
 import time
 import urllib.request
 import urllib.parse
+import urllib.error
 
 from cryptography.hazmat.primitives import serialization
 
@@ -43,6 +44,28 @@ def make_azt_filename(common_name: str, ts_local: datetime, device_id: str = "")
 
 class AuthorizationError(RuntimeError):
     pass
+
+
+def _format_runtime_error(e: Exception) -> str:
+    if isinstance(e, urllib.error.HTTPError):
+        status = getattr(e, "code", "?")
+        try:
+            body_raw = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body_raw = ""
+        if body_raw:
+            try:
+                parsed = json.loads(body_raw)
+                if isinstance(parsed, dict):
+                    code = parsed.get("error")
+                    detail = parsed.get("detail")
+                    if code or detail:
+                        return f"HTTP {status} error={code} detail={detail}"
+            except Exception:
+                pass
+            return f"HTTP {status} body={body_raw[:240]}"
+        return f"HTTP {status}"
+    return str(e)
 
 
 def _readline_limited(resp, max_len: int = 1 << 20) -> bytes:
@@ -313,6 +336,7 @@ class RecordingSession:
             params["sig_alg"] = "ed25519"
             params["sig"] = sig_b64
             params["signer_fp"] = signer_fp
+            print(f"[record] stream_auth device={self.ad.device_name} signer_fp={signer_fp} expected_device_fp={device_fp}")
 
         url = f"{self.ad.base_url}/stream?" + urllib.parse.urlencode(params)
         return urllib.request.Request(url, method="GET"), nonce
@@ -331,7 +355,7 @@ class RecordingSession:
                     print(f"[record] AUTH_FAIL device={self.ad.device_name} ip={self.ad.source_ip} err={e}; worker halted pending re-authorization")
                     return
                 except Exception as e:
-                    print(f"[record] error device={self.ad.device_name} ip={self.ad.source_ip} err={e} backoff={backoff}s")
+                    print(f"[record] error device={self.ad.device_name} ip={self.ad.source_ip} err={_format_runtime_error(e)} backoff={backoff}s")
                     await asyncio.sleep(backoff)
             else:
                 await asyncio.sleep(5)
