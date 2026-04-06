@@ -363,4 +363,4 @@ def test_issue_certificate_authorized_consumers_flags(monkeypatch, tmp_path):
     cert = payload["certificate"]
     raw = base64.b64decode(cert["certificate_payload_b64"])
     doc = json.loads(raw.decode("utf-8"))
-    assert doc["authorized_consumers"] == ["auto-listen", "auto-decode"]
+    assert doc["authorized_consumers"] == ["auto-record", "auto-decode"]

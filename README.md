@@ -48,7 +48,7 @@ If you just want to install and run, jump to **[Install](#install)**.
 
 - `firmware/` — firmware projects (canonical app: `firmware/audio_zero_trust/`)
 - `client/` — host tooling (`azt_tool.py`), SDK code, and tests
-- `listener/` — listener-side implementation and tests
+- `recorder/` — recorder daemon implementation and tests
 - `spec/` — protocol/container/spec references
 - `docs/` — operational documentation (including serial flash profile contracts)
 
@@ -247,7 +247,8 @@ Push a release OTA bundle over the network OTA endpoint:
 ```bash
 python3 client/tools/azt_tool.py ota-bundle-post \
   --host <Host or IP> \
-  --in firmware/releases/OTA-Audio-Zero-Trust-20260322.otabundle
+  --in firmware/releases/OTA-Audio-Zero-Trust-20260322.otabundle \
+  --admin-key client/tools/provisioned/admin-main/private_key.pem
 ```
 
 `--from-ota` validates signed OTA metadata by default and applies OTA signer/version/floor state over serial after flash.
@@ -278,7 +279,7 @@ Compile current source, sign OTA metadata with your firmware key, and output bun
 
 ```bash
 python3 client/tools/azt_tool.py ota-bundle-create \
-  --key client/tools/provisioned/firmware-master/private_key.pem \
+  --firmware-key client/tools/provisioned/firmware-master/private_key.pem \
   --target atom-echos3r \
   --version-code timestamp \
   --rollback-floor-code same \
@@ -286,7 +287,7 @@ python3 client/tools/azt_tool.py ota-bundle-create \
 # legacy: --target atom-echo
 ```
 
-You can use `--post --host <device>` instead of `--out` to create and immediately post upgrade payload.
+You can use `--post --host <device> --admin-key <admin_private_key.pem>` instead of `--out` to create and immediately post upgrade payload.
 
 High-level flow:
 
@@ -307,6 +308,7 @@ python3 client/tools/azt_tool.py create-decoding-credentials --identity listener
 python3 client/tools/azt_tool.py configure-device \
   --admin-creds-dir client/tools/provisioned/admin-main \
   --listener-creds-dir client/tools/provisioned/listener-main \
+  --recorder-auth-creds-dir client/tools/provisioned/recorder-main \
   --identity livingroom \
   --wifi-ssid "<YOUR_WIFI_SSID>" \
   --wifi-password "<YOUR_WIFI_PASSWORD>" \
@@ -322,6 +324,15 @@ Optional controls:
 - `--no-tls-bootstrap` to disable auto TLS bootstrap
 - `--tls-valid-days <days>` to set issued cert validity
 - `--tls-reboot-wait-seconds <seconds>` to control post-reboot verification wait
+
+Patch recorder auth key without serial reflash:
+
+```bash
+python3 client/tools/azt_tool.py config-patch \
+  --host azt-mic.local \
+  --recorder-auth-key client/tools/provisioned/recorder-main \
+  --json
+```
 
 ### 9) Manual one-command TLS bootstrap (when needed)
 
@@ -358,8 +369,9 @@ Port behavior:
 # API/control over HTTPS (CA is auto-discovered from client/tools/pki by default)
 python3 client/tools/azt_tool.py state-get --host azt-mic.local --port 8443
 
-# stream remains plain HTTP
-python3 client/tools/azt_tool.py stream-read --host azt-mic.local --seconds 2
+# stream remains plain HTTP, but is nonce-gated.
+# if recorder_auth_key is configured on device, --key must be provided.
+python3 client/tools/azt_tool.py stream-read --host azt-mic.local --seconds 2 --key client/tools/provisioned/admin-main/private_key.pem
 ```
 
 ---
@@ -480,7 +492,7 @@ Run SDK unit tests:
 cd Audio-Zero-Trust
 ./.venv/bin/python -m pytest client/test/unit_sdk -q
 ```
-- `listener/test/` — listener tests (scaffold)
+- `recorder/tests/` — recorder daemon tests
 
 ---
 

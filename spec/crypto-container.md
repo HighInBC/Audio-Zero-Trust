@@ -67,6 +67,7 @@ Required keys used by current validators/generator:
 - `this_header_signing_key_fingerprint_hex`
 - `device_certificate_serial` (string, optional but recommended when certified)
 - `device_certificate` (JSON object, optional; full signed certificate document as returned by `/api/v0/device/certificate`)
+- `stream_auth_nonce` (string; single-use stream challenge nonce bound to stream-start authorization)
 - `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
 - `chain_alg` = `"sha256-link"`
 - `chain_domain` = `"AZT1-CHAIN-V1"`

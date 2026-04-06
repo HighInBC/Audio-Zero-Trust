@@ -1,35 +1,32 @@
-# azt-listener (iteration 1)
+# azt-recorder
 
-Discovery + trust-decision daemon for Audio Zero Trust microphones.
+Discovery + trust-decision + recording daemon for Audio-Zero-Trust devices.
 
-This is NOT yet ready for consumption!
-
-## What this iteration does
+## Current behavior
 
 - Loads YAML config
-- Listens for UDP discovery packets on port 33333
-- Parses/validates discovery JSON v1
+- Listens for UDP discovery packets on port `33333`
 - Applies trust policy:
   - device fingerprint allowlist
   - admin fingerprint allowlist (certificate required)
-- Verifies admin-signed certificate cryptographically before authorizing admin-path devices
-- Starts continuous recording workers for authorized devices
-- Writes files as: `<CommonName>-<ZuluTime>.azt` (example: `Livingroom-2026-03-13T23:37:39Z.azt`)
-- Auto timestamps each completed recording via TSA, producing `<file>.timestamp.tar` (contains tsq/tsr + README)
-- Background backfill stamps any `.azt` older than 60s that lacks `.timestamp.tar` and is not currently open by any process
-- Reconnects with backoff and rolls over hourly
+- Verifies admin-signed device certificates before recording
+- Starts per-device recording workers for authorized devices
+- Pulls `/stream` continuously with hourly rollover
+- Uses stream challenge nonce flow (`/api/v0/device/stream/challenge`)
+- If device has `recorder_auth_key` configured, signs stream start with recorder Ed25519 key
+- Writes `.azt` files under configured output path
+- Auto-timestamps completed recordings via TSA (`.timestamp.tar`)
 
-## Run
+## Run (dev)
 
 ```bash
-cd projects/azt-listener
+cd recorder
 python3 -m pip install -e .
-azt-listener --config config/listener.yaml
+azt-recorder --config config/recorder.yaml
 ```
 
-## Next iteration
+## Config notes
 
-- Add per-device stream workers (`/stream` pull)
-- 24/7 auto-restart + hourly rollover
-- Persist listener state/checkpoints
-- Dockerfile + compose
+- `recording.output_dir`: recording destination inside container/runtime
+- `recording.recorder_auth_private_key_path`: optional Ed25519 private key used for stream-start auth signatures
+- Keep runtime config/secrets outside git in deployment environments.

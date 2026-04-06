@@ -39,6 +39,11 @@ Firmware must expose a capability surface that includes at minimum:
 
 Client SDK must query capabilities before feature-dependent operations and branch behavior accordingly.
 
+Current feature gates that require graceful fallback behavior:
+- OTA wake-gated uploads (`/api/v0/device/ota/wake/challenge`, `/api/v0/device/ota/wake`)
+- Stream nonce challenge (`/api/v0/device/stream/challenge`)
+- Optional recorder auth key (`recorder_auth_key`) for stream-start signatures
+
 ## 4) Change management requirements
 
 Any breaking change must include, in the same PR:

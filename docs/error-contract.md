@@ -43,6 +43,13 @@ This project emits a stable envelope for all CLI commands when `--json` is used:
   - `STATE_GET_V0_FAILED`
   - `ATTESTATION_GET_FAILED`
   - `CERTIFICATE_POST_FAILED`
-- Stream/device transport failures:
+- Stream/device transport and auth failures:
+  - `STREAM_CHALLENGE_FAILED`
+  - `STREAM_AUTH_KEY_REQUIRED`
+  - `STREAM_AUTH_KEY`
   - `STREAM_READ_REQUEST_FAILED`
   - `STREAM_READ_ITERATION_FAILED`
+- Firmware stream auth responses (from `/stream`):
+  - `ERR_STREAM_NONCE_REQUIRED`
+  - `ERR_STREAM_AUTH_REQUIRED`
+  - `ERR_STREAM_AUTH_VERIFY`
