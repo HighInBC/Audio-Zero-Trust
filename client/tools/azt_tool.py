@@ -165,9 +165,9 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     if time_servers:
         patch_obj["time"] = time_servers
 
-    rec_key_pem_path = (getattr(args, "recording_key_pem", "") or "").strip()
-    if rec_key_pem_path:
-        patch_obj["recording_key"] = {"public_key_pem": Path(rec_key_pem_path).read_text()}
+    listener_key_pem_path = (getattr(args, "listener_key_pem", "") or "").strip()
+    if listener_key_pem_path:
+        patch_obj["listener_key"] = {"public_key_pem": Path(listener_key_pem_path).read_text()}
 
     audio_preamp = getattr(args, "audio_preamp_gain", None)
     audio_adc = getattr(args, "audio_adc_gain", None)
@@ -186,7 +186,7 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
         patch_obj["audio"] = pa
 
     if not patch_obj:
-        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "provide --patch or patch flags (device/wifi/authorized listeners/time/mdns/recording-key)"}, as_json=bool(getattr(args, "as_json", False)))
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "provide --patch or patch flags (device/wifi/authorized listeners/time/mdns/listener-key)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
     if_version = int(args.if_version)

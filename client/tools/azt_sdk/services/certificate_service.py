@@ -17,6 +17,10 @@ from tools.azt_sdk.services.device_service import certificate_post, state_get
 from tools.azt_sdk.services.url_service import base_url
 
 
+def _listener_value(obj: dict, listener_key: str, recording_key: str):
+    return obj.get(listener_key) if obj.get(listener_key) not in (None, "") else obj.get(recording_key)
+
+
 def _validate_attestation(*, att: dict, state: dict, host: str, port: int, attestation_max_age_s: int) -> tuple[bool, str | None, dict]:
     now_s = int(time.time())
     issued_at = int(att.get("issued_at_epoch_s") or 0)
@@ -38,15 +42,15 @@ def _validate_attestation(*, att: dict, state: dict, host: str, port: int, attes
     if att_chip != st_chip:
         return False, "ATTESTATION_CHIP_ID_MISMATCH", {"attestation_chip_id": att_chip, "state_chip_id": st_chip}
 
-    att_rec_pub = str(att.get("recording_public_key_pem") or "")
-    st_rec_pub = str(state.get("recording_public_key_pem") or "")
-    if att_rec_pub != st_rec_pub:
-        return False, "ATTESTATION_RECORDER_KEY_MISMATCH", {"attestation_recording_public_key_pem": att_rec_pub, "state_recording_public_key_pem": st_rec_pub}
+    att_listener_pub = str(_listener_value(att, "listener_public_key_pem", "recording_public_key_pem") or "")
+    st_listener_pub = str(_listener_value(state, "listener_public_key_pem", "recording_public_key_pem") or "")
+    if att_listener_pub != st_listener_pub:
+        return False, "ATTESTATION_LISTENER_KEY_MISMATCH", {"attestation_listener_public_key_pem": att_listener_pub, "state_listener_public_key_pem": st_listener_pub}
 
-    att_rec_fp = str(att.get("recording_fingerprint_hex") or "")
-    st_rec_fp = str(state.get("recording_fingerprint_hex") or "")
-    if att_rec_fp != st_rec_fp:
-        return False, "ATTESTATION_RECORDER_FP_MISMATCH", {"attestation_recording_fingerprint_hex": att_rec_fp, "state_recording_fingerprint_hex": st_rec_fp}
+    att_listener_fp = str(_listener_value(att, "listener_fingerprint_hex", "recording_fingerprint_hex") or "")
+    st_listener_fp = str(_listener_value(state, "listener_fingerprint_hex", "recording_fingerprint_hex") or "")
+    if att_listener_fp != st_listener_fp:
+        return False, "ATTESTATION_LISTENER_FP_MISMATCH", {"attestation_listener_fingerprint_hex": att_listener_fp, "state_listener_fingerprint_hex": st_listener_fp}
 
     return True, None, {}
 
@@ -152,8 +156,11 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
         "device_sign_public_key_b64": state.get("device_sign_public_key_b64", ""),
         "device_sign_fingerprint_hex": state.get("device_sign_fingerprint_hex", ""),
         "device_chip_id_hex": state.get("device_chip_id_hex", ""),
-        "recording_public_key_pem": state.get("recording_public_key_pem", ""),
-        "recording_fingerprint_hex": state.get("recording_fingerprint_hex", ""),
+        "listener_public_key_pem": _listener_value(state, "listener_public_key_pem", "recording_public_key_pem") or "",
+        "listener_fingerprint_hex": _listener_value(state, "listener_fingerprint_hex", "recording_fingerprint_hex") or "",
+        # Backward-compat aliases
+        "recording_public_key_pem": _listener_value(state, "listener_public_key_pem", "recording_public_key_pem") or "",
+        "recording_fingerprint_hex": _listener_value(state, "listener_fingerprint_hex", "recording_fingerprint_hex") or "",
         "admin_signer_fingerprint_hex": state.get("admin_fingerprint_hex", ""),
         "authorized_consumers": authorized_consumers,
         "issued_at_utc": issued_at_utc,

@@ -23,6 +23,10 @@ def _nonce_matches(payload_nonce: str, requested_nonce: str) -> bool:
     return False
 
 
+def _listener_value(obj: dict, listener_key: str, recording_key: str):
+    return obj.get(listener_key) if obj.get(listener_key) not in (None, "") else obj.get(recording_key)
+
+
 def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
     state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
@@ -41,8 +45,8 @@ def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tup
         and payload.get("device_sign_public_key_b64") == state.get("device_sign_public_key_b64")
         and payload.get("device_sign_fingerprint_hex") == state.get("device_sign_fingerprint_hex")
         and payload.get("device_chip_id_hex") == state.get("device_chip_id_hex")
-        and payload.get("recording_public_key_pem") == state.get("recording_public_key_pem")
-        and payload.get("recording_fingerprint_hex") == state.get("recording_fingerprint_hex")
+        and _listener_value(payload, "listener_public_key_pem", "recording_public_key_pem") == _listener_value(state, "listener_public_key_pem", "recording_public_key_pem")
+        and _listener_value(payload, "listener_fingerprint_hex", "recording_fingerprint_hex") == _listener_value(state, "listener_fingerprint_hex", "recording_fingerprint_hex")
         and att.get("signature_algorithm") == "ed25519"
         and isinstance(att.get("signature_b64"), str)
     )
@@ -98,8 +102,11 @@ def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tup
         "admin_fingerprint_hex": state.get("admin_fingerprint_hex"),
         "device_sign_fingerprint_hex": state.get("device_sign_fingerprint_hex"),
         "device_chip_id_hex": state.get("device_chip_id_hex"),
-        "recording_public_key_pem": state.get("recording_public_key_pem"),
-        "recording_fingerprint_hex": state.get("recording_fingerprint_hex"),
+        "listener_public_key_pem": _listener_value(state, "listener_public_key_pem", "recording_public_key_pem"),
+        "listener_fingerprint_hex": _listener_value(state, "listener_fingerprint_hex", "recording_fingerprint_hex"),
+        # Backward-compat aliases
+        "recording_public_key_pem": _listener_value(state, "listener_public_key_pem", "recording_public_key_pem"),
+        "recording_fingerprint_hex": _listener_value(state, "listener_fingerprint_hex", "recording_fingerprint_hex"),
         "schema_ok": schema_ok,
         "sig_ok": sig_ok,
         "sig_detail": sig_detail,
