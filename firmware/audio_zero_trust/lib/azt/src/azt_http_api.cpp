@@ -208,6 +208,32 @@ static bool ed25519_pub_raw_to_spki_pem(const String& raw_b64, String& out_pem) 
   return true;
 }
 
+static int hex_nibble(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+  if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+  return -1;
+}
+
+static String percent_decode(const String& in) {
+  String out;
+  out.reserve(in.length());
+  for (size_t i = 0; i < in.length(); ++i) {
+    char c = in[i];
+    if (c == '%' && i + 2 < in.length()) {
+      int hi = hex_nibble(in[i + 1]);
+      int lo = hex_nibble(in[i + 2]);
+      if (hi >= 0 && lo >= 0) {
+        out += static_cast<char>((hi << 4) | lo);
+        i += 2;
+        continue;
+      }
+    }
+    out += c;
+  }
+  return out;
+}
+
 static String parse_query_param(const String& path, const char* key) {
   int q = path.indexOf('?');
   if (q < 0) return "";
@@ -227,6 +253,7 @@ static String parse_query_param(const String& path, const char* key) {
     end = end_q;
   }
   String v = (end < 0) ? query.substring(start) : query.substring(start, end);
+  v = percent_decode(v);
   v.trim();
   return v;
 }

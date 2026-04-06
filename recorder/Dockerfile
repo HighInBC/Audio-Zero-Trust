@@ -10,7 +10,6 @@ RUN apt-get update \
 
 COPY pyproject.toml /app/
 COPY src /app/src
-COPY config /app/config
 
 RUN pip install --no-cache-dir .
 
