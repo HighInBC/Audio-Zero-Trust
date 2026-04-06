@@ -141,7 +141,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command == "configure-device":
         for ck, an in [
             ("admin_creds_dir", "admin_creds_dir"),
-            ("recorder_creds_dir", "recorder_creds_dir"),
+            ("listener_creds_dir", "listener_creds_dir"),
             ("wifi_ssid", "wifi_ssid"),
             ("wifi_password", "wifi_password"),
             ("host", "host"),

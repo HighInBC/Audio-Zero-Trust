@@ -173,7 +173,7 @@ def fresh_setup(tool: ToolRunner, host_hint: str, port: str, target: str, wifi_s
         [
             "configure-device",
             "--admin-creds-dir", admin_creds_dir,
-            "--recorder-creds-dir", rec_creds_dir,
+            "--listener-creds-dir", rec_creds_dir,
             "--identity", identity,
             "--wifi-ssid", wifi_ssid,
             "--wifi-password", wifi_password,
@@ -348,7 +348,7 @@ def main() -> int:
             rc_cfg_set, obj_cfg_set, out_cfg_set = tool.json([
                 "configure-device",
                 "--admin-creds-dir", str(admin_creds_dir),
-                "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
+                "--listener-creds-dir", str(rec_creds_dir or admin_creds_dir),
                 "--identity", identity_label,
                 "--wifi-ssid", wifi_ssid,
                 "--wifi-password", wifi_password,
@@ -371,7 +371,7 @@ def main() -> int:
             rc_cfg_clr, obj_cfg_clr, out_cfg_clr = tool.json([
                 "configure-device",
                 "--admin-creds-dir", str(admin_creds_dir),
-                "--recorder-creds-dir", str(rec_creds_dir or admin_creds_dir),
+                "--listener-creds-dir", str(rec_creds_dir or admin_creds_dir),
                 "--identity", identity_label,
                 "--wifi-ssid", wifi_ssid,
                 "--wifi-password", wifi_password,
@@ -533,7 +533,7 @@ def main() -> int:
             post_ok = (
                 up_state.get("signed_config_ready") is True
                 and up_state.get("admin_fingerprint_hex") == state.get("admin_fingerprint_hex")
-                and up_state.get("recording_fingerprint_hex") == state.get("recording_fingerprint_hex")
+                and up_state.get("listener_fingerprint_hex") == state.get("listener_fingerprint_hex")
                 and up_state.get("device_sign_fingerprint_hex") == state.get("device_sign_fingerprint_hex")
                 and up_state.get("device_label") == state.get("device_label")
             )

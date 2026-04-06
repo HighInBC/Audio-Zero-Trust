@@ -239,9 +239,9 @@ static constexpr BaseType_t kSignerCore = 0;
 static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
   if (!state.signed_config_ready ||
       state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64 ||
-      state.recording_pubkey_pem.length() == 0 || state.recording_fingerprint_hex.length() != 64) {
+      state.listener_pubkey_pem.length() == 0 || state.listener_fingerprint_hex.length() != 64) {
     send_json(client, 403,
-              "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"stream disabled until signed config with admin_key and recording_key is installed\"}");
+              "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"stream disabled until signed config with admin_key and listener_key is installed\"}");
     return;
   }
 

@@ -1,5 +1,5 @@
 [project]
-name = "azt-recorder"
+name = "azt-listener"
 version = "0.1.0"
 description = "Audio Zero Trust discovery + recording supervisor"
 requires-python = ">=3.10"
@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-azt-recorder = "azt_recorder.main:main"
+azt-listener = "azt_listener.main:main"
 
 [build-system]
 requires = ["setuptools>=68"]

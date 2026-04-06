@@ -9,12 +9,12 @@ bool test_discovery_payload_precise(Context&) {
   azt::AppState st{};
   st.device_sign_fingerprint_hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   st.admin_fingerprint_hex = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-  st.recording_fingerprint_hex = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+  st.listener_fingerprint_hex = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
   st.device_label = "Livingroom";
   st.device_certificate_serial = "mic-000001";
 
   String got = azt::build_discovery_announcement_json(st, 8080);
-  String expected = "{\"discovery_version\":1,\"device_type\":\"audio-zero-trust-microphone\",\"device_key_fingerprint_hex\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"admin_key_fingerprint_hex\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"recording_key_fingerprint_hex\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"device_name\":\"Livingroom\",\"http_port\":8080,\"certificate_serial\":\"mic-000001\"}";
+  String expected = "{\"discovery_version\":1,\"device_type\":\"audio-zero-trust-microphone\",\"device_key_fingerprint_hex\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"admin_key_fingerprint_hex\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"listener_key_fingerprint_hex\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"device_name\":\"Livingroom\",\"http_port\":8080,\"certificate_serial\":\"mic-000001\"}";
   return got == expected;
 }
 
@@ -22,12 +22,12 @@ bool test_discovery_payload_uncertified_blanks_admin(Context&) {
   azt::AppState st{};
   st.device_sign_fingerprint_hex = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   st.admin_fingerprint_hex = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-  st.recording_fingerprint_hex = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+  st.listener_fingerprint_hex = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
   st.device_label = "Livingroom";
   st.device_certificate_serial = "";
 
   String got = azt::build_discovery_announcement_json(st, 8080);
-  String expected = "{\"discovery_version\":1,\"device_type\":\"audio-zero-trust-microphone\",\"device_key_fingerprint_hex\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"admin_key_fingerprint_hex\":\"\",\"recording_key_fingerprint_hex\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"device_name\":\"Livingroom\",\"http_port\":8080,\"certificate_serial\":\"\"}";
+  String expected = "{\"discovery_version\":1,\"device_type\":\"audio-zero-trust-microphone\",\"device_key_fingerprint_hex\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"admin_key_fingerprint_hex\":\"\",\"listener_key_fingerprint_hex\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"device_name\":\"Livingroom\",\"http_port\":8080,\"certificate_serial\":\"\"}";
   return got == expected;
 }
 

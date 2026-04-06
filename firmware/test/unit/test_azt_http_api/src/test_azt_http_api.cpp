@@ -177,7 +177,7 @@ bool test_dispatch_request_basic_routes(Context&) {
   st.managed = false;
   st.signed_config_ready = false;
   st.admin_fingerprint_hex = "abc";
-  st.recording_fingerprint_hex = "def";
+  st.listener_fingerprint_hex = "def";
   st.device_sign_public_key_b64 = "PUB";
   st.device_sign_fingerprint_hex = "FP";
 
@@ -195,7 +195,7 @@ bool test_dispatch_request_basic_routes(Context&) {
   if (r2.body.indexOf("UNSET_ADMIN") < 0) return false;
   if (r2.body.indexOf("device_sign_alg") < 0) return false;
   if (r2.body.indexOf("device_sign_public_key_b64") < 0) return false;
-  if (r2.body.indexOf("recording_key_configured") < 0) return false;
+  if (r2.body.indexOf("listener_key_configured") < 0) return false;
 
   auto r3 = azt::dispatch_request("GET", "/nope", "", st);
   if (r3.wants_stream || r3.code != 404) return false;
@@ -416,7 +416,7 @@ bool test_signing_public_key_endpoint_alias(Context&) {
   return r.code == 200 && r.body.indexOf("BEGIN PUBLIC KEY") >= 0;
 }
 
-bool test_config_post_rejects_invalid_recording_key(Context& ctx) {
+bool test_config_post_rejects_invalid_listener_key(Context& ctx) {
   String fp;
   if (!compute_test_admin_ed25519_fp(fp)) return false;
 
@@ -430,10 +430,10 @@ bool test_config_post_rejects_invalid_recording_key(Context& ctx) {
   doc["admin_key"]["public_key_b64"] = kTestAdminEd25519PublicKeyB64;
   doc["admin_key"]["fingerprint_alg"] = "sha256-raw-ed25519-pub";
   doc["admin_key"]["fingerprint_hex"] = fp;
-  doc["recording_key"]["alg"] = "bad-alg";
-  doc["recording_key"]["public_key_pem"] = *ctx.pubkey_pem;
-  doc["recording_key"]["fingerprint_alg"] = "sha256-spki-der";
-  { String recfp; azt::compute_pubkey_spki_sha256_hex(*ctx.pubkey_pem, recfp); doc["recording_key"]["fingerprint_hex"] = recfp; }
+  doc["listener_key"]["alg"] = "bad-alg";
+  doc["listener_key"]["public_key_pem"] = *ctx.pubkey_pem;
+  doc["listener_key"]["fingerprint_alg"] = "sha256-spki-der";
+  { String recfp; azt::compute_pubkey_spki_sha256_hex(*ctx.pubkey_pem, recfp); doc["listener_key"]["fingerprint_hex"] = recfp; }
   doc["wifi"]["ssid"] = "s";
   doc["wifi"]["password"] = "p";
   doc["time"]["server"] = "pool.ntp.org";
@@ -825,10 +825,10 @@ static JsonDocument build_base_config_doc(const String& pub_pem, const String& f
   doc["admin_key"]["public_key_b64"] = kTestAdminEd25519PublicKeyB64;
   doc["admin_key"]["fingerprint_alg"] = "sha256-raw-ed25519-pub";
   doc["admin_key"]["fingerprint_hex"] = fp;
-  doc["recording_key"]["alg"] = "rsa-oaep-sha256";
-  doc["recording_key"]["public_key_pem"] = pub_pem;
-  doc["recording_key"]["fingerprint_alg"] = "sha256-spki-der";
-  doc["recording_key"]["fingerprint_hex"] = rec_fp;
+  doc["listener_key"]["alg"] = "rsa-oaep-sha256";
+  doc["listener_key"]["public_key_pem"] = pub_pem;
+  doc["listener_key"]["fingerprint_alg"] = "sha256-spki-der";
+  doc["listener_key"]["fingerprint_hex"] = rec_fp;
   doc["wifi"]["ssid"] = "s";
   doc["wifi"]["password"] = "p";
   doc["time"]["server"] = "pool.ntp.org";
@@ -1469,7 +1469,7 @@ void register_test_azt_http_api(Registry& out) {
   out.push_back({"STREAM_QUERY_DROP_TEST_FRAMES_INVALID_DEFAULTS_ZERO", test_stream_query_drop_test_frames_invalid_defaults_zero, "invalid drop_test_frames values should default to zero"});
   out.push_back({"REBOOT_ENDPOINT_SETS_FLAG", test_reboot_endpoint_sets_flag, "reboot endpoint should set reboot-after-response flag"});
   out.push_back({"SIGNING_PUBLIC_KEY_ENDPOINT_ALIAS", test_signing_public_key_endpoint_alias, "signing-public-key alias endpoint should emit PEM"});
-  out.push_back({"CONFIG_POST_REJECTS_INVALID_RECORDING_KEY", test_config_post_rejects_invalid_recording_key, "invalid recording_key object should be rejected"});
+  out.push_back({"CONFIG_POST_REJECTS_INVALID_RECORDING_KEY", test_config_post_rejects_invalid_listener_key, "invalid listener_key object should be rejected"});
   out.push_back({"CONFIG_POST_REJECTS_INVALID_TIME", test_config_post_rejects_invalid_time, "invalid time config should be rejected"});
   out.push_back({"CONFIG_POST_REJECTS_INVALID_AUTH_LISTENER_IPS_TYPE", test_config_post_rejects_invalid_authorized_listener_ips_type, "authorized_listener_ips must be an array"});
   out.push_back({"CONFIG_POST_REJECTS_INVALID_AUTH_LISTENER_IP_VALUE", test_config_post_rejects_invalid_authorized_listener_ip_value, "authorized_listener_ips values must be valid IPv4"});

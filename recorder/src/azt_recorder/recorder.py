@@ -242,7 +242,7 @@ def timestamp_recording(file_path: Path, tsa_url: str) -> tuple[Path, Path, Path
         raise RuntimeError(f"ERR_TIMESTAMP_REPLY: {e}") from e
 
     readme = (
-        "AZT Recorder Timestamp Evidence Bundle\n"
+        "AZT Listener Timestamp Evidence Bundle\n"
         "====================================\n\n"
         "This archive contains RFC 3161 Time-Stamp Protocol artifacts for a recording file.\n\n"
         f"Target recording file: {file_path.name}\n"

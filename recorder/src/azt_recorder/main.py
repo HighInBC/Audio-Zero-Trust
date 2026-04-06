@@ -8,7 +8,7 @@ from pathlib import Path
 from .config import load_config
 from .discovery import listen_discovery
 from .supervisor import Supervisor
-from .recorder import find_untimestamped_azt_files, timestamp_recording
+from .listener import find_untimestamped_azt_files, timestamp_recording
 from .trust import evaluate_discovery_ad
 from .verifier import TrustVerifier
 
@@ -18,7 +18,7 @@ async def run(config_path: str) -> None:
     sup = Supervisor(cfg.recording)
     verifier = TrustVerifier(cfg.trust)
 
-    health_file = Path(cfg.recording.output_dir) / ".azt-recorder-heartbeat"
+    health_file = Path(cfg.recording.output_dir) / ".azt-listener-heartbeat"
     health_file.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"[startup] discovery udp_port={cfg.discovery.udp_port}")
@@ -56,7 +56,7 @@ async def run(config_path: str) -> None:
                 v = await verifier.verify_admin_certificate(ad)
                 if not v.ok:
                     decision = type(decision)(authorized=False, reason=v.reason)
-                elif "auto-record" not in set(v.authorized_consumers):
+                elif "auto-listen" not in set(v.authorized_consumers):
                     decision = type(decision)(authorized=False, reason="certificate_missing_auto_record")
                 else:
                     decision = type(decision)(authorized=True, reason="certificate_verified_auto_record_authorized")
@@ -76,8 +76,8 @@ async def run(config_path: str) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="AZT recorder daemon (iteration 1)")
-    ap.add_argument("--config", default="config/recorder.yaml", help="Path to recorder config yaml")
+    ap = argparse.ArgumentParser(description="AZT listener daemon (iteration 1)")
+    ap.add_argument("--config", default="config/listener.yaml", help="Path to listener config yaml")
     args = ap.parse_args()
     asyncio.run(run(args.config))
 

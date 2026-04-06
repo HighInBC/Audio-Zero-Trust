@@ -82,7 +82,7 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"A valid checkpoint signature means all records up to ref_seq are authenticated by device signing key; chain verification still applies to all records.\",";
   dec_header += "\"block_type 0x02 is dropped frame notice; block_body is missed_frames_u16be and means that many PCM frames were intentionally skipped due to network backpressure.\",";
   dec_header += "\"block_type 0x03 is telemetry snapshot; use telemetry_block_body_format to parse ring-buffer occupancy stats.\",";
-  dec_header += "\"Untrusted recorders estimate frames as COUNT(block_type=0) + SUM_DROPPED(block_type=2), then multiply by audio_frame_duration_ms.\"";
+  dec_header += "\"Untrusted listeners estimate frames as COUNT(block_type=0) + SUM_DROPPED(block_type=2), then multiply by audio_frame_duration_ms.\"";
   dec_header += "]";
   dec_header += "}";
 
@@ -104,8 +104,8 @@ bool build_header_prefix(StreamCtx& sc,
   }
 
   std::vector<uint8_t> wrapped_header_key;
-  std::vector<uint8_t> pub(reinterpret_cast<const uint8_t*>(state.recording_pubkey_pem.c_str()),
-                           reinterpret_cast<const uint8_t*>(state.recording_pubkey_pem.c_str()) + state.recording_pubkey_pem.length() + 1);
+  std::vector<uint8_t> pub(reinterpret_cast<const uint8_t*>(state.listener_pubkey_pem.c_str()),
+                           reinterpret_cast<const uint8_t*>(state.listener_pubkey_pem.c_str()) + state.listener_pubkey_pem.length() + 1);
   if (!rsa_oaep_sha256_encrypt_pub(pub.data(), pub.size(), header_key, sizeof(header_key), wrapped_header_key)) {
     return false;
   }
@@ -126,7 +126,7 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"next_header_tag_b64\":\"" + b64(header_tag, sizeof(header_tag)) + "\",";
   plain_header += "\"next_header_aad_mode\":\"none\",";
   plain_header += "\"next_header_recipient_key_fingerprint_alg\":\"sha256-spki-der\",";
-  plain_header += "\"next_header_recipient_key_fingerprint_hex\":\"" + state.recording_fingerprint_hex + "\",";
+  plain_header += "\"next_header_recipient_key_fingerprint_hex\":\"" + state.listener_fingerprint_hex + "\",";
   plain_header += "\"next_header_ciphertext_hash_alg\":\"sha256\",";
   plain_header += "\"next_header_plaintext_hash_alg\":\"sha256\",";
   plain_header += "\"next_header_plaintext_sha256_b64\":\"" + b64(dec_header_sha256, sizeof(dec_header_sha256)) + "\",";

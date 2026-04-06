@@ -56,7 +56,7 @@ def _sdk_result(code: int, ok: bool, err: str | None, machine: dict | None, summ
 def configure_device(
     *,
     admin_creds_dir: str,
-    recorder_creds_dir: str | None,
+    listener_creds_dir: str | None,
     identity: str,
     wifi_ssid: str,
     wifi_password: str,
@@ -85,12 +85,12 @@ def configure_device(
     tls_valid_days: int,
 ) -> tuple[int, bool, str | None, dict]:
     admin_input = Path(admin_creds_dir)
-    recorder_input = Path(recorder_creds_dir) if recorder_creds_dir else admin_input
+    listener_input = Path(listener_creds_dir) if listener_creds_dir else admin_input
 
     admin_dir = admin_input if admin_input.is_dir() else admin_input.parent
-    recorder_dir = recorder_input if recorder_input.is_dir() else recorder_input.parent
+    listener_dir = listener_input if listener_input.is_dir() else listener_input.parent
 
-    rec_pub_pem, rec_fp = load_keypair_from_artifact_dir(recorder_input)
+    rec_pub_pem, rec_fp = load_keypair_from_artifact_dir(listener_input)
 
     if admin_input.is_file():
         priv_path = admin_input
@@ -183,7 +183,7 @@ def configure_device(
         resolved_time_servers = ["time.nist.gov"]
 
     unsigned_cfg["time"] = {"servers": resolved_time_servers}
-    unsigned_cfg["recording_key"] = {
+    unsigned_cfg["listener_key"] = {
         "alg": "rsa-oaep-sha256",
         "public_key_pem": rec_pub_pem,
         "fingerprint_alg": "sha256-spki-der",
@@ -282,9 +282,9 @@ def configure_device(
     common = {
         "ip": device_ip,
         "admin_creds_dir": str(admin_dir),
-        "recorder_creds_dir": str(recorder_dir),
+        "listener_creds_dir": str(listener_dir),
         "admin_fingerprint_hex": fp,
-        "recorder_fingerprint_hex": rec_fp,
+        "listener_fingerprint_hex": rec_fp,
         "wifi_mode": wifi_mode,
         "wifi_ap_ssid": (wifi_ap_ssid if wifi_mode == "ap" else ""),
         "authorized_listener_ips": authorized_listener_ips,

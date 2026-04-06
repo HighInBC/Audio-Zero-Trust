@@ -10,7 +10,7 @@ from tools.azt_sdk.services.provisioning_service import configure_device
 def run(args: argparse.Namespace) -> int:
     try:
         admin_dir = (args.admin_creds_dir or "").strip()
-        recorder_dir = (args.recorder_creds_dir or "").strip() or admin_dir
+        listener_dir = (args.listener_creds_dir or "").strip() or admin_dir
 
         missing: list[str] = []
         if not admin_dir:
@@ -79,7 +79,7 @@ def run(args: argparse.Namespace) -> int:
 
         code, ok, err, payload = configure_device(
             admin_creds_dir=admin_dir,
-            recorder_creds_dir=recorder_dir,
+            listener_creds_dir=listener_dir,
             identity=args.identity,
             wifi_ssid=args.wifi_ssid,
             wifi_password=args.wifi_password,
@@ -128,7 +128,7 @@ def run(args: argparse.Namespace) -> int:
                 exc=e,
                 context={
                     "admin_creds_dir": str(getattr(args, "admin_creds_dir", "") or ""),
-                    "recorder_creds_dir": str(getattr(args, "recorder_creds_dir", "") or ""),
+                    "listener_creds_dir": str(getattr(args, "listener_creds_dir", "") or ""),
                     "host": str(getattr(args, "host", "") or ""),
                     "ip": str(getattr(args, "ip", "") or ""),
                     "port": str(getattr(args, "port", "") or ""),

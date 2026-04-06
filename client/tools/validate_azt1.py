@@ -61,7 +61,7 @@ def reqb(o: dict, k: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--infile", required=True)
-    ap.add_argument("--key", default="", help="Optional recorder private key PEM; required only for encrypted next-header mode")
+    ap.add_argument("--key", default="", help="Optional listener private key PEM; required only for encrypted next-header mode")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 

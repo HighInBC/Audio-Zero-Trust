@@ -59,7 +59,7 @@ def run(args: argparse.Namespace) -> int:
             checks = {
                 "device_sign_fingerprint_match": cert_payload.get("device_sign_fingerprint_hex") == state.get("device_sign_fingerprint_hex"),
                 "device_chip_id_match": cert_payload.get("device_chip_id_hex") == state.get("device_chip_id_hex"),
-                "recording_fingerprint_match": cert_payload.get("recording_fingerprint_hex") == state.get("recording_fingerprint_hex"),
+                "listener_fingerprint_match": cert_payload.get("listener_fingerprint_hex") == state.get("listener_fingerprint_hex"),
                 "admin_fingerprint_match": cert_payload.get("admin_signer_fingerprint_hex") == state.get("admin_fingerprint_hex"),
                 "serial_matches_active": cert_payload.get("certificate_serial") == state.get("device_certificate_serial"),
             }
@@ -87,7 +87,7 @@ def run(args: argparse.Namespace) -> int:
                 f"Valid until: {cert_payload.get('valid_until_utc', '')}\n"
                 f"Device chip: {cert_payload.get('device_chip_id_hex', '')}\n"
                 f"Device signer fp: {cert_payload.get('device_sign_fingerprint_hex', '')}\n"
-                f"Recorder fp: {cert_payload.get('recording_fingerprint_hex', '')}\n"
+                f"Listener fp: {cert_payload.get('listener_fingerprint_hex', '')}\n"
                 f"Admin signer fp: {cert_payload.get('admin_signer_fingerprint_hex', '')}\n"
                 f"Verification: {verify.get('status', 'unknown')}"
             )

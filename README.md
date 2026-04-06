@@ -48,7 +48,7 @@ If you just want to install and run, jump to **[Install](#install)**.
 
 - `firmware/` — firmware projects (canonical app: `firmware/audio_zero_trust/`)
 - `client/` — host tooling (`azt_tool.py`), SDK code, and tests
-- `recorder/` — recorder-side implementation and tests
+- `listener/` — listener-side implementation and tests
 - `spec/` — protocol/container/spec references
 - `docs/` — operational documentation (including serial flash profile contracts)
 
@@ -91,9 +91,9 @@ Legacy/alternate target: **M5Stack ATOM Echo Smart Speaker Dev Kit**.
 
 **How it works:** certificate issue/post/verify flows bind device identity and signing trust to recording validation.
 
-#### 6) Recorder-side auto-validation
+#### 6) Listener-side auto-validation
 
-**What this means:** recorder workflows can automatically check provenance/integrity before treating data as valid.
+**What this means:** listener workflows can automatically check provenance/integrity before treating data as valid.
 
 **How it works:** tooling validates signatures, certificate linkage, and header consistency in one pipeline.
 
@@ -138,13 +138,13 @@ If you control the signer key, you control what firmware the device will accept 
 
 **What this means:** Recording tool create's third party timstamp certificates on finished recording, establishing a no-later-than date for the recording.
 
-**How it works:** When the recorder finishes a file it immediately sends a hash of it to the digicert TSA RFC 3161 server. The server responds with a signed timestamp of the hash which is then stored with the recording.
+**How it works:** When the listener finishes a file it immediately sends a hash of it to the digicert TSA RFC 3161 server. The server responds with a signed timestamp of the hash which is then stored with the recording.
 
 ### Security model (current)
 
 At a high level, Audio-Zero-Trust combines:
 
-- **Identity** (device/admin/recorder credentials)
+- **Identity** (device/admin/listener credentials)
 - **Authenticity** (digital signatures)
 - **Integrity** (hash/fingerprint checks)
 - **Operational controls** (OTA signer/version policy + serial trust boundary)
@@ -167,7 +167,7 @@ Current non-goals / caveats:
 ### Crypto primitives
 
 - **Ed25519**: signing for config/cert/OTA metadata and trust workflows
-- **RSA OAEP (SHA-256)**: recorder decoding key workflow
+- **RSA OAEP (SHA-256)**: listener decoding key workflow
 - **SHA-256**: fingerprints/hashes for integrity checks and identity binding
 
 ---
@@ -265,7 +265,7 @@ Configure device trust to that signer using serial-privileged config path:
 ```bash
 python3 client/tools/azt_tool.py configure-device \
   --admin-creds-dir client/tools/provisioned/admin-main \
-  --recorder-creds-dir client/tools/provisioned/recorder-main \
+  --listener-creds-dir client/tools/provisioned/listener-main \
   --identity livingroom \
   --wifi-ssid "<YOUR_WIFI_SSID>" \
   --wifi-password "<YOUR_WIFI_PASSWORD>" \
@@ -298,7 +298,7 @@ High-level flow:
 
 ```bash
 python3 client/tools/azt_tool.py create-signing-credentials --identity admin-main
-python3 client/tools/azt_tool.py create-decoding-credentials --identity recorder-main
+python3 client/tools/azt_tool.py create-decoding-credentials --identity listener-main
 ```
 
 ### 8) Configure device (TLS bootstrap included by default)
@@ -306,7 +306,7 @@ python3 client/tools/azt_tool.py create-decoding-credentials --identity recorder
 ```bash
 python3 client/tools/azt_tool.py configure-device \
   --admin-creds-dir client/tools/provisioned/admin-main \
-  --recorder-creds-dir client/tools/provisioned/recorder-main \
+  --listener-creds-dir client/tools/provisioned/listener-main \
   --identity livingroom \
   --wifi-ssid "<YOUR_WIFI_SSID>" \
   --wifi-password "<YOUR_WIFI_PASSWORD>" \
@@ -480,7 +480,7 @@ Run SDK unit tests:
 cd Audio-Zero-Trust
 ./.venv/bin/python -m pytest client/test/unit_sdk -q
 ```
-- `recorder/test/` — recorder tests (scaffold)
+- `listener/test/` — listener tests (scaffold)
 
 ---
 

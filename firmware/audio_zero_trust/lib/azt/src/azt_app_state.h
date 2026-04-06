@@ -11,8 +11,8 @@ struct AppState {
   bool signed_config_ready = false;
   String admin_pubkey_pem;
   String admin_fingerprint_hex;
-  String recording_pubkey_pem;
-  String recording_fingerprint_hex;
+  String listener_pubkey_pem;
+  String listener_fingerprint_hex;
   String device_label;
   String wifi_mode = "sta";  // sta | ap
   String wifi_ssid;

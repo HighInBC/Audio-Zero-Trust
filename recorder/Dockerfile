@@ -15,7 +15,7 @@ COPY config /app/config
 RUN pip install --no-cache-dir .
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD test -f /data/recordings/.azt-recorder-heartbeat || exit 1
+  CMD test -f /data/recordings/.azt-listener-heartbeat || exit 1
 
-ENTRYPOINT ["azt-recorder"]
-CMD ["--config", "/app/config/recorder.yaml"]
+ENTRYPOINT ["azt-listener"]
+CMD ["--config", "/app/config/listener.yaml"]

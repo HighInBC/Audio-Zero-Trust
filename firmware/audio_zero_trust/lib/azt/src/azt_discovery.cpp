@@ -39,7 +39,7 @@ String build_discovery_announcement_json(const AppState& state, uint16_t http_po
   d["device_key_fingerprint_hex"] = state.device_sign_fingerprint_hex;
   const bool certified = state.device_certificate_serial.length() > 0;
   d["admin_key_fingerprint_hex"] = certified ? state.admin_fingerprint_hex : "";
-  d["recording_key_fingerprint_hex"] = state.recording_fingerprint_hex;
+  d["listener_key_fingerprint_hex"] = state.listener_fingerprint_hex;
   d["device_name"] = state.device_label;
   d["http_port"] = http_port;
   d["certificate_serial"] = certified ? state.device_certificate_serial : "";

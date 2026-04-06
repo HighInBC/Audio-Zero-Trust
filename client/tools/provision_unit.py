@@ -73,7 +73,7 @@ def _pub_and_fp_from_public_key_path(pub_path: Path) -> tuple[str, str]:
 
 def _pub_and_fp_from_key_file(key_path: Path) -> tuple[str, str]:
     data = key_path.read_bytes()
-    # Try private key first (admin flow), then public key (recorder flow).
+    # Try private key first (admin flow), then public key (listener flow).
     try:
         priv = load_private_key_auto(data, purpose=str(key_path))
         return _pub_and_fp_from_public_key_obj(priv.public_key())

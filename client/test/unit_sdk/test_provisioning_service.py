@@ -25,7 +25,7 @@ def _base_kwargs(tmp_path: Path) -> dict:
 
     return dict(
         admin_creds_dir=str(admin_key),
-        recorder_creds_dir=str(tmp_path),
+        listener_creds_dir=str(tmp_path),
         identity="id1",
         wifi_ssid="ssid",
         wifi_password="pw",

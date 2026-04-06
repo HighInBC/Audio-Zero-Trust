@@ -1,12 +1,12 @@
 services:
-  azt-recorder:
+  azt-listener:
     build: .
-    image: azt-recorder:dev
-    container_name: azt-recorder-dev
+    image: azt-listener:dev
+    container_name: azt-listener-dev
     restart: unless-stopped
     user: "1000:1000"
     network_mode: host
-    command: ["--config", "/config/recorder.yaml"]
+    command: ["--config", "/config/listener.yaml"]
     environment:
       - TZ=America/Vancouver
     volumes:

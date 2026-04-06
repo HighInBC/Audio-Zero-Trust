@@ -482,23 +482,23 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     return r;
   }
 
-  String new_recording_pem = new_admin_pem;
-  String new_recording_fp = new_admin_fp;
-  JsonVariant rk = doc["recording_key"];
+  String new_listener_pem = new_admin_pem;
+  String new_listener_fp = new_admin_fp;
+  JsonVariant rk = doc["listener_key"];
   JsonVariant lk = doc["listener_key"];
   if (!rk.isNull() && !lk.isNull()) {
     r.code = 400;
-    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"provide only one of recording_key or listener_key\"}";
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"provide only one of listener_key or listener_key\"}";
     return r;
   }
   if (!rk.isNull()) {
-    if (!parse_rsa_key_object(doc, "recording_key", new_recording_pem, new_recording_fp)) {
+    if (!parse_rsa_key_object(doc, "listener_key", new_listener_pem, new_listener_fp)) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
       return r;
     }
   } else if (!lk.isNull()) {
-    if (!parse_rsa_key_object(doc, "listener_key", new_recording_pem, new_recording_fp)) {
+    if (!parse_rsa_key_object(doc, "listener_key", new_listener_pem, new_listener_fp)) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
       return r;
@@ -707,7 +707,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
     state.audio_preamp_gain = new_audio_preamp_gain;
     state.audio_adc_gain = new_audio_adc_gain;
-    if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+    if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
       r.code = 500;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
       return r;
@@ -815,7 +815,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   state.audio_preamp_gain = new_audio_preamp_gain;
   state.audio_adc_gain = new_audio_adc_gain;
-  if (!save_config_state(state, new_admin_pem, new_admin_fp, new_recording_pem, new_recording_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+  if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
     r.code = 500;
     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
     return r;
@@ -961,8 +961,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     return r;
   }
 
-  String new_recording_pem = state.recording_pubkey_pem;
-  String new_recording_fp = state.recording_fingerprint_hex;
+  String new_listener_pem = state.listener_pubkey_pem;
+  String new_listener_fp = state.listener_fingerprint_hex;
   String new_device_label = state.device_label;
   String new_wifi_mode = state.wifi_mode;
   String new_wifi_ssid = state.wifi_ssid;
@@ -976,16 +976,16 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   uint8_t new_audio_preamp_gain = state.audio_preamp_gain;
   uint8_t new_audio_adc_gain = state.audio_adc_gain;
 
-  if (!patch["recording_key"].isNull() && !patch["listener_key"].isNull()) {
+  if (!patch["listener_key"].isNull() && !patch["listener_key"].isNull()) {
     r.code = 400;
-    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"provide only one of recording_key or listener_key\"}";
+    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"provide only one of listener_key or listener_key\"}";
     return r;
   }
 
-  if (!patch["recording_key"].isNull()) {
+  if (!patch["listener_key"].isNull()) {
     JsonDocument tmp;
-    tmp["recording_key"] = patch["recording_key"];
-    if (!parse_rsa_key_object(tmp, "recording_key", new_recording_pem, new_recording_fp)) {
+    tmp["listener_key"] = patch["listener_key"];
+    if (!parse_rsa_key_object(tmp, "listener_key", new_listener_pem, new_listener_fp)) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
       return r;
@@ -993,7 +993,7 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   } else if (!patch["listener_key"].isNull()) {
     JsonDocument tmp;
     tmp["listener_key"] = patch["listener_key"];
-    if (!parse_rsa_key_object(tmp, "listener_key", new_recording_pem, new_recording_fp)) {
+    if (!parse_rsa_key_object(tmp, "listener_key", new_listener_pem, new_listener_fp)) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
       return r;
@@ -1084,8 +1084,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   if (!save_config_state(state,
                          state.admin_pubkey_pem,
                          state.admin_fingerprint_hex,
-                         new_recording_pem,
-                         new_recording_fp,
+                         new_listener_pem,
+                         new_listener_fp,
                          new_device_label,
                          new_wifi_mode,
                          new_wifi_ssid,
@@ -1312,11 +1312,8 @@ HttpDispatchResult dispatch_request(const String& method,
     payload += "\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 + "\",";
     payload += "\"device_sign_fingerprint_hex\":\"" + state.device_sign_fingerprint_hex + "\",";
     payload += "\"device_chip_id_hex\":\"" + state.device_chip_id_hex + "\",";
-    payload += "\"listener_public_key_pem\":" + json_quote(state.recording_pubkey_pem) + ",";
-    payload += "\"listener_fingerprint_hex\":\"" + state.recording_fingerprint_hex + "\",";
-    // Backward-compat aliases
-    payload += "\"recording_public_key_pem\":" + json_quote(state.recording_pubkey_pem) + ",";
-    payload += "\"recording_fingerprint_hex\":\"" + state.recording_fingerprint_hex + "\"";
+    payload += "\"listener_public_key_pem\":" + json_quote(state.listener_pubkey_pem) + ",";
+    payload += "\"listener_fingerprint_hex\":\"" + state.listener_fingerprint_hex + "\"";
     payload += "}";
 
     unsigned char sig[crypto_sign_ed25519_BYTES] = {0};
@@ -1420,9 +1417,9 @@ HttpDispatchResult dispatch_request(const String& method,
     String dev_fp = String((const char*)(payload_doc["device_sign_fingerprint_hex"] | ""));
     String chip_id = String((const char*)(payload_doc["device_chip_id_hex"] | ""));
     String rec_pub = String((const char*)(payload_doc["listener_public_key_pem"] | ""));
-    if (rec_pub.length() == 0) rec_pub = String((const char*)(payload_doc["recording_public_key_pem"] | ""));
+    if (rec_pub.length() == 0) rec_pub = String((const char*)(payload_doc["listener_public_key_pem"] | ""));
     String rec_fp = String((const char*)(payload_doc["listener_fingerprint_hex"] | ""));
-    if (rec_fp.length() == 0) rec_fp = String((const char*)(payload_doc["recording_fingerprint_hex"] | ""));
+    if (rec_fp.length() == 0) rec_fp = String((const char*)(payload_doc["listener_fingerprint_hex"] | ""));
     String admin_fp = String((const char*)(payload_doc["admin_signer_fingerprint_hex"] | ""));
     String cert_serial = String((const char*)(payload_doc["certificate_serial"] | ""));
     String cert_nonce = String((const char*)(payload_doc["nonce"] | ""));
@@ -1491,7 +1488,7 @@ HttpDispatchResult dispatch_request(const String& method,
       r.content_type = "application/json";
       return r;
     }
-    if (rec_pub != state.recording_pubkey_pem || rec_fp != state.recording_fingerprint_hex) {
+    if (rec_pub != state.listener_pubkey_pem || rec_fp != state.listener_fingerprint_hex) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CERT_RECORDER_MISMATCH\"}";
       r.content_type = "application/json";
@@ -1729,7 +1726,7 @@ HttpDispatchResult dispatch_request(const String& method,
   if (method == "GET" && path == "/api/v0/config/state") {
     String status = !state.managed ? "UNSET_ADMIN" : (state.signed_config_ready ? "MANAGED" : "PENDING_SIGNED_CONFIG");
     bool wifi_cfg = (state.wifi_mode == "ap") ? (state.wifi_ap_ssid.length() > 0 && state.wifi_ap_pass.length() >= 8) : (state.wifi_ssid.length() > 0 && state.wifi_pass.length() > 0);
-    bool listener_key_cfg = state.recording_pubkey_pem.length() > 0 && state.recording_fingerprint_hex.length() == 64;
+    bool listener_key_cfg = state.listener_pubkey_pem.length() > 0 && state.listener_fingerprint_hex.length() == 64;
     String ota_active_pem = state.ota_signer_override_public_key_pem.length() > 0 ? state.ota_signer_override_public_key_pem : String(kOtaSignerPublicKeyPem);
     String ota_active_fp;
     std::vector<uint8_t> ota_active_pub;
@@ -1776,14 +1773,9 @@ HttpDispatchResult dispatch_request(const String& method,
              "\",\"tls_san_hosts_csv\":" + json_quote(state.tls_san_hosts_csv) +
              ",\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex +
              "\",\"listener_key_configured\":" + String(listener_key_cfg ? "true" : "false") +
-             ",\"listener_public_key_pem\":" + json_quote(state.recording_pubkey_pem) +
-             ",\"listener_fingerprint_hex\":\"" + state.recording_fingerprint_hex +
+             ",\"listener_public_key_pem\":" + json_quote(state.listener_pubkey_pem) +
+             ",\"listener_fingerprint_hex\":\"" + state.listener_fingerprint_hex +
              "\",\"listener_key_alg\":\"rsa-oaep-sha256\"" +
-             // Backward-compat aliases
-             ",\"recording_key_configured\":" + String(listener_key_cfg ? "true" : "false") +
-             ",\"recording_public_key_pem\":" + json_quote(state.recording_pubkey_pem) +
-             ",\"recording_fingerprint_hex\":\"" + state.recording_fingerprint_hex +
-             "\",\"recording_key_alg\":\"rsa-oaep-sha256\"" +
              ",\"device_sign_alg\":\"ed25519\"" +
              ",\"firmware_build_number\":\"" + String(AZT_STR(AZT_BUILD_NUMBER)) +
              "\",\"firmware_build_id\":\"" + String(AZT_STR(AZT_BUILD_ID)) +

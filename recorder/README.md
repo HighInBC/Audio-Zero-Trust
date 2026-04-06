@@ -1,4 +1,4 @@
-# azt-recorder (iteration 1)
+# azt-listener (iteration 1)
 
 Discovery + trust-decision daemon for Audio Zero Trust microphones.
 
@@ -22,14 +22,14 @@ This is NOT yet ready for consumption!
 ## Run
 
 ```bash
-cd projects/azt-recorder
+cd projects/azt-listener
 python3 -m pip install -e .
-azt-recorder --config config/recorder.yaml
+azt-listener --config config/listener.yaml
 ```
 
 ## Next iteration
 
 - Add per-device stream workers (`/stream` pull)
 - 24/7 auto-restart + hourly rollover
-- Persist recorder state/checkpoints
+- Persist listener state/checkpoints
 - Dockerfile + compose

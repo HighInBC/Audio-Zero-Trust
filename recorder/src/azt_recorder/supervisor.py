@@ -6,7 +6,7 @@ from datetime import datetime, UTC
 
 from .config import RecordingConfig
 from .models import DiscoveryAd
-from .recorder import RecordingSession
+from .listener import RecordingSession
 
 
 @dataclass

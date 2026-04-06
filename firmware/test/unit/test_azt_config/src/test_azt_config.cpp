@@ -160,7 +160,7 @@ bool test_config_boot_cert_verify_valid(Context&) {
   return loaded.device_certificate_serial == "cert-valid-001";
 }
 
-bool test_config_recording_key_migration_from_admin(Context&) {
+bool test_config_listener_key_migration_from_admin(Context&) {
   seed_device_sign_cache_for_config_tests();
 
   String admin_pub_b64, admin_fp;
@@ -181,8 +181,8 @@ bool test_config_recording_key_migration_from_admin(Context&) {
 
   azt::AppState loaded;
   azt::load_config_state(loaded);
-  if (loaded.recording_pubkey_pem != loaded.admin_pubkey_pem) return false;
-  if (loaded.recording_fingerprint_hex != loaded.admin_fingerprint_hex) return false;
+  if (loaded.listener_pubkey_pem != loaded.admin_pubkey_pem) return false;
+  if (loaded.listener_fingerprint_hex != loaded.admin_fingerprint_hex) return false;
 
   p.begin("aztcfg", true);
   String rec_pem = p.getString("rec_pem", "");
@@ -191,7 +191,7 @@ bool test_config_recording_key_migration_from_admin(Context&) {
   return rec_pem == loaded.admin_pubkey_pem && rec_fp == loaded.admin_fingerprint_hex;
 }
 
-bool test_config_recording_key_migration_when_rec_fp_invalid(Context&) {
+bool test_config_listener_key_migration_when_rec_fp_invalid(Context&) {
   seed_device_sign_cache_for_config_tests();
 
   String admin_pub_b64, admin_fp;
@@ -209,12 +209,12 @@ bool test_config_recording_key_migration_when_rec_fp_invalid(Context&) {
 
   azt::AppState loaded;
   azt::load_config_state(loaded);
-  if (loaded.recording_pubkey_pem != loaded.admin_pubkey_pem) return false;
-  if (loaded.recording_fingerprint_hex != loaded.admin_fingerprint_hex) return false;
+  if (loaded.listener_pubkey_pem != loaded.admin_pubkey_pem) return false;
+  if (loaded.listener_fingerprint_hex != loaded.admin_fingerprint_hex) return false;
   return true;
 }
 
-bool test_config_recording_key_migration_when_rec_pem_missing(Context&) {
+bool test_config_listener_key_migration_when_rec_pem_missing(Context&) {
   seed_device_sign_cache_for_config_tests();
 
   String admin_pub_b64, admin_fp;
@@ -232,11 +232,11 @@ bool test_config_recording_key_migration_when_rec_pem_missing(Context&) {
 
   azt::AppState loaded;
   azt::load_config_state(loaded);
-  return loaded.recording_pubkey_pem == loaded.admin_pubkey_pem &&
-         loaded.recording_fingerprint_hex == loaded.admin_fingerprint_hex;
+  return loaded.listener_pubkey_pem == loaded.admin_pubkey_pem &&
+         loaded.listener_fingerprint_hex == loaded.admin_fingerprint_hex;
 }
 
-bool test_save_config_state_legacy_overload_sets_recording_from_admin(Context&) {
+bool test_save_config_state_legacy_overload_sets_listener_from_admin(Context&) {
   seed_device_sign_cache_for_config_tests();
 
   String admin_pub_b64, admin_fp;
@@ -255,8 +255,8 @@ bool test_save_config_state_legacy_overload_sets_recording_from_admin(Context&) 
 
   azt::AppState loaded;
   azt::load_config_state(loaded);
-  return loaded.recording_pubkey_pem == loaded.admin_pubkey_pem &&
-         loaded.recording_fingerprint_hex == loaded.admin_fingerprint_hex;
+  return loaded.listener_pubkey_pem == loaded.admin_pubkey_pem &&
+         loaded.listener_fingerprint_hex == loaded.admin_fingerprint_hex;
 }
 
 bool test_reset_managed_preserves_device_keys(Context&) {
@@ -276,7 +276,7 @@ bool test_reset_managed_preserves_device_keys(Context&) {
 
   bool managed_cleared = !loaded.managed && !loaded.signed_config_ready &&
                          loaded.admin_pubkey_pem.length() == 0 && loaded.admin_fingerprint_hex.length() == 0 &&
-                         loaded.recording_pubkey_pem.length() == 0 && loaded.recording_fingerprint_hex.length() == 0 &&
+                         loaded.listener_pubkey_pem.length() == 0 && loaded.listener_fingerprint_hex.length() == 0 &&
                          loaded.wifi_ssid.length() == 0 && loaded.wifi_pass.length() == 0;
 
   bool device_keys_present = loaded.device_sign_public_key_b64.length() > 0 &&
@@ -484,10 +484,10 @@ void register_test_azt_config(Registry& out) {
   out.push_back({"CONFIG_SAVE_LOAD_ROUNDTRIP", test_config_save_load_roundtrip, "config save/load mismatch"});
   out.push_back({"CONFIG_SIGNED_FLAG_TRANSITION", test_config_signed_flag_transition, "config signed flag transition mismatch"});
   out.push_back({"CONFIG_BOOT_CERT_VERIFY_VALID", test_config_boot_cert_verify_valid, "boot cert verify valid path mismatch"});
-  out.push_back({"CONFIG_RECORDING_KEY_MIGRATION_FROM_ADMIN", test_config_recording_key_migration_from_admin, "recording key migration from admin mismatch"});
-  out.push_back({"CONFIG_RECORDING_KEY_MIGRATION_WHEN_REC_FP_INVALID", test_config_recording_key_migration_when_rec_fp_invalid, "recording key migration should recover invalid rec_fp"});
-  out.push_back({"CONFIG_RECORDING_KEY_MIGRATION_WHEN_REC_PEM_MISSING", test_config_recording_key_migration_when_rec_pem_missing, "recording key migration should recover missing rec_pem"});
-  out.push_back({"SAVE_CONFIG_STATE_LEGACY_OVERLOAD_SETS_RECORDING_FROM_ADMIN", test_save_config_state_legacy_overload_sets_recording_from_admin, "legacy save overload should mirror recording key from admin"});
+  out.push_back({"CONFIG_RECORDING_KEY_MIGRATION_FROM_ADMIN", test_config_listener_key_migration_from_admin, "listener key migration from admin mismatch"});
+  out.push_back({"CONFIG_RECORDING_KEY_MIGRATION_WHEN_REC_FP_INVALID", test_config_listener_key_migration_when_rec_fp_invalid, "listener key migration should recover invalid rec_fp"});
+  out.push_back({"CONFIG_RECORDING_KEY_MIGRATION_WHEN_REC_PEM_MISSING", test_config_listener_key_migration_when_rec_pem_missing, "listener key migration should recover missing rec_pem"});
+  out.push_back({"SAVE_CONFIG_STATE_LEGACY_OVERLOAD_SETS_LISTENER_FROM_ADMIN", test_save_config_state_legacy_overload_sets_listener_from_admin, "legacy save overload should mirror listener key from admin"});
   out.push_back({"RESET_MANAGED_PRESERVES_DEVICE_KEYS", test_reset_managed_preserves_device_keys, "managed reset should preserve device signing keys"});
   out.push_back({"INVALID_CERT_JSON_IS_CLEARED_ON_LOAD", test_invalid_cert_json_is_cleared_on_load, "invalid cert JSON should be purged on load"});
   out.push_back({"TAMPERED_CERT_SIGNATURE_IS_CLEARED_ON_LOAD", test_tampered_cert_signature_is_cleared_on_load, "tampered cert signature should be purged on load"});

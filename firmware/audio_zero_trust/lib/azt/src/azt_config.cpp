@@ -129,8 +129,8 @@ static bool ensure_device_keypair(AppState& state) {
   state.device_sign_fingerprint_hex = fp_hex;
   state.managed = false;
   state.signed_config_ready = false;
-  state.recording_pubkey_pem = "";
-  state.recording_fingerprint_hex = "";
+  state.listener_pubkey_pem = "";
+  state.listener_fingerprint_hex = "";
   state.device_label = "";
   state.wifi_mode = "sta";
   state.wifi_ssid = "";
@@ -210,8 +210,8 @@ void load_config_state(AppState& state) {
   state.signed_config_ready = g_prefs.getBool("signed_ok", false);
   state.admin_pubkey_pem = g_prefs.getString("admin_pem", "");
   state.admin_fingerprint_hex = g_prefs.getString("admin_fp", "");
-  state.recording_pubkey_pem = g_prefs.getString("rec_pem", "");
-  state.recording_fingerprint_hex = g_prefs.getString("rec_fp", "");
+  state.listener_pubkey_pem = g_prefs.getString("rec_pem", "");
+  state.listener_fingerprint_hex = g_prefs.getString("rec_fp", "");
   state.device_label = g_prefs.getString("dev_label", "");
   state.wifi_mode = g_prefs.getString("wifi_mode", "sta");
   state.wifi_mode.trim();
@@ -260,14 +260,14 @@ void load_config_state(AppState& state) {
   // Capture this boot's reset reason (once per boot) and persist for /config/state.
   record_boot_reset_state(state);
 
-  // Backward-compatible migration: if recording key was not stored, default it to admin key.
-  if (state.recording_pubkey_pem.length() == 0 || state.recording_fingerprint_hex.length() != 64) {
-    state.recording_pubkey_pem = state.admin_pubkey_pem;
-    state.recording_fingerprint_hex = state.admin_fingerprint_hex;
-    if (state.recording_pubkey_pem.length() > 0 && state.recording_fingerprint_hex.length() == 64) {
+  // Backward-compatible migration: if listener key was not stored, default it to admin key.
+  if (state.listener_pubkey_pem.length() == 0 || state.listener_fingerprint_hex.length() != 64) {
+    state.listener_pubkey_pem = state.admin_pubkey_pem;
+    state.listener_fingerprint_hex = state.admin_fingerprint_hex;
+    if (state.listener_pubkey_pem.length() > 0 && state.listener_fingerprint_hex.length() == 64) {
       g_prefs.begin("aztcfg", false);
-      g_prefs.putString("rec_pem", state.recording_pubkey_pem);
-      g_prefs.putString("rec_fp", state.recording_fingerprint_hex);
+      g_prefs.putString("rec_pem", state.listener_pubkey_pem);
+      g_prefs.putString("rec_fp", state.listener_fingerprint_hex);
       g_prefs.end();
     }
   }
@@ -301,8 +301,8 @@ void load_config_state(AppState& state) {
 bool save_config_state(AppState& state,
                        const String& admin_pem,
                        const String& admin_fp,
-                       const String& recording_pem,
-                       const String& recording_fp,
+                       const String& listener_pem,
+                       const String& listener_fp,
                        const String& device_label,
                        const String& wifi_mode,
                        const String& wifi_ssid,
@@ -322,8 +322,8 @@ bool save_config_state(AppState& state,
   ok = ok && g_prefs.putUInt("cfg_rev", next_rev);
   ok = ok && g_prefs.putString("admin_pem", admin_pem) > 0;
   ok = ok && g_prefs.putString("admin_fp", admin_fp) > 0;
-  ok = ok && g_prefs.putString("rec_pem", recording_pem) > 0;
-  ok = ok && g_prefs.putString("rec_fp", recording_fp) > 0;
+  ok = ok && g_prefs.putString("rec_pem", listener_pem) > 0;
+  ok = ok && g_prefs.putString("rec_fp", listener_fp) > 0;
   ok = ok && g_prefs.putString("dev_label", device_label) > 0;
   ok = ok && g_prefs.putString("wifi_mode", wifi_mode) > 0;
   if (wifi_mode == "ap") {
@@ -362,8 +362,8 @@ bool save_config_state(AppState& state,
     state.signed_config_ready = signed_ok;
     state.admin_pubkey_pem = admin_pem;
     state.admin_fingerprint_hex = admin_fp;
-    state.recording_pubkey_pem = recording_pem;
-    state.recording_fingerprint_hex = recording_fp;
+    state.listener_pubkey_pem = listener_pem;
+    state.listener_fingerprint_hex = listener_fp;
     state.device_label = device_label;
     state.wifi_mode = wifi_mode;
     state.wifi_ssid = wifi_ssid;
@@ -447,8 +447,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.signed_config_ready = false;
   state.admin_pubkey_pem = "";
   state.admin_fingerprint_hex = "";
-  state.recording_pubkey_pem = "";
-  state.recording_fingerprint_hex = "";
+  state.listener_pubkey_pem = "";
+  state.listener_fingerprint_hex = "";
   state.device_label = "";
   state.wifi_mode = "sta";
   state.wifi_ssid = "";
