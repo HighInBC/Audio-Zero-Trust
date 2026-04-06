@@ -484,20 +484,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   String new_listener_pem = new_admin_pem;
   String new_listener_fp = new_admin_fp;
-  JsonVariant rk = doc["listener_key"];
   JsonVariant lk = doc["listener_key"];
-  if (!rk.isNull() && !lk.isNull()) {
-    r.code = 400;
-    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"provide only one of listener_key or listener_key\"}";
-    return r;
-  }
-  if (!rk.isNull()) {
-    if (!parse_rsa_key_object(doc, "listener_key", new_listener_pem, new_listener_fp)) {
-      r.code = 400;
-      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
-      return r;
-    }
-  } else if (!lk.isNull()) {
+  if (!lk.isNull()) {
     if (!parse_rsa_key_object(doc, "listener_key", new_listener_pem, new_listener_fp)) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
@@ -976,21 +964,7 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   uint8_t new_audio_preamp_gain = state.audio_preamp_gain;
   uint8_t new_audio_adc_gain = state.audio_adc_gain;
 
-  if (!patch["listener_key"].isNull() && !patch["listener_key"].isNull()) {
-    r.code = 400;
-    r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"provide only one of listener_key or listener_key\"}";
-    return r;
-  }
-
   if (!patch["listener_key"].isNull()) {
-    JsonDocument tmp;
-    tmp["listener_key"] = patch["listener_key"];
-    if (!parse_rsa_key_object(tmp, "listener_key", new_listener_pem, new_listener_fp)) {
-      r.code = 400;
-      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
-      return r;
-    }
-  } else if (!patch["listener_key"].isNull()) {
     JsonDocument tmp;
     tmp["listener_key"] = patch["listener_key"];
     if (!parse_rsa_key_object(tmp, "listener_key", new_listener_pem, new_listener_fp)) {
