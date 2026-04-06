@@ -120,11 +120,10 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     if mdns_enabled and mdns_disabled:
         emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "cannot set both --mdns-enabled and --mdns-disabled"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
-    if not _is_valid_mdns_hostname(mdns_hostname):
-        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "invalid --mdns-hostname (must match ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$)"}, as_json=bool(getattr(args, "as_json", False)))
-        return 1
-
     if mdns_enabled or mdns_disabled or mdns_hostname:
+        if not _is_valid_mdns_hostname(mdns_hostname):
+            emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": f"invalid --mdns-hostname '{mdns_hostname}' (must match ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$)"}, as_json=bool(getattr(args, "as_json", False)))
+            return 1
         pm = _ensure_obj(patch_obj, "mdns")
         if mdns_enabled:
             pm["enabled"] = True
@@ -173,6 +172,11 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     recorder_auth_key_path = (getattr(args, "recorder_auth_key_path", "") or "").strip()
     if recorder_auth_key_path:
         kp = Path(recorder_auth_key_path)
+        if kp.is_dir():
+            cand = kp / "private_key.pem"
+            if not cand.exists():
+                cand = kp / "admin_private_key.pem"
+            kp = cand
         patch_obj["recorder_auth_key"] = {
             "alg": "ed25519",
             "public_key_b64": ed25519_public_b64_from_private_key(kp),
