@@ -3,10 +3,47 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <mbedtls/base64.h>
+#include <vector>
 
 namespace azt {
 
 static constexpr uint16_t kDiscoveryPort = 33333;
+
+static bool decode_cert_payload_json(const String& cert_json, JsonDocument& out_payload) {
+  JsonDocument cert_doc;
+  if (deserializeJson(cert_doc, cert_json) != DeserializationError::Ok) return false;
+  String payload_b64 = String((const char*)(cert_doc["certificate_payload_b64"] | ""));
+  if (payload_b64.length() == 0) return false;
+
+  size_t out_len = 0;
+  std::vector<uint8_t> raw(payload_b64.length());
+  if (mbedtls_base64_decode(raw.data(), raw.size(), &out_len,
+                            reinterpret_cast<const unsigned char*>(payload_b64.c_str()), payload_b64.length()) != 0) {
+    return false;
+  }
+  raw.resize(out_len);
+
+  if (deserializeJson(out_payload, raw.data(), raw.size()) != DeserializationError::Ok) return false;
+  return true;
+}
+
+static void extract_discovery_cert_flags(const AppState& state, bool& out_auto_record, bool& out_auto_decode) {
+  out_auto_record = false;
+  out_auto_decode = false;
+  if (state.device_certificate_json.length() == 0) return;
+
+  JsonDocument payload;
+  if (!decode_cert_payload_json(state.device_certificate_json, payload)) return;
+
+  JsonVariant consumers = payload["authorized_consumers"];
+  if (!consumers.is<JsonArray>()) return;
+  for (JsonVariant v : consumers.as<JsonArray>()) {
+    String c = String((const char*)(v | ""));
+    if (c == "auto-record") out_auto_record = true;
+    if (c == "auto-decode") out_auto_decode = true;
+  }
+}
 
 size_t parse_authorized_listener_ips_csv(const String& csv, IPAddress* out, size_t max_out) {
   if (max_out == 0 || out == nullptr) return 0;
@@ -40,6 +77,12 @@ String build_discovery_announcement_json(const AppState& state, uint16_t http_po
   const bool certified = state.device_certificate_serial.length() > 0;
   d["admin_key_fingerprint_hex"] = certified ? state.admin_fingerprint_hex : "";
   d["listener_key_fingerprint_hex"] = state.listener_fingerprint_hex;
+  d["recorder_auth_fingerprint_hex"] = state.recorder_auth_fingerprint_hex;
+  bool auto_record = false;
+  bool auto_decode = false;
+  extract_discovery_cert_flags(state, auto_record, auto_decode);
+  d["cert_auto_record"] = auto_record;
+  d["cert_auto_decode"] = auto_decode;
   d["device_name"] = state.device_label;
   d["http_port"] = http_port;
   d["certificate_serial"] = certified ? state.device_certificate_serial : "";

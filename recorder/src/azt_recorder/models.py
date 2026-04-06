@@ -15,6 +15,9 @@ class DiscoveryAd:
     device_name: str
     http_port: int
     certificate_serial: str
+    recorder_auth_fingerprint_hex: str
+    cert_auto_record: bool
+    cert_auto_decode: bool
     raw: dict[str, Any]
 
     @property

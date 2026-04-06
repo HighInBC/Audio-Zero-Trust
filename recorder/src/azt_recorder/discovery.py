@@ -29,6 +29,9 @@ class DiscoveryProtocol(asyncio.DatagramProtocol):
                 device_name=str(d.get("device_name", "")),
                 http_port=int(d.get("http_port", 0)),
                 certificate_serial=str(d.get("certificate_serial", "")),
+                recorder_auth_fingerprint_hex=str(d.get("recorder_auth_fingerprint_hex", "")).lower(),
+                cert_auto_record=bool(d.get("cert_auto_record", False)),
+                cert_auto_decode=bool(d.get("cert_auto_decode", False)),
                 raw=d,
             )
         except Exception:
