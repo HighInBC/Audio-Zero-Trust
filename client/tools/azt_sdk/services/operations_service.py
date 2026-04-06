@@ -441,7 +441,8 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
         return False, "ERR_OTA_BUNDLE_NOT_FOUND", {"path": str(bundle_path)}
 
     data = bundle_path.read_bytes()
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    # OTA upload is HTTP-only by design. Do not inherit AZT_SCHEME/auto TLS routing here.
+    base = base_url(host=host, port=port, scheme="http")
     url = f"{base}{upgrade_path}"
     req = Request(url, data=data, method="POST", headers={"Content-Type": "application/octet-stream"})
     try:

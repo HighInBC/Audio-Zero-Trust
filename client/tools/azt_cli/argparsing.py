@@ -96,7 +96,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sb.add_argument("--out", dest="out_path", default="", help="Output .otabundle file")
     sb.add_argument("--post", dest="post_upgrade", action="store_true", help="POST bundle to device upgrade endpoint after creation")
     sb.add_argument("--host", default="", help="Device host/IP for --post")
-    sb.add_argument("--port", type=int, default=8080, help="Device API port")
+    sb.add_argument("--port", type=int, default=8080, help="Device HTTP API port")
     sb.add_argument("--upgrade-path", default="/api/v0/device/upgrade", help="Upgrade endpoint path")
     sb.add_argument("--timeout", type=int, default=45, help="HTTP timeout seconds")
     sb.add_argument("--interactive", action="store_true", help="Prompt for missing values using [default] prompts")
@@ -105,7 +105,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
 
     spost = sub.add_parser("ota-bundle-post", help="POST one-file OTA bundle to MCU upgrade endpoint")
     spost.add_argument("--host", default="", help="Device host/IP")
-    spost.add_argument("--port", type=int, default=8080, help="Device API port")
+    spost.add_argument("--port", type=int, default=8080, help="Device HTTP API port")
     spost.add_argument("--in", dest="in_path", default="", help="Input .otabundle file")
     spost.add_argument("--upgrade-path", default="/api/v0/device/upgrade", help="Upgrade endpoint path")
     spost.add_argument("--timeout", type=int, default=45, help="HTTP timeout seconds")
