@@ -177,18 +177,8 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         elif "admin_key_path" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
             _set_if_unset(args, "recorder_auth_key_path", str(conf_defaults["admin_key_path"]))
 
-        if "mdns_enabled" in conf_defaults:
-            cfg_enabled = bool(conf_defaults["mdns_enabled"])
-            if cfg_enabled:
-                _set_if_unset(args, "mdns_enabled", True)
-            else:
-                _set_if_unset(args, "mdns_disabled", True)
-
-        if "mdns_hostname_template" in conf_defaults and _is_unset(args, "mdns_hostname"):
-            t = str(conf_defaults["mdns_hostname_template"])
-            expanded = _expand_template(t, args).strip().lower()
-            if expanded:
-                setattr(args, "mdns_hostname", expanded)
+        # Intentionally do NOT auto-apply mdns defaults/templates for config-patch.
+        # Patch commands should only modify mdns when flags are explicitly provided.
 
         if "authorized_listener_ips" in conf_defaults and _is_unset(args, "authorized_listener_ips"):
             v = conf_defaults["authorized_listener_ips"]
