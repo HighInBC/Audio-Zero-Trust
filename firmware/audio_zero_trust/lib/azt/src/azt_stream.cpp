@@ -203,6 +203,19 @@ static bool is_active_certificate_serial(const String& cert_serial) {
   return stored.length() > 0 && stored == cert_serial;
 }
 
+static bool get_active_recorder_auth_state(bool& configured, String& fp_hex) {
+  configured = false;
+  fp_hex = "";
+  Preferences p;
+  if (!p.begin("aztcfg", true)) return false;
+  String pub = p.getString("rec_auth_pub", "");
+  String fp = p.getString("rec_auth_fp", "");
+  p.end();
+  configured = pub.length() > 0 && fp.length() == 64;
+  fp_hex = fp;
+  return true;
+}
+
 static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETKEYBYTES]) {
   Preferences p;
   p.begin("aztcfg", true);
@@ -381,12 +394,15 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     // Halt active stream if recorder auth key posture changes mid-stream
     // (added/removed/rotated), matching certificate revocation behavior.
     {
-      const bool current_with_recorder_auth = state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64;
-      if (current_with_recorder_auth != started_with_recorder_auth) {
-        break;
-      }
-      if (started_with_recorder_auth && state.recorder_auth_fingerprint_hex != started_recorder_auth_fp) {
-        break;
+      bool current_with_recorder_auth = false;
+      String current_recorder_auth_fp;
+      if (get_active_recorder_auth_state(current_with_recorder_auth, current_recorder_auth_fp)) {
+        if (current_with_recorder_auth != started_with_recorder_auth) {
+          break;
+        }
+        if (started_with_recorder_auth && current_recorder_auth_fp != started_recorder_auth_fp) {
+          break;
+        }
       }
     }
 
