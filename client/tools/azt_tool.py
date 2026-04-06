@@ -359,6 +359,7 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
             port=int(args.port),
             upgrade_path=args.upgrade_path,
             timeout=int(args.timeout),
+            key_path=str(getattr(args, "key_path", "") or ""),
         )
         post_response = post_payload
         payload = {**payload, "post_response": post_response}
@@ -383,6 +384,10 @@ def cmd_ota_bundle_post(args: argparse.Namespace) -> int:
         port=int(args.port),
         upgrade_path=args.upgrade_path,
         timeout=int(args.timeout),
+        key_path=str(getattr(args, "key_path", "") or ""),
+        wake_window_seconds=int(getattr(args, "wake_window_seconds", 30) or 30),
+        wake_allow_self=bool(getattr(args, "wake_allow_self", True)),
+        wake_allowed_ip=str(getattr(args, "wake_allowed_ip", "") or ""),
     )
     emit_envelope(command="ota-bundle-post", ok=ok, error=err, payload=payload, as_json=bool(getattr(args, "as_json", False)))
     return 0 if ok else 1

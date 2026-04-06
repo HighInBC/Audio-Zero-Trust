@@ -41,6 +41,12 @@ static const char* kOtaSignerPublicKeyPem = "6n6Ge+vZPN6HC+09FrDdBTlaEzQ0di799Fu
 static String g_reboot_nonce = "";
 static uint32_t g_reboot_nonce_expires_ms = 0;
 
+// OTA wake challenge + temporary open window state.
+static String g_ota_wake_nonce = "";
+static uint32_t g_ota_wake_nonce_expires_ms = 0;
+static String g_ota_wake_allowed_ip = "";
+static uint32_t g_ota_wake_open_expires_ms = 0;
+
 // Certificate/TLS challenge state (single active nonce per operation).
 static String g_cert_nonce = "";
 static uint32_t g_cert_nonce_expires_ms = 0;
@@ -48,6 +54,10 @@ static String g_tls_cert_nonce = "";
 static uint32_t g_tls_cert_nonce_expires_ms = 0;
 
 static constexpr uint32_t kRebootNonceTtlMs = 10000;
+static constexpr uint32_t kOtaWakeNonceTtlMs = 10000;
+static constexpr uint32_t kOtaWakeWindowDefaultMs = 30000;
+static constexpr uint32_t kOtaWakeWindowMinMs = 1000;
+static constexpr uint32_t kOtaWakeWindowMaxMs = 120000;
 
 static String json_quote(const String& in) {
   String out = "\"";
@@ -94,6 +104,27 @@ static bool validate_active_nonce(const String& provided,
 static void consume_nonce(String& expected, uint32_t& expires_ms) {
   expected = "";
   expires_ms = 0;
+}
+
+static bool is_valid_ipv4_literal(const String& ip) {
+  IPAddress parsed;
+  return parsed.fromString(ip);
+}
+
+static void clear_ota_wake_window() {
+  g_ota_wake_allowed_ip = "";
+  g_ota_wake_open_expires_ms = 0;
+}
+
+static bool ota_wake_window_allows_ip(const String& remote_ip, uint32_t now_ms) {
+  if (g_ota_wake_allowed_ip.length() == 0 || g_ota_wake_open_expires_ms == 0) {
+    return false;
+  }
+  if (static_cast<int32_t>(now_ms - g_ota_wake_open_expires_ms) > 0) {
+    clear_ota_wake_window();
+    return false;
+  }
+  return remote_ip == g_ota_wake_allowed_ip;
 }
 
 static String wrap_pem(const char* begin_label, const char* end_label, const uint8_t* der, size_t der_len) {
@@ -1151,6 +1182,24 @@ HttpDispatchResult dispatch_request(const String& method,
     r.content_type = "application/json";
     r.body = "{\"ok\":true,\"op\":\"reboot\",\"nonce\":" + json_quote(g_reboot_nonce) +
              ",\"ttl_ms\":" + String(static_cast<unsigned long>(kRebootNonceTtlMs)) + "}";
+    return r;
+  }
+
+  if (method == "GET" && path == "/api/v0/device/ota/wake/challenge") {
+    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH_NOT_READY\"}";
+      return r;
+    }
+
+    // Issuing a new nonce replaces any previous nonce.
+    (void)issue_single_use_nonce(g_ota_wake_nonce, g_ota_wake_nonce_expires_ms, kOtaWakeNonceTtlMs);
+
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"op\":\"ota_wake\",\"nonce\":" + json_quote(g_ota_wake_nonce) +
+             ",\"ttl_ms\":" + String(static_cast<unsigned long>(kOtaWakeNonceTtlMs)) + "}";
     return r;
   }
 
@@ -2754,7 +2803,94 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
     return;
   }
 
+  if (method == "POST" && path == "/api/v0/device/ota/wake") {
+    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      send_json(client, 409, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH_NOT_READY\"}");
+      return;
+    }
+
+    String body = "";
+    body.reserve(content_len > 0 ? content_len : 256);
+    while ((int)body.length() < content_len && client.connected()) {
+      int c = client.read();
+      if (c < 0) {
+        delay(1);
+        continue;
+      }
+      body += static_cast<char>(c);
+    }
+
+    JsonDocument doc;
+    DeserializationError jerr = deserializeJson(doc, body);
+    if (jerr) {
+      send_json(client, 400, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_SCHEMA\",\"detail\":\"invalid json\"}");
+      return;
+    }
+
+    String nonce = String((const char*)(doc["nonce"] | ""));
+    String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
+    String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
+    String signer_fp = String((const char*)(doc["signer_fingerprint_hex"] | ""));
+
+    uint32_t now_ms = millis();
+    if (!validate_active_nonce(nonce, g_ota_wake_nonce, g_ota_wake_nonce_expires_ms, now_ms)) {
+      send_json(client, 401, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_CHALLENGE_EXPIRED\"}");
+      return;
+    }
+
+    if (sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.admin_fingerprint_hex) {
+      send_json(client, 401, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH\"}");
+      return;
+    }
+
+    String signed_msg = String("ota_wake:") + nonce;
+    std::vector<uint8_t> msg_raw;
+    msg_raw.reserve(signed_msg.length());
+    for (size_t i = 0; i < signed_msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(signed_msg[i]));
+    if (!verify_ed25519_signature_b64(state.admin_pubkey_pem, msg_raw, sig_b64)) {
+      send_json(client, 401, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_SIG_VERIFY\"}");
+      return;
+    }
+
+    bool allow_self = true;
+    if (!doc["allow_self"].isNull()) allow_self = bool(doc["allow_self"]);
+    String requested_ip = String((const char*)(doc["allowed_ip"] | ""));
+    requested_ip.trim();
+    String effective_ip = allow_self ? remote_ip : requested_ip;
+    if (effective_ip.length() == 0 || !is_valid_ipv4_literal(effective_ip)) {
+      send_json(client, 400, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_ALLOWED_IP\",\"detail\":\"valid IPv4 allowed_ip required (or set allow_self=true)\"}");
+      return;
+    }
+
+    uint32_t window_ms = kOtaWakeWindowDefaultMs;
+    if (!doc["window_seconds"].isNull()) {
+      int req_secs = int(doc["window_seconds"] | int(kOtaWakeWindowDefaultMs / 1000));
+      if (req_secs < 1) req_secs = 1;
+      uint32_t req_ms = static_cast<uint32_t>(req_secs) * 1000u;
+      if (req_ms < kOtaWakeWindowMinMs) req_ms = kOtaWakeWindowMinMs;
+      if (req_ms > kOtaWakeWindowMaxMs) req_ms = kOtaWakeWindowMaxMs;
+      window_ms = req_ms;
+    }
+
+    consume_nonce(g_ota_wake_nonce, g_ota_wake_nonce_expires_ms);
+    g_ota_wake_allowed_ip = effective_ip;
+    g_ota_wake_open_expires_ms = millis() + window_ms;
+
+    send_json(client, 200,
+              "{\"ok\":true,\"ota_open\":true,\"allowed_ip\":" + json_quote(g_ota_wake_allowed_ip) +
+              ",\"window_ms\":" + String(static_cast<unsigned long>(window_ms)) +
+              ",\"expires_in_ms\":" + String(static_cast<unsigned long>(window_ms)) + "}");
+    return;
+  }
+
   if (method == "GET" && path == "/api/v0/device/upgrade") {
+    uint32_t now_ms = millis();
+    if (!ota_wake_window_allows_ip(remote_ip, now_ms)) {
+      send_json(client, 403,
+                "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_REQUIRED\",\"detail\":\"OTA endpoint is closed; use /api/v0/device/ota/wake/challenge + signed POST /api/v0/device/ota/wake\"}");
+      return;
+    }
+
     String html = "<!doctype html><html><head><meta charset=\"utf-8\"><title>AZT OTA Upgrade</title></head><body>"
                   "<h1>AZT OTA Upgrade</h1>"
                   "<p>POST multipart firmware bundle to <code>/api/v0/device/upgrade</code>.</p>"
@@ -2771,10 +2907,18 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
   }
 
   if (method == "POST" && path == "/api/v0/device/upgrade") {
+    uint32_t now_ms = millis();
+    if (!ota_wake_window_allows_ip(remote_ip, now_ms)) {
+      send_json(client, 403,
+                "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_REQUIRED\",\"detail\":\"OTA endpoint is closed; use /api/v0/device/ota/wake/challenge + signed POST /api/v0/device/ota/wake\"}");
+      return;
+    }
+
     Serial.printf("AZT_OTA_POST begin content_len=%d from=%s\n", content_len, remote_ip.c_str());
     String err;
     if (handle_ota_upgrade_bundle_post(client, content_len, state, err)) {
       Serial.printf("AZT_OTA_POST ok\n");
+      clear_ota_wake_window();
       send_json(client, 200, "{\"ok\":true,\"upgrade_written\":true,\"reboot_required\":true,\"detail\":\"firmware accepted; reboot to run new image\"}");
     } else {
       Serial.printf("AZT_OTA_POST err=%s\n", err.c_str());

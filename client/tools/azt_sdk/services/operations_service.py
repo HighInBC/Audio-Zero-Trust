@@ -435,7 +435,61 @@ def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware
     }
 
 
-def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, timeout: int) -> tuple[bool, str | None, dict]:
+def _ota_wake_if_possible(*, base: str, timeout: int, key_path: str, allow_self: bool, allowed_ip: str, window_seconds: int) -> tuple[bool, dict]:
+    challenge_url = f"{base}/api/v0/device/ota/wake/challenge"
+    wake_url = f"{base}/api/v0/device/ota/wake"
+
+    ch = get_json(challenge_url, timeout=timeout)
+    if not (isinstance(ch, dict) and ch.get("ok")):
+        return False, {
+            "ok": False,
+            "error": "ERR_OTA_WAKE_CHALLENGE",
+            "challenge_url": challenge_url,
+            "challenge_response": ch,
+        }
+
+    nonce = str(ch.get("nonce") or "")
+    if not nonce:
+        return False, {"ok": False, "error": "ERR_OTA_WAKE_CHALLENGE", "detail": "missing nonce in challenge response"}
+
+    priv = load_private_key_auto(Path(key_path), purpose=str(key_path))
+    if not isinstance(priv, ed25519.Ed25519PrivateKey):
+        return False, {"ok": False, "error": "ERR_OTA_WAKE_KEY", "detail": "wake key must be Ed25519 private key PEM"}
+
+    msg = f"ota_wake:{nonce}".encode("utf-8")
+    sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
+    signer_fp = ed25519_fp_hex_from_private_key(Path(key_path))
+
+    payload = {
+        "nonce": nonce,
+        "signature_algorithm": "ed25519",
+        "signature_b64": sig_b64,
+        "signer_fingerprint_hex": signer_fp,
+        "allow_self": bool(allow_self),
+        "window_seconds": int(window_seconds),
+    }
+    if not allow_self:
+        payload["allowed_ip"] = str(allowed_ip or "").strip()
+
+    wake_res = http_json("POST", wake_url, payload, timeout=timeout)
+    return bool(isinstance(wake_res, dict) and wake_res.get("ok")), {
+        "ok": bool(isinstance(wake_res, dict) and wake_res.get("ok")),
+        "challenge_url": challenge_url,
+        "wake_url": wake_url,
+        "response": wake_res,
+    }
+
+
+def ota_bundle_post(*,
+                    in_path: str,
+                    host: str,
+                    port: int,
+                    upgrade_path: str,
+                    timeout: int,
+                    key_path: str = "",
+                    wake_window_seconds: int = 30,
+                    wake_allow_self: bool = True,
+                    wake_allowed_ip: str = "") -> tuple[bool, str | None, dict]:
     bundle_path = Path(in_path)
     if not bundle_path.exists():
         return False, "ERR_OTA_BUNDLE_NOT_FOUND", {"path": str(bundle_path)}
@@ -444,6 +498,41 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
     # OTA upload is HTTP-only by design. Do not inherit AZT_SCHEME/auto TLS routing here.
     base = base_url(host=host, port=port, scheme="http")
     url = f"{base}{upgrade_path}"
+
+    resolved_key_path = str(key_path or os.getenv("AZT_ADMIN_KEY_PATH", "")).strip()
+    wake_result: dict | None = None
+
+    # Backward compatibility: transparently perform wake first when key material is available.
+    if resolved_key_path:
+        try:
+            woke_ok, wake_result = _ota_wake_if_possible(
+                base=base,
+                timeout=int(timeout),
+                key_path=resolved_key_path,
+                allow_self=bool(wake_allow_self),
+                allowed_ip=str(wake_allowed_ip or ""),
+                window_seconds=int(wake_window_seconds),
+            )
+            if not woke_ok:
+                return False, "ERR_OTA_WAKE_FAILED", {"url": url, "wake": wake_result}
+        except urllib.error.HTTPError as e:
+            # Older firmware may not support wake endpoints; fall through and attempt direct post.
+            if int(getattr(e, "code", 0) or 0) not in {404, 405}:
+                body = e.read().decode("utf-8", errors="replace")
+                return False, "ERR_OTA_WAKE_HTTP", {
+                    "url": url,
+                    "wake": wake_result,
+                    "http_status": e.code,
+                    "response": body,
+                    "detail": _error_detail(where="operations_service.ota_bundle_post.wake", exc=e, url=url),
+                }
+        except Exception as e:
+            return False, "ERR_OTA_WAKE", {
+                "url": url,
+                "wake": wake_result,
+                "detail": _error_detail(where="operations_service.ota_bundle_post.wake", exc=e, url=url),
+            }
+
     req = Request(url, data=data, method="POST", headers={"Content-Type": "application/octet-stream"})
     try:
         with urlopen_with_tls(req, timeout=timeout) as r:
@@ -453,20 +542,36 @@ def ota_bundle_post(*, in_path: str, host: str, port: int, upgrade_path: str, ti
             except json.JSONDecodeError:
                 parsed = body
             ok = isinstance(parsed, dict) and bool(parsed.get("ok"))
-            return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), {"url": url, "response": parsed}
+            payload = {"url": url, "response": parsed}
+            if wake_result is not None:
+                payload["wake"] = wake_result
+            return ok, (None if ok else "ERR_OTA_BUNDLE_POST_FAILED"), payload
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        return False, "ERR_OTA_BUNDLE_HTTP", {
+        try:
+            parsed_err = json.loads(body)
+        except Exception:
+            parsed_err = body
+        err_code = "ERR_OTA_BUNDLE_HTTP"
+        if isinstance(parsed_err, dict) and parsed_err.get("error") == "ERR_OTA_WAKE_REQUIRED" and not resolved_key_path:
+            err_code = "ERR_OTA_WAKE_REQUIRED"
+        payload = {
             "url": url,
             "http_status": e.code,
-            "response": body,
+            "response": parsed_err,
             "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
         }
+        if wake_result is not None:
+            payload["wake"] = wake_result
+        return False, err_code, payload
     except Exception as e:
-        return False, "ERR_OTA_BUNDLE_POST", {
+        payload = {
             "url": url,
             "detail": _error_detail(where="operations_service.ota_bundle_post", exc=e, url=url),
         }
+        if wake_result is not None:
+            payload["wake"] = wake_result
+        return False, "ERR_OTA_BUNDLE_POST", payload
 
 
 def separate_headers(*, in_path: str, out_headers: str) -> tuple[bool, dict]:
