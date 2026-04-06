@@ -83,6 +83,7 @@ void send_json(WiFiClient& client, int code, const String& body);
 void handle_stream(WiFiClient& client,
                    int seconds,
                    const AppState& state,
+                   const String& stream_auth_nonce,
                    bool signbench_each_chunk = false,
                    bool enable_telemetry = false,
                    int drop_test_frames = 0);

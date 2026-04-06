@@ -47,6 +47,10 @@ static uint32_t g_ota_wake_nonce_expires_ms = 0;
 static String g_ota_wake_allowed_ip = "";
 static uint32_t g_ota_wake_open_expires_ms = 0;
 
+// Stream access challenge state (single active nonce).
+static String g_stream_nonce = "";
+static uint32_t g_stream_nonce_expires_ms = 0;
+
 // Certificate/TLS challenge state (single active nonce per operation).
 static String g_cert_nonce = "";
 static uint32_t g_cert_nonce_expires_ms = 0;
@@ -54,6 +58,7 @@ static String g_tls_cert_nonce = "";
 static uint32_t g_tls_cert_nonce_expires_ms = 0;
 
 static constexpr uint32_t kRebootNonceTtlMs = 10000;
+static constexpr uint32_t kStreamNonceTtlMs = 15000;
 static constexpr uint32_t kOtaWakeNonceTtlMs = 10000;
 static constexpr uint32_t kOtaWakeWindowDefaultMs = 30000;
 static constexpr uint32_t kOtaWakeWindowMinMs = 1000;
@@ -111,6 +116,8 @@ static bool is_valid_ipv4_literal(const String& ip) {
   return parsed.fromString(ip);
 }
 
+static String parse_query_param(const String& path, const char* key);
+
 static void clear_ota_wake_window() {
   g_ota_wake_allowed_ip = "";
   g_ota_wake_open_expires_ms = 0;
@@ -125,6 +132,40 @@ static bool ota_wake_window_allows_ip(const String& remote_ip, uint32_t now_ms) 
     return false;
   }
   return remote_ip == g_ota_wake_allowed_ip;
+}
+
+static bool verify_stream_nonce_and_auth(const String& path,
+                                         const AppState& state,
+                                         String& out_nonce,
+                                         String& out_err) {
+  out_nonce = parse_query_param(path, "nonce");
+  uint32_t now_ms = millis();
+  if (!validate_active_nonce(out_nonce, g_stream_nonce, g_stream_nonce_expires_ms, now_ms)) {
+    out_err = "ERR_STREAM_NONCE_REQUIRED";
+    return false;
+  }
+
+  bool require_sig = state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64;
+  if (require_sig) {
+    String sig_alg = parse_query_param(path, "sig_alg");
+    String sig_b64 = parse_query_param(path, "sig");
+    String signer_fp = parse_query_param(path, "signer_fp");
+    if (sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.recorder_auth_fingerprint_hex) {
+      out_err = "ERR_STREAM_AUTH_REQUIRED";
+      return false;
+    }
+    String msg = String("stream:") + out_nonce + ":" + state.device_sign_fingerprint_hex;
+    std::vector<uint8_t> msg_raw;
+    msg_raw.reserve(msg.length());
+    for (size_t i = 0; i < msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(msg[i]));
+    if (!verify_ed25519_signature_b64(state.recorder_auth_pubkey_b64, msg_raw, sig_b64)) {
+      out_err = "ERR_STREAM_AUTH_VERIFY";
+      return false;
+    }
+  }
+
+  consume_nonce(g_stream_nonce, g_stream_nonce_expires_ms);
+  return true;
 }
 
 static String wrap_pem(const char* begin_label, const char* end_label, const uint8_t* der, size_t der_len) {
@@ -493,6 +534,17 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     }
   }
 
+  String new_recorder_auth_pub = state.recorder_auth_pubkey_b64;
+  String new_recorder_auth_fp = state.recorder_auth_fingerprint_hex;
+  JsonVariant rk = doc["recorder_auth_key"];
+  if (!rk.isNull()) {
+    if (!parse_ed25519_key_object(doc, "recorder_auth_key", new_recorder_auth_pub, new_recorder_auth_fp)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid recorder_auth_key object\"}";
+      return r;
+    }
+  }
+
   String new_device_label = String((const char*)(doc["device_label"] | ""));
   new_device_label.trim();
   if (new_device_label.length() == 0) {
@@ -695,7 +747,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
     state.audio_preamp_gain = new_audio_preamp_gain;
     state.audio_adc_gain = new_audio_adc_gain;
-    if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+    if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_recorder_auth_pub, new_recorder_auth_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
       r.code = 500;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
       return r;
@@ -803,7 +855,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   state.audio_preamp_gain = new_audio_preamp_gain;
   state.audio_adc_gain = new_audio_adc_gain;
-  if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
+  if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_recorder_auth_pub, new_recorder_auth_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
     r.code = 500;
     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
     return r;
@@ -951,6 +1003,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
 
   String new_listener_pem = state.listener_pubkey_pem;
   String new_listener_fp = state.listener_fingerprint_hex;
+  String new_recorder_auth_pub = state.recorder_auth_pubkey_b64;
+  String new_recorder_auth_fp = state.recorder_auth_fingerprint_hex;
   String new_device_label = state.device_label;
   String new_wifi_mode = state.wifi_mode;
   String new_wifi_ssid = state.wifi_ssid;
@@ -970,6 +1024,16 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     if (!parse_rsa_key_object(tmp, "listener_key", new_listener_pem, new_listener_fp)) {
       r.code = 400;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid listener_key object\"}";
+      return r;
+    }
+  }
+
+  if (!patch["recorder_auth_key"].isNull()) {
+    JsonDocument tmp;
+    tmp["recorder_auth_key"] = patch["recorder_auth_key"];
+    if (!parse_ed25519_key_object(tmp, "recorder_auth_key", new_recorder_auth_pub, new_recorder_auth_fp)) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid recorder_auth_key object\"}";
       return r;
     }
   }
@@ -1060,6 +1124,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
                          state.admin_fingerprint_hex,
                          new_listener_pem,
                          new_listener_fp,
+                         new_recorder_auth_pub,
+                         new_recorder_auth_fp,
                          new_device_label,
                          new_wifi_mode,
                          new_wifi_ssid,
@@ -1750,6 +1816,9 @@ HttpDispatchResult dispatch_request(const String& method,
              ",\"listener_public_key_pem\":" + json_quote(state.listener_pubkey_pem) +
              ",\"listener_fingerprint_hex\":\"" + state.listener_fingerprint_hex +
              "\",\"listener_key_alg\":\"rsa-oaep-sha256\"" +
+             ",\"recorder_auth_key_configured\":" + String(state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64 ? "true" : "false") +
+             ",\"recorder_auth_public_key_b64\":" + json_quote(state.recorder_auth_pubkey_b64) +
+             ",\"recorder_auth_fingerprint_hex\":\"" + state.recorder_auth_fingerprint_hex + "\"" +
              ",\"device_sign_alg\":\"ed25519\"" +
              ",\"firmware_build_number\":\"" + String(AZT_STR(AZT_BUILD_NUMBER)) +
              "\",\"firmware_build_id\":\"" + String(AZT_STR(AZT_BUILD_ID)) +
@@ -2785,9 +2854,17 @@ void handle_client_stream_only(WiFiClient& client, const AppState& state) {
     return;
   }
 
+  String stream_nonce;
+  String stream_err;
+  if (!verify_stream_nonce_and_auth(path, state, stream_nonce, stream_err)) {
+    send_json(client, 401, "{\"ok\":false,\"error\":" + json_quote(stream_err) + "}");
+    return;
+  }
+
   handle_stream(client,
                 parse_seconds_from_path(path),
                 state,
+                stream_nonce,
                 parse_signbench_from_path(path),
                 path.indexOf("telemetry=1") >= 0 || path.indexOf("telemetry=true") >= 0 || path.indexOf("telemetry=yes") >= 0 || path.indexOf("telemetry=on") >= 0,
                 parse_drop_test_frames_from_path(path));
@@ -2802,6 +2879,16 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
   if (!is_remote_ip_authorized(state, remote_ip)) {
     send_json(client, 403,
               "{\"ok\":false,\"error\":\"ERR_AUTH_LISTENER_IP\",\"detail\":\"listener IP not authorized\"}");
+    return;
+  }
+
+  if (method == "GET" && path == "/api/v0/device/stream/challenge") {
+    (void)issue_single_use_nonce(g_stream_nonce, g_stream_nonce_expires_ms, kStreamNonceTtlMs);
+    send_json(client, 200,
+              "{\"ok\":true,\"op\":\"stream\",\"nonce\":" + json_quote(g_stream_nonce) +
+              ",\"ttl_ms\":" + String(static_cast<unsigned long>(kStreamNonceTtlMs)) +
+              ",\"device_sign_fingerprint_hex\":" + json_quote(state.device_sign_fingerprint_hex) +
+              ",\"recorder_auth_required\":" + String(state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64 ? "true" : "false") + "}");
     return;
   }
 

@@ -17,6 +17,7 @@ class RecordingConfig:
     reconnect_backoff_seconds: list[int] = field(default_factory=lambda: [1, 2, 5, 10, 30])
     auto_timestamp_on_complete: bool = True
     timestamp_tsa_url: str = "http://timestamp.digicert.com"
+    recorder_auth_private_key_path: str = ""
 
 
 @dataclass

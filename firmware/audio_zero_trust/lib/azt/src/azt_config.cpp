@@ -131,6 +131,8 @@ static bool ensure_device_keypair(AppState& state) {
   state.signed_config_ready = false;
   state.listener_pubkey_pem = "";
   state.listener_fingerprint_hex = "";
+  state.recorder_auth_pubkey_b64 = "";
+  state.recorder_auth_fingerprint_hex = "";
   state.device_label = "";
   state.wifi_mode = "sta";
   state.wifi_ssid = "";
@@ -212,6 +214,8 @@ void load_config_state(AppState& state) {
   state.admin_fingerprint_hex = g_prefs.getString("admin_fp", "");
   state.listener_pubkey_pem = g_prefs.getString("rec_pem", "");
   state.listener_fingerprint_hex = g_prefs.getString("rec_fp", "");
+  state.recorder_auth_pubkey_b64 = g_prefs.getString("rec_auth_pub", "");
+  state.recorder_auth_fingerprint_hex = g_prefs.getString("rec_auth_fp", "");
   state.device_label = g_prefs.getString("dev_label", "");
   state.wifi_mode = g_prefs.getString("wifi_mode", "sta");
   state.wifi_mode.trim();
@@ -303,6 +307,8 @@ bool save_config_state(AppState& state,
                        const String& admin_fp,
                        const String& listener_pem,
                        const String& listener_fp,
+                       const String& recorder_auth_pub_b64,
+                       const String& recorder_auth_fp,
                        const String& device_label,
                        const String& wifi_mode,
                        const String& wifi_ssid,
@@ -324,6 +330,13 @@ bool save_config_state(AppState& state,
   ok = ok && g_prefs.putString("admin_fp", admin_fp) > 0;
   ok = ok && g_prefs.putString("rec_pem", listener_pem) > 0;
   ok = ok && g_prefs.putString("rec_fp", listener_fp) > 0;
+  if (recorder_auth_pub_b64.length() > 0 && recorder_auth_fp.length() == 64) {
+    ok = ok && g_prefs.putString("rec_auth_pub", recorder_auth_pub_b64) > 0;
+    ok = ok && g_prefs.putString("rec_auth_fp", recorder_auth_fp) > 0;
+  } else {
+    g_prefs.remove("rec_auth_pub");
+    g_prefs.remove("rec_auth_fp");
+  }
   ok = ok && g_prefs.putString("dev_label", device_label) > 0;
   ok = ok && g_prefs.putString("wifi_mode", wifi_mode) > 0;
   if (wifi_mode == "ap") {
@@ -364,6 +377,8 @@ bool save_config_state(AppState& state,
     state.admin_fingerprint_hex = admin_fp;
     state.listener_pubkey_pem = listener_pem;
     state.listener_fingerprint_hex = listener_fp;
+    state.recorder_auth_pubkey_b64 = recorder_auth_pub_b64;
+    state.recorder_auth_fingerprint_hex = recorder_auth_fp;
     state.device_label = device_label;
     state.wifi_mode = wifi_mode;
     state.wifi_ssid = wifi_ssid;
@@ -398,6 +413,8 @@ bool save_config_state(AppState& state,
                            admin_fp,
                            admin_pem,
                            admin_fp,
+                           "",
+                           "",
                            device_label,
                            wifi_mode,
                            wifi_ssid,
@@ -419,6 +436,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   g_prefs.remove("admin_fp");
   g_prefs.remove("rec_pem");
   g_prefs.remove("rec_fp");
+  g_prefs.remove("rec_auth_pub");
+  g_prefs.remove("rec_auth_fp");
   g_prefs.remove("wifi_mode");
   g_prefs.remove("wifi_ssid");
   g_prefs.remove("wifi_pass");
@@ -449,6 +468,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.admin_fingerprint_hex = "";
   state.listener_pubkey_pem = "";
   state.listener_fingerprint_hex = "";
+  state.recorder_auth_pubkey_b64 = "";
+  state.recorder_auth_fingerprint_hex = "";
   state.device_label = "";
   state.wifi_mode = "sta";
   state.wifi_ssid = "";

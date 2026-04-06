@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import base64
 import json
@@ -298,7 +298,6 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
 
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
     b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    url = f"{b}/stream"
     total = 0
     import time
     from pathlib import Path
@@ -317,6 +316,39 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                 "error": "STREAM_READ_KEY",
                 "detail": _error_detail(where="device_service.stream_read.key", exc=e),
             }
+
+    # Stream freshness challenge (required by firmware).
+    try:
+        challenge = get_json(f"{b}/api/v0/device/stream/challenge", timeout=timeout)
+    except Exception as e:
+        return False, {
+            "error": "STREAM_CHALLENGE_FAILED",
+            "detail": _error_detail(where="device_service.stream_read.challenge", exc=e, url=f"{b}/api/v0/device/stream/challenge"),
+        }
+    nonce = str((challenge or {}).get("nonce") or "").strip()
+    if not nonce:
+        return False, {"error": "STREAM_CHALLENGE_FAILED", "detail": "missing nonce"}
+
+    params = {"nonce": nonce}
+    if bool((challenge or {}).get("recorder_auth_required")):
+        if not key_path:
+            return False, {"error": "STREAM_AUTH_KEY_REQUIRED", "detail": "device requires recorder auth signature"}
+        try:
+            priv = load_private_key_auto(Path(str(key_path)), purpose=str(key_path))
+            if not isinstance(priv, ed25519.Ed25519PrivateKey):
+                return False, {"error": "STREAM_AUTH_KEY", "detail": "recorder auth key must be Ed25519 private key"}
+            signer_fp = ed25519_fp_hex_from_private_key(Path(str(key_path)))
+            device_fp = str((challenge or {}).get("device_sign_fingerprint_hex") or "").strip().lower()
+            msg = f"stream:{nonce}:{device_fp}".encode("utf-8")
+            sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
+            params.update({"sig_alg": "ed25519", "sig": sig_b64, "signer_fp": signer_fp})
+        except Exception as e:
+            return False, {
+                "error": "STREAM_AUTH_KEY",
+                "detail": _error_detail(where="device_service.stream_read.auth", exc=e),
+            }
+
+    url = f"{b}/stream?{urlencode(params)}"
 
     out_file = None
     resolved_out = ""

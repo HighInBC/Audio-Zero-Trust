@@ -13,6 +13,7 @@ bool build_header_prefix(StreamCtx& sc,
                          uint32_t sig_checkpoint_min_interval,
                          float recommended_decode_gain,
                          const String& recording_started_utc,
+                         const String& stream_auth_nonce,
                          uint32_t time_sync_staleness_seconds,
                          float audio_frame_duration_ms,
                          std::vector<uint8_t>& out_prefix);

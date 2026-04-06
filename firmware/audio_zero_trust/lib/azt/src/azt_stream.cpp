@@ -236,7 +236,7 @@ void send_json(WiFiClient& client, int code, const String& body) {
 static constexpr BaseType_t kStreamPipelineCore = 1;
 static constexpr BaseType_t kSignerCore = 0;
 
-static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
+static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& state, const String& stream_auth_nonce, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
   if (!state.signed_config_ready ||
       state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64 ||
       state.listener_pubkey_pem.length() == 0 || state.listener_fingerprint_hex.length() != 64) {
@@ -301,6 +301,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
                            kSigCheckpointMinInterval,
                            kRecommendedDecodeGain,
                            recording_started_utc,
+                           stream_auth_nonce,
                            staleness_s,
                            audio_frame_duration_ms,
                            prefix)) {
@@ -558,6 +559,7 @@ struct StreamTaskCtx {
   WiFiClient* client;
   int seconds;
   const AppState* state;
+  String stream_auth_nonce;
   bool signbench_each_chunk;
   bool enable_telemetry;
   int drop_test_frames;
@@ -566,13 +568,13 @@ struct StreamTaskCtx {
 
 static void stream_task_entry(void* arg) {
   StreamTaskCtx* ctx = reinterpret_cast<StreamTaskCtx*>(arg);
-  handle_stream_impl(*ctx->client, ctx->seconds, *ctx->state, ctx->signbench_each_chunk, ctx->enable_telemetry, ctx->drop_test_frames);
+  handle_stream_impl(*ctx->client, ctx->seconds, *ctx->state, ctx->stream_auth_nonce, ctx->signbench_each_chunk, ctx->enable_telemetry, ctx->drop_test_frames);
   xTaskNotifyGive(ctx->parent);
   vTaskDelete(nullptr);
 }
 
-void handle_stream(WiFiClient& client, int seconds, const AppState& state, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
-  StreamTaskCtx ctx{&client, seconds, &state, signbench_each_chunk, enable_telemetry, drop_test_frames, xTaskGetCurrentTaskHandle()};
+void handle_stream(WiFiClient& client, int seconds, const AppState& state, const String& stream_auth_nonce, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
+  StreamTaskCtx ctx{&client, seconds, &state, stream_auth_nonce, signbench_each_chunk, enable_telemetry, drop_test_frames, xTaskGetCurrentTaskHandle()};
   BaseType_t ok = xTaskCreatePinnedToCore(stream_task_entry,
                                           "azt_stream",
                                           constants::runtime::kTaskStackStreamWorker,

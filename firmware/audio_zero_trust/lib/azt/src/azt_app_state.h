@@ -13,6 +13,8 @@ struct AppState {
   String admin_fingerprint_hex;
   String listener_pubkey_pem;
   String listener_fingerprint_hex;
+  String recorder_auth_pubkey_b64;
+  String recorder_auth_fingerprint_hex;
   String device_label;
   String wifi_mode = "sta";  // sta | ap
   String wifi_ssid;

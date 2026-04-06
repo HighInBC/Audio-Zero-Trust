@@ -14,6 +14,9 @@ import subprocess
 import tarfile
 import time
 import urllib.request
+import urllib.parse
+
+from cryptography.hazmat.primitives import serialization
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
@@ -278,6 +281,42 @@ class RecordingSession:
     ad: DiscoveryAd
     cfg: RecordingConfig
 
+    def _build_stream_request(self) -> tuple[urllib.request.Request, str]:
+        challenge_url = f"{self.ad.base_url}/api/v0/device/stream/challenge"
+        with urllib.request.urlopen(challenge_url, timeout=8) as resp:
+            ch = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(ch, dict) or not ch.get("ok"):
+            raise AuthorizationError("stream_challenge_failed")
+        nonce = str(ch.get("nonce") or "").strip()
+        if not nonce:
+            raise AuthorizationError("stream_challenge_missing_nonce")
+
+        params = {"nonce": nonce}
+        require_auth = bool(ch.get("recorder_auth_required"))
+        key_path = str(self.cfg.recorder_auth_private_key_path or "").strip()
+        if require_auth:
+            if not key_path:
+                raise AuthorizationError("stream_auth_key_required")
+            pem = Path(key_path).read_bytes()
+            priv = serialization.load_pem_private_key(pem, password=None)
+            if not isinstance(priv, ed25519.Ed25519PrivateKey):
+                raise AuthorizationError("stream_auth_key_not_ed25519")
+            device_fp = str(ch.get("device_sign_fingerprint_hex") or self.ad.device_key_fingerprint_hex).strip().lower()
+            msg = f"stream:{nonce}:{device_fp}".encode("utf-8")
+            sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
+            signer_fp = hashlib.sha256(
+                priv.public_key().public_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PublicFormat.Raw,
+                )
+            ).hexdigest()
+            params["sig_alg"] = "ed25519"
+            params["sig"] = sig_b64
+            params["signer_fp"] = signer_fp
+
+        url = f"{self.ad.base_url}/stream?" + urllib.parse.urlencode(params)
+        return urllib.request.Request(url, method="GET"), nonce
+
     async def run_forever(self) -> None:
         base_out_dir = Path(self.cfg.output_dir)
         base_out_dir.mkdir(parents=True, exist_ok=True)
@@ -308,13 +347,12 @@ class RecordingSession:
         max_seconds = 3600 if self.cfg.hourly_rollover else 86400
         deadline = time.monotonic() + max_seconds
 
-        url = f"{self.ad.base_url}/stream"
-        req = urllib.request.Request(url, method="GET")
+        req, expected_nonce = self._build_stream_request()
 
         stream_err: Exception | None = None
         try:
             # Run blocking network+file write in thread to keep event loop responsive.
-            out_path = await asyncio.to_thread(self._stream_to_file, req, base_out_dir, out_path, deadline)
+            out_path = await asyncio.to_thread(self._stream_to_file, req, expected_nonce, base_out_dir, out_path, deadline)
         except Exception as e:
             stream_err = e
         finally:
@@ -347,11 +385,14 @@ class RecordingSession:
 
         print(f"[record] ROLLOVER device={self.ad.device_name} file={out_path}")
 
-    def _stream_to_file(self, req: urllib.request.Request, base_out_dir: Path, out_path: Path, deadline_monotonic: float) -> Path:
+    def _stream_to_file(self, req: urllib.request.Request, expected_nonce: str, base_out_dir: Path, out_path: Path, deadline_monotonic: float) -> Path:
         with urllib.request.urlopen(req, timeout=30) as resp:
             # Enforce authorization at stream start by verifying outer-header signature
             # and binding to the already authorized device signing fingerprint.
             prefix, plain_header = _preflight_stream_header(resp, self.ad.device_key_fingerprint_hex)
+            header_nonce = str(plain_header.get("stream_auth_nonce") or "").strip()
+            if not header_nonce or header_nonce != expected_nonce:
+                raise AuthorizationError("stream_auth_nonce_mismatch")
 
             # Use signed device recording start time as filename basis (local timezone).
             recording_started_utc = str(plain_header.get("recording_started_utc") or "").strip()
