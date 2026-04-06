@@ -291,7 +291,7 @@ def _resolve_ota_env(target: str) -> str:
 
 def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
     if bool(getattr(args, "interactive", False)):
-        args.key_path = _prompt_default("Signer private key PEM", args.key_path or "")
+        args.firmware_key_path = _prompt_default("Firmware signer private key PEM", args.firmware_key_path or "")
         if not (getattr(args, "target", "") or "").strip():
             args.target = _prompt_default("Target (atom-echo|atom-echos3r)", "")
         args.version_code = _prompt_default("Version code", str(args.version_code or "timestamp"))
@@ -303,14 +303,16 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
             args.post_upgrade = _prompt_bool("POST to device after create", False)
         if bool(getattr(args, "post_upgrade", False)) and not (args.host or "").strip():
             args.host = _prompt_default("Host", args.host or "")
+        if bool(getattr(args, "post_upgrade", False)) and not (args.admin_key_path or "").strip():
+            args.admin_key_path = _prompt_default("Admin private key PEM", args.admin_key_path or "")
 
     if bool(getattr(args, "post_upgrade", False)) and not (args.out_path or "").strip():
         import time
         auto_out = Path("/tmp") / f"azt-ota-{int(time.time())}.otabundle"
         args.out_path = str(auto_out)
 
-    if not (args.key_path and args.target and args.version_code and args.out_path):
-        emit_envelope(command="ota-bundle-create", ok=False, error="OTA_BUNDLE_CREATE_ARGS", payload={"detail": "--key, --target, and --version-code are required; --out is required unless --post is used (or use --interactive)"}, as_json=bool(getattr(args, "as_json", False)))
+    if not (args.firmware_key_path and args.target and args.version_code and args.out_path):
+        emit_envelope(command="ota-bundle-create", ok=False, error="OTA_BUNDLE_CREATE_ARGS", payload={"detail": "--firmware-key, --target, and --version-code are required; --out is required unless --post is used (or use --interactive)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
     vc_raw = (str(args.version_code).strip().lower())
@@ -334,7 +336,7 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
 
     ok, payload = ops.ota_bundle_create(
         repo_root=REPO_ROOT,
-        key_path=args.key_path,
+        key_path=args.firmware_key_path,
         out_path=args.out_path,
         firmware_path=args.firmware_path,
         env=env,
@@ -353,13 +355,16 @@ def cmd_ota_bundle_create(args: argparse.Namespace) -> int:
         if not getattr(args, "host", ""):
             emit_envelope(command="ota-bundle-create", ok=False, error="ERR_OTA_POST_HOST_REQUIRED", payload=payload, as_json=bool(getattr(args, "as_json", False)))
             return 1
+        if not (getattr(args, "admin_key_path", "") or "").strip():
+            emit_envelope(command="ota-bundle-create", ok=False, error="ERR_OTA_POST_ADMIN_KEY_REQUIRED", payload=payload, as_json=bool(getattr(args, "as_json", False)))
+            return 1
         ok_post, err_post, post_payload = ops.ota_bundle_post(
             in_path=args.out_path,
             host=args.host,
             port=int(args.port),
             upgrade_path=args.upgrade_path,
             timeout=int(args.timeout),
-            key_path=str(getattr(args, "key_path", "") or ""),
+            key_path=str(getattr(args, "admin_key_path", "") or ""),
         )
         post_response = post_payload
         payload = {**payload, "post_response": post_response}
@@ -373,9 +378,10 @@ def cmd_ota_bundle_post(args: argparse.Namespace) -> int:
     if bool(getattr(args, "interactive", False)):
         args.host = _prompt_default("Host", args.host or "")
         args.in_path = _prompt_default("Input bundle path", args.in_path or "")
+        args.admin_key_path = _prompt_default("Admin private key PEM", args.admin_key_path or "")
 
-    if not (args.host and args.in_path):
-        emit_envelope(command="ota-bundle-post", ok=False, error="OTA_BUNDLE_POST_ARGS", payload={"detail": "--host and --in are required (or use --interactive)"}, as_json=bool(getattr(args, "as_json", False)))
+    if not (args.host and args.in_path and args.admin_key_path):
+        emit_envelope(command="ota-bundle-post", ok=False, error="OTA_BUNDLE_POST_ARGS", payload={"detail": "--host, --in, and --admin-key are required (or use --interactive)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
     ok, err, payload = ops.ota_bundle_post(
@@ -384,7 +390,7 @@ def cmd_ota_bundle_post(args: argparse.Namespace) -> int:
         port=int(args.port),
         upgrade_path=args.upgrade_path,
         timeout=int(args.timeout),
-        key_path=str(getattr(args, "key_path", "") or ""),
+        key_path=str(getattr(args, "admin_key_path", "") or ""),
         wake_window_seconds=int(getattr(args, "wake_window_seconds", 30) or 30),
         wake_allow_self=bool(getattr(args, "wake_allow_self", True)),
         wake_allowed_ip=str(getattr(args, "wake_allowed_ip", "") or ""),
