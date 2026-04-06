@@ -172,23 +172,12 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
                 setattr(args, "mdns_hostname", expanded)
 
     if command == "config-patch":
+        # For config-patch, only inherit local operator resources (keys/paths).
+        # Do NOT inherit device-setting defaults (mdns/time/auth IPs/wifi/etc).
         if "recorder_auth_creds_dir" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
             _set_if_unset(args, "recorder_auth_key_path", str(Path(str(conf_defaults["recorder_auth_creds_dir"])) / "private_key.pem"))
         elif "admin_key_path" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
             _set_if_unset(args, "recorder_auth_key_path", str(conf_defaults["admin_key_path"]))
-
-        # Intentionally do NOT auto-apply mdns defaults/templates for config-patch.
-        # Patch commands should only modify mdns when flags are explicitly provided.
-
-        if "authorized_listener_ips" in conf_defaults and _is_unset(args, "authorized_listener_ips"):
-            v = conf_defaults["authorized_listener_ips"]
-            if isinstance(v, list):
-                setattr(args, "authorized_listener_ips", [str(x) for x in v])
-
-        if "time_servers" in conf_defaults and _is_unset(args, "time_servers"):
-            v = conf_defaults["time_servers"]
-            if isinstance(v, list):
-                setattr(args, "time_servers", [str(x) for x in v])
 
     if command == "ota-bundle-create":
         for ck, an in [
