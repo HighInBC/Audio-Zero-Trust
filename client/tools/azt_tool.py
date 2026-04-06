@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import re
 import sys
@@ -172,16 +174,34 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     recorder_auth_key_path = (getattr(args, "recorder_auth_key_path", "") or "").strip()
     if recorder_auth_key_path:
         kp = Path(recorder_auth_key_path)
+        pub_b64 = ""
+        fp_hex = ""
+
         if kp.is_dir():
-            cand = kp / "private_key.pem"
-            if not cand.exists():
-                cand = kp / "admin_private_key.pem"
-            kp = cand
+            pub_txt = kp / "public_key_b64.txt"
+            if pub_txt.exists():
+                pub_b64 = pub_txt.read_text(encoding="utf-8").strip()
+                try:
+                    pub_raw = base64.b64decode(pub_b64, validate=True)
+                    fp_hex = hashlib.sha256(pub_raw).hexdigest()
+                except Exception:
+                    emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": f"invalid recorder auth public key file: {pub_txt}"}, as_json=bool(getattr(args, "as_json", False)))
+                    return 1
+            else:
+                cand = kp / "private_key.pem"
+                if not cand.exists():
+                    cand = kp / "admin_private_key.pem"
+                kp = cand
+
+        if not pub_b64:
+            pub_b64 = ed25519_public_b64_from_private_key(kp)
+            fp_hex = ed25519_fp_hex_from_private_key(kp)
+
         patch_obj["recorder_auth_key"] = {
             "alg": "ed25519",
-            "public_key_b64": ed25519_public_b64_from_private_key(kp),
+            "public_key_b64": pub_b64,
             "fingerprint_alg": "sha256-raw-ed25519-pub",
-            "fingerprint_hex": ed25519_fp_hex_from_private_key(kp),
+            "fingerprint_hex": fp_hex,
         }
 
     audio_preamp = getattr(args, "audio_preamp_gain", None)
