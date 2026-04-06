@@ -142,6 +142,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         for ck, an in [
             ("admin_creds_dir", "admin_creds_dir"),
             ("listener_creds_dir", "listener_creds_dir"),
+            ("recorder_auth_creds_dir", "recorder_auth_creds_dir"),
             ("wifi_ssid", "wifi_ssid"),
             ("wifi_password", "wifi_password"),
             ("host", "host"),
@@ -171,6 +172,11 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
                 setattr(args, "mdns_hostname", expanded)
 
     if command == "config-patch":
+        if "recorder_auth_creds_dir" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
+            _set_if_unset(args, "recorder_auth_key_path", str(Path(str(conf_defaults["recorder_auth_creds_dir"])) / "private_key.pem"))
+        elif "admin_key_path" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
+            _set_if_unset(args, "recorder_auth_key_path", str(conf_defaults["admin_key_path"]))
+
         if "mdns_enabled" in conf_defaults:
             cfg_enabled = bool(conf_defaults["mdns_enabled"])
             if cfg_enabled:

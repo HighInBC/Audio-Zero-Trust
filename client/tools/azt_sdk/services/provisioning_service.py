@@ -57,6 +57,7 @@ def configure_device(
     *,
     admin_creds_dir: str,
     listener_creds_dir: str | None,
+    recorder_auth_creds_dir: str | None,
     identity: str,
     wifi_ssid: str,
     wifi_password: str,
@@ -86,6 +87,7 @@ def configure_device(
 ) -> tuple[int, bool, str | None, dict]:
     admin_input = Path(admin_creds_dir)
     listener_input = Path(listener_creds_dir) if listener_creds_dir else admin_input
+    recorder_auth_input = Path(recorder_auth_creds_dir) if recorder_auth_creds_dir else None
 
     admin_dir = admin_input if admin_input.is_dir() else admin_input.parent
     listener_dir = listener_input if listener_input.is_dir() else listener_input.parent
@@ -112,6 +114,18 @@ def configure_device(
 
     admin_pub_b64 = ed25519_public_b64_from_private_key(priv_path)
     fp = ed25519_fp_hex_from_private_key(priv_path)
+
+    recorder_auth_pub_b64 = ""
+    recorder_auth_fp = ""
+    if recorder_auth_input:
+        if recorder_auth_input.is_file():
+            recorder_priv_path = recorder_auth_input
+        else:
+            recorder_priv_path = recorder_auth_input / "private_key.pem"
+            if not recorder_priv_path.exists():
+                recorder_priv_path = recorder_auth_input / "admin_private_key.pem"
+        recorder_auth_pub_b64 = ed25519_public_b64_from_private_key(recorder_priv_path)
+        recorder_auth_fp = ed25519_fp_hex_from_private_key(recorder_priv_path)
 
     def ok_result(code: int, machine: dict, summary: str) -> tuple[int, bool, str | None, dict]:
         return _sdk_result(code, True, None, machine, summary)
@@ -189,6 +203,13 @@ def configure_device(
         "fingerprint_alg": "sha256-spki-der",
         "fingerprint_hex": rec_fp,
     }
+    if recorder_auth_pub_b64 and recorder_auth_fp:
+        unsigned_cfg["recorder_auth_key"] = {
+            "alg": "ed25519",
+            "public_key_b64": recorder_auth_pub_b64,
+            "fingerprint_alg": "sha256-raw-ed25519-pub",
+            "fingerprint_hex": recorder_auth_fp,
+        }
 
     if audio_preamp_gain is not None or audio_adc_gain is not None:
         audio_cfg = unsigned_cfg.get("audio") if isinstance(unsigned_cfg.get("audio"), dict) else {}

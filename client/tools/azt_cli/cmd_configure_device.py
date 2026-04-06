@@ -11,6 +11,7 @@ def run(args: argparse.Namespace) -> int:
     try:
         admin_dir = (args.admin_creds_dir or "").strip()
         listener_dir = (args.listener_creds_dir or "").strip() or admin_dir
+        recorder_auth_dir = (getattr(args, "recorder_auth_creds_dir", "") or "").strip() or None
 
         missing: list[str] = []
         if not admin_dir:
@@ -80,6 +81,7 @@ def run(args: argparse.Namespace) -> int:
         code, ok, err, payload = configure_device(
             admin_creds_dir=admin_dir,
             listener_creds_dir=listener_dir,
+            recorder_auth_creds_dir=recorder_auth_dir,
             identity=args.identity,
             wifi_ssid=args.wifi_ssid,
             wifi_password=args.wifi_password,

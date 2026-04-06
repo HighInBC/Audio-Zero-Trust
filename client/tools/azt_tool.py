@@ -17,6 +17,7 @@ from tools.azt_cli import handler_map as cli_handler_map
 from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk import config as sdk_config
 from tools.azt_sdk.services import operations_service as ops
+from tools.azt_client.crypto import ed25519_public_b64_from_private_key, ed25519_fp_hex_from_private_key
 
 
 _MDNS_HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -169,6 +170,16 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     if listener_key_pem_path:
         patch_obj["listener_key"] = {"public_key_pem": Path(listener_key_pem_path).read_text()}
 
+    recorder_auth_key_path = (getattr(args, "recorder_auth_key_path", "") or "").strip()
+    if recorder_auth_key_path:
+        kp = Path(recorder_auth_key_path)
+        patch_obj["recorder_auth_key"] = {
+            "alg": "ed25519",
+            "public_key_b64": ed25519_public_b64_from_private_key(kp),
+            "fingerprint_alg": "sha256-raw-ed25519-pub",
+            "fingerprint_hex": ed25519_fp_hex_from_private_key(kp),
+        }
+
     audio_preamp = getattr(args, "audio_preamp_gain", None)
     audio_adc = getattr(args, "audio_adc_gain", None)
     if audio_preamp is not None or audio_adc is not None:
@@ -186,7 +197,7 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
         patch_obj["audio"] = pa
 
     if not patch_obj:
-        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "provide --patch or patch flags (device/wifi/authorized listeners/time/mdns/listener-key)"}, as_json=bool(getattr(args, "as_json", False)))
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "provide --patch or patch flags (device/wifi/authorized listeners/time/mdns/listener-key/recorder-auth-key)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
     if_version = int(args.if_version)
