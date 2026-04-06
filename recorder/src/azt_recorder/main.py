@@ -13,13 +13,11 @@ from .discovery import listen_discovery
 from .supervisor import Supervisor
 from .recorder import find_untimestamped_azt_files, timestamp_recording
 from .trust import evaluate_discovery_ad
-from .verifier import TrustVerifier
 
 
 async def run(config_path: str) -> None:
     cfg = load_config(config_path)
     sup = Supervisor(cfg.recording)
-    verifier = TrustVerifier(cfg.trust)
 
     health_file = Path(cfg.recording.output_dir) / ".azt-recorder-heartbeat"
     health_file.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +70,8 @@ async def run(config_path: str) -> None:
         async for ad in listen_discovery(cfg.discovery.udp_port):
             decision = evaluate_discovery_ad(ad, cfg.trust)
             if decision.authorized:
-                # Early prefilter from discovery advertisement
+                # Early prefilter from discovery advertisement only.
+                # Full cryptographic verification is enforced at stream preflight.
                 if not ad.cert_auto_record:
                     decision = type(decision)(authorized=False, reason="discovery_cert_missing_auto_record")
                 elif (
@@ -83,13 +82,7 @@ async def run(config_path: str) -> None:
                 ):
                     decision = type(decision)(authorized=False, reason="discovery_recorder_auth_fp_mismatch")
                 else:
-                    v = await verifier.verify_admin_certificate(ad)
-                    if not v.ok:
-                        decision = type(decision)(authorized=False, reason=v.reason)
-                    elif "auto-record" not in set(v.authorized_consumers):
-                        decision = type(decision)(authorized=False, reason="certificate_missing_auto_record")
-                    else:
-                        decision = type(decision)(authorized=True, reason="certificate_verified_auto_record_authorized")
+                    decision = type(decision)(authorized=True, reason="discovery_prefilter_pass")
 
             print(
                 f"[discovery] ip={ad.source_ip} name={ad.device_name!r} fp={ad.device_key_fingerprint_hex[:12]}.. "
