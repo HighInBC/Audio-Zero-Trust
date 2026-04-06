@@ -56,7 +56,7 @@ async def run(config_path: str) -> None:
                 v = await verifier.verify_admin_certificate(ad)
                 if not v.ok:
                     decision = type(decision)(authorized=False, reason=v.reason)
-                elif "auto-listen" not in set(v.authorized_consumers):
+                elif "auto-record" not in set(v.authorized_consumers):
                     decision = type(decision)(authorized=False, reason="certificate_missing_auto_record")
                 else:
                     decision = type(decision)(authorized=True, reason="certificate_verified_auto_record_authorized")

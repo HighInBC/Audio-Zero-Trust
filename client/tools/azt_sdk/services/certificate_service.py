@@ -135,7 +135,7 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
     issued_at_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     authorized_consumers: list[str] = []
     if auto_record:
-        authorized_consumers.append("auto-listen")
+        authorized_consumers.append("auto-record")
     if auto_decode:
         authorized_consumers.append("auto-decode")
 
