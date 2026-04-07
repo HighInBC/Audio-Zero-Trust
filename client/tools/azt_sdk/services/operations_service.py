@@ -435,9 +435,9 @@ def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware
     }
 
 
-def _ota_wake_if_possible(*, base: str, timeout: int, key_path: str, allow_self: bool, allowed_ip: str, window_seconds: int) -> tuple[bool, dict]:
-    challenge_url = f"{base}/api/v0/device/ota/wake/challenge"
-    wake_url = f"{base}/api/v0/device/ota/wake"
+def _ota_wake_if_possible(*, api_base: str, timeout: int, key_path: str, allow_self: bool, allowed_ip: str, window_seconds: int) -> tuple[bool, dict]:
+    challenge_url = f"{api_base}/api/v0/device/ota/wake/challenge"
+    wake_url = f"{api_base}/api/v0/device/ota/wake"
 
     ch = get_json(challenge_url, timeout=timeout)
     if not (isinstance(ch, dict) and ch.get("ok")):
@@ -495,9 +495,11 @@ def ota_bundle_post(*,
         return False, "ERR_OTA_BUNDLE_NOT_FOUND", {"path": str(bundle_path)}
 
     data = bundle_path.read_bytes()
-    # OTA upload is HTTP-only by design. Do not inherit AZT_SCHEME/auto TLS routing here.
-    base = base_url(host=host, port=port, scheme="http")
-    url = f"{base}{upgrade_path}"
+    # OTA upload body is currently sent over HTTP upgrade transport.
+    # OTA wake challenge/auth must use HTTPS API.
+    upgrade_base = base_url(host=host, port=port, scheme="http")
+    api_base = base_url(host=host, port=8443, scheme="https")
+    url = f"{upgrade_base}{upgrade_path}"
 
     resolved_key_path = str(key_path or os.getenv("AZT_ADMIN_KEY_PATH", "")).strip()
     wake_result: dict | None = None
@@ -506,7 +508,7 @@ def ota_bundle_post(*,
     if resolved_key_path:
         try:
             woke_ok, wake_result = _ota_wake_if_possible(
-                base=base,
+                api_base=api_base,
                 timeout=int(timeout),
                 key_path=resolved_key_path,
                 allow_self=bool(wake_allow_self),
