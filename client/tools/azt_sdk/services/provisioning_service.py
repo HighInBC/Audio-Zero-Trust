@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import ipaddress
 import json
 import re
@@ -118,14 +119,17 @@ def configure_device(
     recorder_auth_pub_b64 = ""
     recorder_auth_fp = ""
     if recorder_auth_input:
-        if recorder_auth_input.is_file():
-            recorder_priv_path = recorder_auth_input
-        else:
-            recorder_priv_path = recorder_auth_input / "private_key.pem"
-            if not recorder_priv_path.exists():
-                recorder_priv_path = recorder_auth_input / "admin_private_key.pem"
-        recorder_auth_pub_b64 = ed25519_public_b64_from_private_key(recorder_priv_path)
-        recorder_auth_fp = ed25519_fp_hex_from_private_key(recorder_priv_path)
+        # Accept any artifact shape supported by load_keypair_from_artifact_dir:
+        # - dir with public_key.pem(+fingerprint.txt)
+        # - dir with private_key.pem
+        # - direct key file path
+        rec_pub_pem, recorder_auth_fp = load_keypair_from_artifact_dir(recorder_auth_input)
+        rec_pub_obj = serialization.load_pem_public_key(rec_pub_pem.encode("utf-8"))
+        rec_pub_raw = rec_pub_obj.public_bytes(
+            serialization.Encoding.Raw,
+            serialization.PublicFormat.Raw,
+        )
+        recorder_auth_pub_b64 = base64.b64encode(rec_pub_raw).decode("ascii")
 
     def ok_result(code: int, machine: dict, summary: str) -> tuple[int, bool, str | None, dict]:
         return _sdk_result(code, True, None, machine, summary)
