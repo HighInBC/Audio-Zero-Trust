@@ -119,17 +119,31 @@ def configure_device(
     recorder_auth_pub_b64 = ""
     recorder_auth_fp = ""
     if recorder_auth_input:
-        # Accept any artifact shape supported by load_keypair_from_artifact_dir:
-        # - dir with public_key.pem(+fingerprint.txt)
-        # - dir with private_key.pem
-        # - direct key file path
-        rec_pub_pem, recorder_auth_fp = load_keypair_from_artifact_dir(recorder_auth_input)
-        rec_pub_obj = serialization.load_pem_public_key(rec_pub_pem.encode("utf-8"))
-        rec_pub_raw = rec_pub_obj.public_bytes(
-            serialization.Encoding.Raw,
-            serialization.PublicFormat.Raw,
-        )
-        recorder_auth_pub_b64 = base64.b64encode(rec_pub_raw).decode("ascii")
+        # Accept recorder public-only artifact dirs too:
+        # - public_key_b64.txt + fingerprint.txt
+        # as well as PEM/private-key based inputs.
+        if recorder_auth_input.is_dir():
+            b64_path = recorder_auth_input / "public_key_b64.txt"
+            fp_path = recorder_auth_input / "fingerprint.txt"
+            if b64_path.exists() and fp_path.exists():
+                recorder_auth_pub_b64 = b64_path.read_text().strip()
+                recorder_auth_fp = fp_path.read_text().strip().lower()
+
+        if not recorder_auth_pub_b64:
+            # Accept any artifact shape supported by load_keypair_from_artifact_dir:
+            # - dir with public_key.pem(+fingerprint.txt)
+            # - dir with private_key.pem
+            # - direct key file path
+            rec_pub_pem, recorder_auth_fp = load_keypair_from_artifact_dir(recorder_auth_input)
+            rec_pub_obj = serialization.load_pem_public_key(rec_pub_pem.encode("utf-8"))
+            rec_pub_raw = rec_pub_obj.public_bytes(
+                serialization.Encoding.Raw,
+                serialization.PublicFormat.Raw,
+            )
+            recorder_auth_pub_b64 = base64.b64encode(rec_pub_raw).decode("ascii")
+
+        if len(recorder_auth_fp) != 64:
+            raise ValueError(f"invalid recorder auth fingerprint in {recorder_auth_input}")
 
     def ok_result(code: int, machine: dict, summary: str) -> tuple[int, bool, str | None, dict]:
         return _sdk_result(code, True, None, machine, summary)
