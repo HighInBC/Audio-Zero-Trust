@@ -35,6 +35,7 @@ def main() -> int:
     ap.add_argument("--identity", default="localdev")
     ap.add_argument("--host", default="localdev-mic.local")
     ap.add_argument("--admin-key", default="client/tools/provisioned/iter-admin/private_key.pem")
+    ap.add_argument("--admin-creds-dir", default="client/tools/provisioned/iter-admin")
     ap.add_argument("--firmware-key", default="client/tools/provisioned/iter-fw/private_key.pem")
     ap.add_argument("--wifi-ssid", default="")
     ap.add_argument("--wifi-password", default="")
@@ -66,7 +67,7 @@ def main() -> int:
                 args.port,
                 "--allow-serial-bootstrap",
                 "--admin-creds-dir",
-                str(Path(args.admin_key).parent),
+                args.admin_creds_dir,
                 "--wifi-ssid",
                 args.wifi_ssid,
                 "--wifi-password",
