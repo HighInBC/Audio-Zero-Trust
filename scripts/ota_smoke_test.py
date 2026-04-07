@@ -66,6 +66,24 @@ def ensure_signing_creds(repo: Path, tool: list[str], out_dir: Path, identity: s
     return out_dir, priv
 
 
+def ensure_decoding_creds(repo: Path, tool: list[str], out_dir: Path, identity: str) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    priv = out_dir / "private_key.pem"
+    if not priv.exists():
+        cmd = tool + [
+            "create-decoding-credentials",
+            "--identity",
+            identity,
+            "--out-dir",
+            str(out_dir),
+            "--json",
+        ]
+        resp = run_json(cmd, repo)
+        if not ok(resp):
+            raise RuntimeError(f"failed to create decoding creds at {out_dir}")
+    return out_dir
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Erase -> flash -> configure -> OTA smoke loop")
     ap.add_argument("--repo", default=".")
@@ -76,6 +94,7 @@ def main() -> int:
     ap.add_argument("--admin-key", default="client/tools/provisioned/iter-admin/private_key.pem")
     ap.add_argument("--admin-creds-dir", default="client/tools/provisioned/iter-admin")
     ap.add_argument("--firmware-key", default="client/tools/provisioned/iter-fw/private_key.pem")
+    ap.add_argument("--listener-creds-dir", default="client/tools/provisioned/iter-rec")
     ap.add_argument("--wifi-ssid", default="")
     ap.add_argument("--wifi-password", default="")
     ap.add_argument("--expect-ota-fail", action="store_true", help="Current known-bad mode: require OTA step to fail")
@@ -87,11 +106,14 @@ def main() -> int:
     admin_creds_dir = Path(args.admin_creds_dir)
     admin_key = Path(args.admin_key)
     firmware_key = Path(args.firmware_key)
+    listener_creds_dir = Path(args.listener_creds_dir)
 
     if not admin_key.exists() or not admin_creds_dir.exists():
         admin_creds_dir, admin_key = ensure_signing_creds(repo, tool, repo / ".tmp" / "ota-smoke-admin", "ota-smoke-admin")
     if not firmware_key.exists():
         _fw_dir, firmware_key = ensure_signing_creds(repo, tool, repo / ".tmp" / "ota-smoke-fw", "ota-smoke-fw")
+    if not listener_creds_dir.exists() or not (listener_creds_dir / "private_key.pem").exists():
+        listener_creds_dir = ensure_decoding_creds(repo, tool, repo / ".tmp" / "ota-smoke-listener", "ota-smoke-listener")
 
     steps: list[tuple[str, list[str], bool]] = [
         (
@@ -116,6 +138,8 @@ def main() -> int:
                 "--allow-serial-bootstrap",
                 "--admin-creds-dir",
                 str(admin_creds_dir),
+                "--listener-creds-dir",
+                str(listener_creds_dir),
                 "--wifi-ssid",
                 args.wifi_ssid,
                 "--wifi-password",
