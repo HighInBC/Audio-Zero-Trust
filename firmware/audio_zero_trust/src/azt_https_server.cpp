@@ -10,6 +10,7 @@
 #include <lwip/inet.h>
 
 #include "azt_http_api.h"
+#include "azt_stream.h"
 
 namespace azt {
 
@@ -113,7 +114,8 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
   httpd_resp_send(req, r.body.c_str(), r.body.length());
 
   if (r.reboot_after_response) {
-    vTaskDelay(pdMS_TO_TICKS(150));
+    request_stream_shutdown();
+    vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
   }
 

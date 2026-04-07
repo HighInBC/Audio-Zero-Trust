@@ -24,6 +24,10 @@ static constexpr uint32_t kSigCheckpointMinInterval = 10;
 static constexpr uint32_t kSigCheckpointMaxInterval = 160;
 static constexpr uint32_t kTelemetryIntervalBlocks = 50;
 static constexpr uint32_t kMaxContiguousDropMs = 10000;
+static volatile bool g_stream_shutdown_requested = false;
+
+void request_stream_shutdown() { g_stream_shutdown_requested = true; }
+void clear_stream_shutdown_request() { g_stream_shutdown_requested = false; }
 
 int parse_seconds_from_path(const String& path) {
   int q = path.indexOf('?');
@@ -250,6 +254,8 @@ static constexpr BaseType_t kStreamPipelineCore = 1;
 static constexpr BaseType_t kSignerCore = 0;
 
 static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& state, const String& stream_auth_nonce, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
+  clear_stream_shutdown_request();
+
   if (!state.signed_config_ready ||
       state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64 ||
       state.listener_pubkey_pem.length() == 0 || state.listener_fingerprint_hex.length() != 64) {
@@ -383,7 +389,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   uint32_t last_sig_ref_seq = 0;
   bool sig_req_pending = false;
 
-  while (client.connected() &&
+  while (client.connected() && !g_stream_shutdown_requested &&
          (!finite_stream || static_cast<uint64_t>(esp_timer_get_time()) < deadline)) {
     const uint64_t t1 = static_cast<uint64_t>(esp_timer_get_time());
 
