@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import json
 import secrets
+import socket
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -435,7 +436,23 @@ def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware
     }
 
 
-def _ota_wake_if_possible(*, api_base: str, timeout: int, key_path: str, allow_self: bool, allowed_ip: str, window_seconds: int) -> tuple[bool, dict]:
+def _detect_local_ipv4_for_host(host: str, port: int) -> str:
+    try:
+        infos = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_DGRAM)
+        if not infos:
+            return ""
+        family, socktype, proto, _canon, sockaddr = infos[0]
+        s = socket.socket(family, socktype, proto)
+        try:
+            s.connect(sockaddr)
+            return str(s.getsockname()[0] or "")
+        finally:
+            s.close()
+    except Exception:
+        return ""
+
+
+def _ota_wake_if_possible(*, api_base: str, host: str, timeout: int, key_path: str, allow_self: bool, allowed_ip: str, window_seconds: int) -> tuple[bool, dict]:
     challenge_url = f"{api_base}/api/v0/device/ota/wake/challenge"
     wake_url = f"{api_base}/api/v0/device/ota/wake"
 
@@ -468,7 +485,13 @@ def _ota_wake_if_possible(*, api_base: str, timeout: int, key_path: str, allow_s
         "allow_self": bool(allow_self),
         "window_seconds": int(window_seconds),
     }
-    if not allow_self:
+    if allow_self:
+        # Some HTTPS stacks may not surface peer IPv4 reliably to app handlers.
+        # Provide caller IPv4 explicitly as a fallback while keeping allow_self=true semantics.
+        detected_ip = _detect_local_ipv4_for_host(host, 8443)
+        if detected_ip:
+            payload["allowed_ip"] = detected_ip
+    else:
         payload["allowed_ip"] = str(allowed_ip or "").strip()
 
     wake_res = http_json("POST", wake_url, payload, timeout=timeout)
@@ -509,6 +532,7 @@ def ota_bundle_post(*,
         try:
             woke_ok, wake_result = _ota_wake_if_possible(
                 api_base=api_base,
+                host=host,
                 timeout=int(timeout),
                 key_path=resolved_key_path,
                 allow_self=bool(wake_allow_self),
