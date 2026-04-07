@@ -121,6 +121,8 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command == "ota-bundle-create":
         if "firmware_key_path" in conf_defaults:
             _set_if_unset(args, "firmware_key_path", str(conf_defaults["firmware_key_path"]))
+        elif "firmware_creds_dir" in conf_defaults and _is_unset(args, "firmware_key_path"):
+            _set_if_unset(args, "firmware_key_path", str(Path(str(conf_defaults["firmware_creds_dir"])) / "private_key.pem"))
         if "admin_key_path" in conf_defaults:
             _set_if_unset(args, "admin_key_path", str(conf_defaults["admin_key_path"]))
         elif "admin_creds_dir" in conf_defaults and _is_unset(args, "admin_key_path"):

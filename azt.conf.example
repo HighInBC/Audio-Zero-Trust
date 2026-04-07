@@ -32,6 +32,8 @@ defaults:
   # host: 192.168.1.113
   # admin_key_path: client/tools/provisioned/admin-admin/private_key.pem
   # admin_creds_dir: client/tools/provisioned/admin-admin
+  # firmware_key_path: client/tools/provisioned/firmware-master/private_key.pem
+  # firmware_creds_dir: client/tools/provisioned/firmware-master
   # listener_creds_dir: client/tools/provisioned/decode-listener
   # wifi_ssid: "YourWiFi"
   # wifi_password: "YourPassword"
