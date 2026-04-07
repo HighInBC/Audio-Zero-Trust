@@ -8,6 +8,27 @@ import sys
 from pathlib import Path
 
 
+def _extract_last_json_blob(text: str) -> dict:
+    s = text or ""
+    dec = json.JSONDecoder()
+    i = 0
+    last = None
+    while i < len(s):
+        j = s.find("{", i)
+        if j < 0:
+            break
+        try:
+            obj, end = dec.raw_decode(s, j)
+            if isinstance(obj, dict):
+                last = obj
+            i = end
+        except Exception:
+            i = j + 1
+    if last is None:
+        raise RuntimeError("no JSON object found in command output")
+    return last
+
+
 def run_json(cmd: list[str], cwd: Path) -> dict:
     print(f"\n$ {' '.join(cmd)}")
     p = subprocess.run(cmd, cwd=str(cwd), text=True, capture_output=True)
@@ -16,9 +37,9 @@ def run_json(cmd: list[str], cwd: Path) -> dict:
     if p.stderr:
         print(p.stderr.strip(), file=sys.stderr)
     try:
-        out = json.loads(p.stdout or "{}")
+        out = _extract_last_json_blob(p.stdout or "")
     except Exception:
-        raise RuntimeError(f"command did not return JSON: {' '.join(cmd)}")
+        raise RuntimeError(f"command did not return JSON envelope: {' '.join(cmd)}")
     out["_exit_code"] = p.returncode
     return out
 
