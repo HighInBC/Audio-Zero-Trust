@@ -1258,6 +1258,17 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
+  if (method == "GET" && path == "/api/v0/device/stream/challenge") {
+    (void)issue_single_use_nonce(g_stream_nonce, g_stream_nonce_expires_ms, kStreamNonceTtlMs);
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"op\":\"stream\",\"nonce\":" + json_quote(g_stream_nonce) +
+             ",\"ttl_ms\":" + String(static_cast<unsigned long>(kStreamNonceTtlMs)) +
+             ",\"device_sign_fingerprint_hex\":" + json_quote(state.device_sign_fingerprint_hex) +
+             ",\"recorder_auth_required\":" + String(state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64 ? "true" : "false") + "}";
+    return r;
+  }
+
   if (method == "POST" && path == "/api/v0/config") {
     return handle_config_post_json(state, body, false);
   }
@@ -2918,16 +2929,8 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
     return;
   }
 
-  if (method == "GET" && path == "/api/v0/device/stream/challenge") {
-    (void)issue_single_use_nonce(g_stream_nonce, g_stream_nonce_expires_ms, kStreamNonceTtlMs);
-    send_json(client, 200,
-              "{\"ok\":true,\"op\":\"stream\",\"nonce\":" + json_quote(g_stream_nonce) +
-              ",\"ttl_ms\":" + String(static_cast<unsigned long>(kStreamNonceTtlMs)) +
-              ",\"device_sign_fingerprint_hex\":" + json_quote(state.device_sign_fingerprint_hex) +
-              ",\"recorder_auth_required\":" + String(state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64 ? "true" : "false") + "}");
-    return;
-  }
-
+  // Plain HTTP allowlist is intentionally tiny: hardened OTA wake/upgrade only.
+  // All general API routes (config, reboot, certs, challenges, state, etc.) must use HTTPS.
   if (method == "POST" && path == "/api/v0/device/ota/wake") {
     if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
       send_json(client, 409, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH_NOT_READY\"}");
@@ -3054,48 +3057,9 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
     return;
   }
 
-  String body = "";
-  if (method == "POST") {
-    body.reserve(content_len > 0 ? content_len : 256);
-    while ((int)body.length() < content_len && client.connected()) {
-      int c = client.read();
-      if (c < 0) {
-        delay(1);
-        continue;
-      }
-      body += static_cast<char>(c);
-    }
-  }
-
-  HttpDispatchResult r = dispatch_request(method, path, body, state);
-  if (r.wants_stream) {
-    String location = String("http://") + client.localIP().toString() + ":8081" + path;
-    client.print("HTTP/1.1 307 Temporary Redirect\r\n");
-    client.print("Location: ");
-    client.print(location);
-    client.print("\r\n");
-    client.print("Cache-Control: no-store\r\n");
-    client.print("Connection: close\r\n");
-    client.print("Content-Length: 0\r\n\r\n");
-    return;
-  }
-
-  if (r.content_type == "application/json") {
-    send_json(client, r.code, r.body);
-  } else {
-    client.print("HTTP/1.1 ");
-    client.print(r.code);
-    client.print(r.code == 200 ? " OK\r\n" : " Error\r\n");
-    client.print("Content-Type: ");
-    client.print(r.content_type);
-    client.print("\r\nConnection: close\r\n\r\n");
-    client.print(r.body);
-  }
-
-  if (r.reboot_after_response) {
-    delay(150);
-    esp_restart();
-  }
+  // Any other HTTP route is explicitly blocked; use HTTPS API instead.
+  send_json(client, 403,
+            "{\"ok\":false,\"error\":\"ERR_HTTP_API_DISABLED\",\"detail\":\"use HTTPS API for this endpoint\"}");
 }
 
 void handle_client(WiFiClient& client, AppState& state) {

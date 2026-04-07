@@ -20,6 +20,7 @@ WiFiServer g_api_server(azt::kHttpPort);
 WiFiServer g_stream_server(azt::constants::runtime::kStreamPort);
 SemaphoreHandle_t g_state_mu = nullptr;
 TaskHandle_t g_stream_task = nullptr;
+bool g_http_servers_enabled = false;
 
 azt::SerialControlState g_serial_state;
 
@@ -76,24 +77,29 @@ void setup() {
 
   azt::setup_audio_input(g_state);
 
-  g_api_server.begin();
-  g_stream_server.begin();
   bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, azt::constants::runtime::kApiTlsPort);
 
-  xTaskCreatePinnedToCore(stream_server_task,
-                          "azt_stream_server",
-                          azt::constants::runtime::kTaskStackStreamServer,
-                          nullptr,
-                          static_cast<UBaseType_t>(azt::constants::runtime::kTaskPriorityNormal),
-                          &g_stream_task,
-                          static_cast<BaseType_t>(azt::constants::runtime::kTaskCore0));
-
-  Serial.printf("AZT_HTTP api_port=%u stream_port=%u\n", azt::kHttpPort, azt::constants::runtime::kStreamPort);
-  log_boot_marker("http_server_started");
   if (https_ok) {
+    // Security policy: plaintext HTTP is never allowed for general API routes.
+    // HTTP listeners are enabled only as a narrow transport for hardened OTA/stream paths.
+    g_http_servers_enabled = true;
+    g_api_server.begin();
+    g_stream_server.begin();
+
+    xTaskCreatePinnedToCore(stream_server_task,
+                            "azt_stream_server",
+                            azt::constants::runtime::kTaskStackStreamServer,
+                            nullptr,
+                            static_cast<UBaseType_t>(azt::constants::runtime::kTaskPriorityNormal),
+                            &g_stream_task,
+                            static_cast<BaseType_t>(azt::constants::runtime::kTaskCore0));
+
+    Serial.printf("AZT_HTTP limited_endpoints api_port=%u stream_port=%u\n", azt::kHttpPort, azt::constants::runtime::kStreamPort);
+    log_boot_marker("http_server_started_limited");
     Serial.printf("AZT_HTTPS api_tls_port=%u\n", azt::constants::runtime::kApiTlsPort);
   } else {
-    Serial.println("AZT_HTTPS disabled (no tls cert/key configured)");
+    g_http_servers_enabled = false;
+    Serial.println("AZT_NET tls_not_configured: network API/stream/OTA disabled; serial-only mode");
   }
 }
 
@@ -109,6 +115,11 @@ void loop() {
   }
 
   azt::handle_serial_control(g_state, g_state_mu, g_serial_state);
+
+  if (!g_http_servers_enabled) {
+    delay(azt::constants::runtime::kIdleLoopDelayMs);
+    return;
+  }
 
   WiFiClient client = g_api_server.available();
   if (!client) {
