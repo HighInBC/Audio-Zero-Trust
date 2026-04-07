@@ -435,26 +435,17 @@ def ota_bundle_create(*, repo_root: Path, key_path: str, out_path: str, firmware
     }
 
 
-def _ota_wake_if_possible(*, api_base: str, legacy_http_base: str, timeout: int, key_path: str, allow_self: bool, allowed_ip: str, window_seconds: int) -> tuple[bool, dict]:
+def _ota_wake_if_possible(*, api_base: str, timeout: int, key_path: str, allow_self: bool, allowed_ip: str, window_seconds: int) -> tuple[bool, dict]:
     challenge_url = f"{api_base}/api/v0/device/ota/wake/challenge"
     wake_url = f"{api_base}/api/v0/device/ota/wake"
 
-    ch_https = get_json(challenge_url, timeout=timeout)
-    ch = ch_https
-    # Compatibility bridge: some deployed firmware builds still expose OTA wake challenge
-    # on HTTP 8080 only. If HTTPS wake challenge is not OK for any reason, try legacy HTTP wake challenge.
-    if not (isinstance(ch_https, dict) and ch_https.get("ok")):
-        challenge_url = f"{legacy_http_base}/api/v0/device/ota/wake/challenge"
-        wake_url = f"{legacy_http_base}/api/v0/device/ota/wake"
-        ch_http = get_json(challenge_url, timeout=timeout)
-        ch = ch_http if isinstance(ch_http, dict) else ch_https
+    ch = get_json(challenge_url, timeout=timeout)
     if not (isinstance(ch, dict) and ch.get("ok")):
         return False, {
             "ok": False,
             "error": "ERR_OTA_WAKE_CHALLENGE",
             "challenge_url": challenge_url,
             "challenge_response": ch,
-            "https_challenge_response": ch_https,
         }
 
     nonce = str(ch.get("nonce") or "")
@@ -518,7 +509,6 @@ def ota_bundle_post(*,
         try:
             woke_ok, wake_result = _ota_wake_if_possible(
                 api_base=api_base,
-                legacy_http_base=upgrade_base,
                 timeout=int(timeout),
                 key_path=resolved_key_path,
                 allow_self=bool(wake_allow_self),
