@@ -95,12 +95,13 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         "tls-status",
         "tls-bootstrap",
         "mdns-fqdn-get",
-        "ota-bundle-post",
         "certificate-revoke",
     }:
         if "host" in conf_defaults:
             _set_if_unset(args, "host", str(conf_defaults["host"]))
-        if "http_port" in conf_defaults:
+        if "https_port" in conf_defaults:
+            _set_if_matches(args, "port", int(conf_defaults["https_port"]), {8080, 8443})
+        elif "http_port" in conf_defaults:
             _set_if_matches(args, "port", int(conf_defaults["http_port"]), {8080})
         if "timeout_seconds" in conf_defaults:
             _set_if_matches(args, "timeout", int(conf_defaults["timeout_seconds"]), {10, 15, 45})
@@ -126,6 +127,12 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
             _set_if_unset(args, "admin_key_path", str(Path(str(conf_defaults["admin_creds_dir"])) / "private_key.pem"))
 
     if command == "ota-bundle-post":
+        if "host" in conf_defaults:
+            _set_if_unset(args, "host", str(conf_defaults["host"]))
+        if "http_port" in conf_defaults:
+            _set_if_matches(args, "port", int(conf_defaults["http_port"]), {8080})
+        if "timeout_seconds" in conf_defaults:
+            _set_if_matches(args, "timeout", int(conf_defaults["timeout_seconds"]), {10, 15, 45})
         if "admin_key_path" in conf_defaults:
             _set_if_unset(args, "admin_key_path", str(conf_defaults["admin_key_path"]))
         elif "admin_creds_dir" in conf_defaults and _is_unset(args, "admin_key_path"):
