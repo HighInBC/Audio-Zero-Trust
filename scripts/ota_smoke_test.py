@@ -36,6 +36,8 @@ def main() -> int:
     ap.add_argument("--host", default="localdev-mic.local")
     ap.add_argument("--admin-key", default="client/tools/provisioned/iter-admin/private_key.pem")
     ap.add_argument("--firmware-key", default="client/tools/provisioned/iter-fw/private_key.pem")
+    ap.add_argument("--wifi-ssid", default="")
+    ap.add_argument("--wifi-password", default="")
     ap.add_argument("--expect-ota-fail", action="store_true", help="Current known-bad mode: require OTA step to fail")
     args = ap.parse_args()
 
@@ -65,6 +67,10 @@ def main() -> int:
                 "--allow-serial-bootstrap",
                 "--admin-creds-dir",
                 str(Path(args.admin_key).parent),
+                "--wifi-ssid",
+                args.wifi_ssid,
+                "--wifi-password",
+                args.wifi_password,
                 "--json",
             ],
             True,
