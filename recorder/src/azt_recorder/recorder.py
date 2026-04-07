@@ -16,6 +16,7 @@ import time
 import urllib.request
 import urllib.parse
 import urllib.error
+import ssl
 
 from cryptography.hazmat.primitives import serialization
 
@@ -305,8 +306,11 @@ class RecordingSession:
     cfg: RecordingConfig
 
     def _build_stream_request(self) -> tuple[urllib.request.Request, str]:
-        challenge_url = f"{self.ad.base_url}/api/v0/device/stream/challenge"
-        with urllib.request.urlopen(challenge_url, timeout=8) as resp:
+        challenge_url = f"{self.ad.api_https_url}/api/v0/device/stream/challenge"
+        # Device TLS is private PKI today; recorder performs application-layer auth checks
+        # and uses an unverified TLS context for API bootstrap/challenge fetch.
+        insecure_tls = ssl._create_unverified_context()
+        with urllib.request.urlopen(challenge_url, timeout=8, context=insecure_tls) as resp:
             ch = json.loads(resp.read().decode("utf-8"))
         if not isinstance(ch, dict) or not ch.get("ok"):
             raise AuthorizationError("stream_challenge_failed")
@@ -338,7 +342,7 @@ class RecordingSession:
             params["signer_fp"] = signer_fp
             print(f"[record] stream_auth device={self.ad.device_name} signer_fp={signer_fp} expected_device_fp={device_fp}")
 
-        url = f"{self.ad.base_url}/stream?" + urllib.parse.urlencode(params)
+        url = f"{self.ad.stream_http_url}/stream?" + urllib.parse.urlencode(params)
         return urllib.request.Request(url, method="GET"), nonce
 
     async def run_forever(self) -> None:

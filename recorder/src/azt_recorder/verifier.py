@@ -9,6 +9,7 @@ from pathlib import Path
 import urllib.request
 import secrets
 import hashlib
+import ssl
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -70,7 +71,7 @@ class TrustVerifier:
             return self._cache[ck]
 
         try:
-            env = await asyncio.to_thread(self._fetch_cert_envelope, ad.base_url)
+            env = await asyncio.to_thread(self._fetch_cert_envelope, ad.api_https_url)
             payload_raw, sig_raw = self._parse_envelope(env)
             self._verify_signature(admin_fp, payload_raw, sig_raw)
             pobj = json.loads(payload_raw.decode("utf-8"))
@@ -87,7 +88,8 @@ class TrustVerifier:
 
     @staticmethod
     def _fetch_cert_envelope(base_url: str) -> dict:
-        raw = urllib.request.urlopen(base_url + "/api/v0/device/certificate", timeout=8).read().decode()
+        insecure_tls = ssl._create_unverified_context()
+        raw = urllib.request.urlopen(base_url + "/api/v0/device/certificate", timeout=8, context=insecure_tls).read().decode()
         doc = json.loads(raw)
         if not doc.get("ok"):
             raise ValueError("cert_get_not_ok")
@@ -146,7 +148,8 @@ class TrustVerifier:
 
     @staticmethod
     def _fetch_attestation(base_url: str, nonce: str) -> dict:
-        raw = urllib.request.urlopen(base_url + f"/api/v0/device/attestation?nonce={nonce}", timeout=8).read().decode()
+        insecure_tls = ssl._create_unverified_context()
+        raw = urllib.request.urlopen(base_url + f"/api/v0/device/attestation?nonce={nonce}", timeout=8, context=insecure_tls).read().decode()
         doc = json.loads(raw)
         if not doc.get("ok"):
             raise ValueError("attestation_not_ok")
@@ -155,7 +158,7 @@ class TrustVerifier:
     @staticmethod
     def _verify_device_attestation(ad: DiscoveryAd, cert_payload: dict) -> None:
         nonce = "rec-" + secrets.token_hex(12)
-        att = TrustVerifier._fetch_attestation(ad.base_url, nonce)
+        att = TrustVerifier._fetch_attestation(ad.api_https_url, nonce)
 
         payload = att.get("payload")
         if not isinstance(payload, dict):
