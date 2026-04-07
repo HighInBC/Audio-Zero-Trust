@@ -441,12 +441,22 @@ def _ota_wake_if_possible(*, api_base: str, timeout: int, key_path: str, allow_s
 
     ch = get_json(challenge_url, timeout=timeout)
     if not (isinstance(ch, dict) and ch.get("ok")):
-        return False, {
-            "ok": False,
-            "error": "ERR_OTA_WAKE_CHALLENGE",
-            "challenge_url": challenge_url,
-            "challenge_response": ch,
-        }
+        # HTTPS-only compatibility alias: some firmware variants expose GET wake challenge
+        # directly on /api/v0/device/ota/wake.
+        alt_challenge_url = f"{api_base}/api/v0/device/ota/wake"
+        alt_ch = get_json(alt_challenge_url, timeout=timeout)
+        if isinstance(alt_ch, dict) and alt_ch.get("ok") and str(alt_ch.get("nonce") or ""):
+            ch = alt_ch
+            challenge_url = alt_challenge_url
+        else:
+            return False, {
+                "ok": False,
+                "error": "ERR_OTA_WAKE_CHALLENGE",
+                "challenge_url": challenge_url,
+                "challenge_response": ch,
+                "alt_challenge_url": alt_challenge_url,
+                "alt_challenge_response": alt_ch,
+            }
 
     nonce = str(ch.get("nonce") or "")
     if not nonce:
