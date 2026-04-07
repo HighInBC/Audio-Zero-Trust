@@ -1368,6 +1368,11 @@ HttpDispatchResult dispatch_request(const String& method,
     String effective_ip = requested_ip;
     if (allow_self) {
       effective_ip = remote_ip;
+      // HTTPS peer address may not always surface as plain IPv4; allow explicit allowed_ip fallback.
+      IPAddress self_ip_chk;
+      if (!self_ip_chk.fromString(effective_ip)) {
+        effective_ip = requested_ip;
+      }
     }
 
     IPAddress ip_chk;
