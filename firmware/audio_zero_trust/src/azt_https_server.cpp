@@ -6,6 +6,8 @@
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <memory>
+#include <lwip/sockets.h>
+#include <lwip/inet.h>
 
 #include "azt_http_api.h"
 
@@ -17,6 +19,29 @@ AppState* g_state = nullptr;
 SemaphoreHandle_t g_state_mu = nullptr;
 String g_cert;
 String g_key;
+
+static String https_remote_ip(httpd_req_t* req) {
+  if (!req) return String("");
+  int fd = httpd_req_to_sockfd(req);
+  if (fd < 0) return String("");
+
+  struct sockaddr_storage ss;
+  socklen_t slen = sizeof(ss);
+  if (getpeername(fd, reinterpret_cast<struct sockaddr*>(&ss), &slen) != 0) return String("");
+
+  char ipbuf[INET6_ADDRSTRLEN] = {0};
+  if (ss.ss_family == AF_INET) {
+    auto* a = reinterpret_cast<struct sockaddr_in*>(&ss);
+    if (!inet_ntop(AF_INET, &a->sin_addr, ipbuf, sizeof(ipbuf))) return String("");
+    return String(ipbuf);
+  }
+  if (ss.ss_family == AF_INET6) {
+    auto* a6 = reinterpret_cast<struct sockaddr_in6*>(&ss);
+    if (!inet_ntop(AF_INET6, &a6->sin6_addr, ipbuf, sizeof(ipbuf))) return String("");
+    return String(ipbuf);
+  }
+  return String("");
+}
 
 static esp_err_t handle_https_any(httpd_req_t* req) {
   if (!req || !g_state || !g_state_mu) return ESP_FAIL;
@@ -78,7 +103,8 @@ static esp_err_t handle_https_any(httpd_req_t* req) {
     httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ERR_STATE_LOCK\"}");
     return ESP_OK;
   }
-  HttpDispatchResult r = dispatch_request(method, path, body, *g_state);
+  String remote_ip = https_remote_ip(req);
+  HttpDispatchResult r = dispatch_request(method, path, body, *g_state, remote_ip);
   xSemaphoreGive(g_state_mu);
 
   String status = String(r.code) + (r.code == 200 ? " OK" : " Error");

@@ -1227,7 +1227,8 @@ bool parse_request_line(const String& req, String& method, String& path) {
 HttpDispatchResult dispatch_request(const String& method,
                                    const String& path,
                                    const String& body,
-                                   AppState& state) {
+                                   AppState& state,
+                                   const String& remote_ip) {
   HttpDispatchResult r{};
 
   if (method == "GET" && path == "/") {
@@ -1309,6 +1310,90 @@ HttpDispatchResult dispatch_request(const String& method,
     r.content_type = "application/json";
     r.body = "{\"ok\":true,\"op\":\"ota_wake\",\"nonce\":" + json_quote(g_ota_wake_nonce) +
              ",\"ttl_ms\":" + String(static_cast<unsigned long>(kOtaWakeNonceTtlMs)) + "}";
+    return r;
+  }
+
+  if (method == "POST" && path == "/api/v0/device/ota/wake") {
+    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH_NOT_READY\"}";
+      return r;
+    }
+
+    JsonDocument doc;
+    DeserializationError jerr = deserializeJson(doc, body);
+    if (jerr) {
+      r.code = 400;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH_SCHEMA\",\"detail\":\"invalid json\"}";
+      return r;
+    }
+
+    String nonce = String((const char*)(doc["nonce"] | ""));
+    String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
+    String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
+    String signer_fp = String((const char*)(doc["signer_fingerprint_hex"] | ""));
+    bool allow_self = bool(doc["allow_self"] | false);
+    String requested_ip = String((const char*)(doc["allowed_ip"] | ""));
+    requested_ip.trim();
+
+    uint32_t now_ms = millis();
+    if (!validate_active_nonce(nonce, g_ota_wake_nonce, g_ota_wake_nonce_expires_ms, now_ms)) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_CHALLENGE_EXPIRED\"}";
+      return r;
+    }
+
+    if (sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.admin_fingerprint_hex) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH\"}";
+      return r;
+    }
+
+    String signed_msg = String("ota_wake:") + nonce;
+    std::vector<uint8_t> msg_raw;
+    msg_raw.reserve(signed_msg.length());
+    for (size_t i = 0; i < signed_msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(signed_msg[i]));
+
+    if (!verify_ed25519_signature_b64(state.admin_pubkey_pem, msg_raw, sig_b64)) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH\"}";
+      return r;
+    }
+
+    String effective_ip = requested_ip;
+    if (allow_self) {
+      effective_ip = remote_ip;
+    }
+
+    IPAddress ip_chk;
+    if (!ip_chk.fromString(effective_ip)) {
+      r.code = 400;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_ALLOWED_IP\",\"detail\":\"valid IPv4 allowed_ip required (or set allow_self=true)\"}";
+      return r;
+    }
+
+    uint32_t window_ms = kOtaWakeWindowDefaultMs;
+    if (!doc["window_seconds"].isNull()) {
+      int req_secs = int(doc["window_seconds"] | int(kOtaWakeWindowDefaultMs / 1000));
+      if (req_secs < 5) req_secs = 5;
+      if (req_secs > 300) req_secs = 300;
+      window_ms = static_cast<uint32_t>(req_secs) * 1000U;
+    }
+
+    consume_nonce(g_ota_wake_nonce, g_ota_wake_nonce_expires_ms);
+    g_ota_wake_allowed_ip = effective_ip;
+    g_ota_wake_open_expires_ms = millis() + window_ms;
+
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"ota_open\":true,\"allowed_ip\":" + json_quote(g_ota_wake_allowed_ip) +
+             ",\"window_ms\":" + String(static_cast<unsigned long>(window_ms)) + "}";
     return r;
   }
 
@@ -2932,82 +3017,8 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
   // Plain HTTP allowlist is intentionally tiny: hardened OTA wake/upgrade only.
   // All general API routes (config, reboot, certs, challenges, state, etc.) must use HTTPS.
   if (method == "POST" && path == "/api/v0/device/ota/wake") {
-    if (!state.managed || state.admin_pubkey_pem.length() == 0 || state.admin_fingerprint_hex.length() != 64) {
-      send_json(client, 409, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH_NOT_READY\"}");
-      return;
-    }
-
-    String body = "";
-    body.reserve(content_len > 0 ? content_len : 256);
-    while ((int)body.length() < content_len && client.connected()) {
-      int c = client.read();
-      if (c < 0) {
-        delay(1);
-        continue;
-      }
-      body += static_cast<char>(c);
-    }
-
-    JsonDocument doc;
-    DeserializationError jerr = deserializeJson(doc, body);
-    if (jerr) {
-      send_json(client, 400, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_SCHEMA\",\"detail\":\"invalid json\"}");
-      return;
-    }
-
-    String nonce = String((const char*)(doc["nonce"] | ""));
-    String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
-    String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
-    String signer_fp = String((const char*)(doc["signer_fingerprint_hex"] | ""));
-
-    uint32_t now_ms = millis();
-    if (!validate_active_nonce(nonce, g_ota_wake_nonce, g_ota_wake_nonce_expires_ms, now_ms)) {
-      send_json(client, 401, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_CHALLENGE_EXPIRED\"}");
-      return;
-    }
-
-    if (sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != state.admin_fingerprint_hex) {
-      send_json(client, 401, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_AUTH\"}");
-      return;
-    }
-
-    String signed_msg = String("ota_wake:") + nonce;
-    std::vector<uint8_t> msg_raw;
-    msg_raw.reserve(signed_msg.length());
-    for (size_t i = 0; i < signed_msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(signed_msg[i]));
-    if (!verify_ed25519_signature_b64(state.admin_pubkey_pem, msg_raw, sig_b64)) {
-      send_json(client, 401, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_SIG_VERIFY\"}");
-      return;
-    }
-
-    bool allow_self = true;
-    if (!doc["allow_self"].isNull()) allow_self = bool(doc["allow_self"]);
-    String requested_ip = String((const char*)(doc["allowed_ip"] | ""));
-    requested_ip.trim();
-    String effective_ip = allow_self ? remote_ip : requested_ip;
-    if (effective_ip.length() == 0 || !is_valid_ipv4_literal(effective_ip)) {
-      send_json(client, 400, "{\"ok\":false,\"error\":\"ERR_OTA_WAKE_ALLOWED_IP\",\"detail\":\"valid IPv4 allowed_ip required (or set allow_self=true)\"}");
-      return;
-    }
-
-    uint32_t window_ms = kOtaWakeWindowDefaultMs;
-    if (!doc["window_seconds"].isNull()) {
-      int req_secs = int(doc["window_seconds"] | int(kOtaWakeWindowDefaultMs / 1000));
-      if (req_secs < 1) req_secs = 1;
-      uint32_t req_ms = static_cast<uint32_t>(req_secs) * 1000u;
-      if (req_ms < kOtaWakeWindowMinMs) req_ms = kOtaWakeWindowMinMs;
-      if (req_ms > kOtaWakeWindowMaxMs) req_ms = kOtaWakeWindowMaxMs;
-      window_ms = req_ms;
-    }
-
-    consume_nonce(g_ota_wake_nonce, g_ota_wake_nonce_expires_ms);
-    g_ota_wake_allowed_ip = effective_ip;
-    g_ota_wake_open_expires_ms = millis() + window_ms;
-
-    send_json(client, 200,
-              "{\"ok\":true,\"ota_open\":true,\"allowed_ip\":" + json_quote(g_ota_wake_allowed_ip) +
-              ",\"window_ms\":" + String(static_cast<unsigned long>(window_ms)) +
-              ",\"expires_in_ms\":" + String(static_cast<unsigned long>(window_ms)) + "}");
+    send_json(client, 403,
+              "{\"ok\":false,\"error\":\"ERR_HTTP_API_DISABLED\",\"detail\":\"use HTTPS API for this endpoint\"}");
     return;
   }
 

@@ -26,7 +26,8 @@ bool parse_request_line(const String& req, String& method, String& path);
 HttpDispatchResult dispatch_request(const String& method,
                                    const String& path,
                                    const String& body,
-                                   AppState& state);
+                                   AppState& state,
+                                   const String& remote_ip = "");
 
 // OTA upgrade validation helpers (deterministic unit-test targets).
 bool validate_ota_bundle_header_line(const String& header_line,
