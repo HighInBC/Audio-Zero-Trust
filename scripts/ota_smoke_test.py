@@ -48,6 +48,24 @@ def ok(resp: dict) -> bool:
     return bool(resp.get("ok"))
 
 
+def ensure_signing_creds(repo: Path, tool: list[str], out_dir: Path, identity: str) -> tuple[Path, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    priv = out_dir / "private_key.pem"
+    if not priv.exists():
+        cmd = tool + [
+            "create-signing-credentials",
+            "--identity",
+            identity,
+            "--out-dir",
+            str(out_dir),
+            "--json",
+        ]
+        resp = run_json(cmd, repo)
+        if not ok(resp):
+            raise RuntimeError(f"failed to create signing creds at {out_dir}")
+    return out_dir, priv
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Erase -> flash -> configure -> OTA smoke loop")
     ap.add_argument("--repo", default=".")
@@ -65,6 +83,15 @@ def main() -> int:
 
     repo = Path(args.repo).resolve()
     tool = ["python3", "./client/tools/azt_tool.py"]
+
+    admin_creds_dir = Path(args.admin_creds_dir)
+    admin_key = Path(args.admin_key)
+    firmware_key = Path(args.firmware_key)
+
+    if not admin_key.exists() or not admin_creds_dir.exists():
+        admin_creds_dir, admin_key = ensure_signing_creds(repo, tool, repo / ".tmp" / "ota-smoke-admin", "ota-smoke-admin")
+    if not firmware_key.exists():
+        _fw_dir, firmware_key = ensure_signing_creds(repo, tool, repo / ".tmp" / "ota-smoke-fw", "ota-smoke-fw")
 
     steps: list[tuple[str, list[str], bool]] = [
         (
@@ -88,7 +115,7 @@ def main() -> int:
                 args.port,
                 "--allow-serial-bootstrap",
                 "--admin-creds-dir",
-                args.admin_creds_dir,
+                str(admin_creds_dir),
                 "--wifi-ssid",
                 args.wifi_ssid,
                 "--wifi-password",
@@ -103,9 +130,9 @@ def main() -> int:
             + [
                 "ota-bundle-create",
                 "--firmware-key",
-                args.firmware_key,
+                str(firmware_key),
                 "--admin-key",
-                args.admin_key,
+                str(admin_key),
                 "--version-code",
                 "timestamp",
                 "--rollback-floor-code",
