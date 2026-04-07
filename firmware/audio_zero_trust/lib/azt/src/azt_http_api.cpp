@@ -1240,6 +1240,15 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
+  // Security boundary: before admin key is pinned (managed=false), network API is disabled.
+  // Initial claim/bootstrap must happen over serial only.
+  if (!state.managed) {
+    r.code = 403;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":false,\"error\":\"ERR_BOOTSTRAP_SERIAL_REQUIRED\",\"detail\":\"network API disabled until admin key is pinned via serial\"}";
+    return r;
+  }
+
   if (method == "GET" && path.startsWith("/stream")) {
     r.wants_stream = true;
     r.stream_seconds = parse_seconds_from_path(path);
@@ -3016,6 +3025,12 @@ void handle_client_api_only(WiFiClient& client, AppState& state) {
   if (!is_remote_ip_authorized(state, remote_ip)) {
     send_json(client, 403,
               "{\"ok\":false,\"error\":\"ERR_AUTH_LISTENER_IP\",\"detail\":\"listener IP not authorized\"}");
+    return;
+  }
+
+  if (!state.managed) {
+    send_json(client, 403,
+              "{\"ok\":false,\"error\":\"ERR_BOOTSTRAP_SERIAL_REQUIRED\",\"detail\":\"network API disabled until admin key is pinned via serial\"}");
     return;
   }
 
