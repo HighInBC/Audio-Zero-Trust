@@ -53,15 +53,13 @@ def _get_json_safe(*, url: str, timeout: int, where: str, error: str) -> dict:
 
 
 def _state_get_v0(*, host: str, port: int, timeout: int) -> dict:
-    scheme = os.getenv("AZT_SCHEME", "auto")
-    b = base_url(host=host, port=port, scheme=scheme)
+    b = base_url(host=host, port=port, scheme="https")
     url = f"{b}/api/v0/config/state"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v0", error="STATE_GET_V0_FAILED")
 
 
 def _state_get_v1_legacy(*, host: str, port: int, timeout: int) -> dict:
-    scheme = os.getenv("AZT_SCHEME", "auto")
-    b = base_url(host=host, port=port, scheme=scheme)
+    b = base_url(host=host, port=port, scheme="https")
     url = f"{b}/api/v1/config/state"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v1_legacy", error="STATE_GET_V1_LEGACY_FAILED")
 
@@ -91,19 +89,19 @@ def state_get(*, host: str, port: int, timeout: int) -> dict:
 
 
 def attestation_get(*, host: str, port: int, timeout: int, nonce: str) -> dict:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     url = f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.attestation_get", error="ATTESTATION_GET_FAILED")
 
 
 def certificate_get(*, host: str, port: int, timeout: int) -> dict:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     url = f"{b}/api/v0/device/certificate"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.certificate_get", error="CERTIFICATE_GET_FAILED")
 
 
 def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> dict:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     url = f"{b}/api/v0/device/certificate"
     try:
         return http_json("POST", url, payload, timeout=timeout)
@@ -122,7 +120,7 @@ def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> di
 
 
 def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     challenge_url = f"{b}/api/v0/device/reboot/challenge"
     ch = _get_json_safe(url=challenge_url, timeout=timeout, where="device_service.reboot_device.challenge", error="REBOOT_CHALLENGE_REQUEST_FAILED")
     if not ch.get("ok"):
@@ -170,7 +168,7 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
 
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     pem_url = f"{b}/api/v0/device/signing-public-key.pem"
     alias_url = f"{b}/api/v0/device/signing-public-key"
     try:
@@ -215,8 +213,7 @@ def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict
 
 
 def stream_redirect_check(*, host: str, port: int, seconds: int, stream_port: int, timeout: int) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
-    req_url = f"{b}/stream?seconds={seconds}"
+    req_url = f"http://{host}:{int(stream_port)}/stream?seconds={seconds}"
     try:
         r = requests.get(req_url, allow_redirects=False, timeout=timeout, verify=requests_verify_for_url(req_url))
     except (requests.RequestException, TimeoutError, OSError) as e:
@@ -297,7 +294,7 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
 
 
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     total = 0
     import time
     from pathlib import Path
@@ -319,11 +316,11 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 
     # Stream freshness challenge (required by firmware).
     try:
-        challenge = get_json(f"{b}/api/v0/device/stream/challenge", timeout=timeout)
+        challenge = get_json(f"{api_b}/api/v0/device/stream/challenge", timeout=timeout)
     except Exception as e:
         return False, {
             "error": "STREAM_CHALLENGE_FAILED",
-            "detail": _error_detail(where="device_service.stream_read.challenge", exc=e, url=f"{b}/api/v0/device/stream/challenge"),
+            "detail": _error_detail(where="device_service.stream_read.challenge", exc=e, url=f"{api_b}/api/v0/device/stream/challenge"),
         }
     nonce = str((challenge or {}).get("nonce") or "").strip()
     if not nonce:
@@ -348,7 +345,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                 "detail": _error_detail(where="device_service.stream_read.auth", exc=e),
             }
 
-    url = f"{b}/stream?{urlencode(params)}"
+    url = f"{stream_b}/stream?{urlencode(params)}"
 
     out_file = None
     resolved_out = ""

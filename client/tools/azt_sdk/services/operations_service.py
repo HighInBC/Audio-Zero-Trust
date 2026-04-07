@@ -65,7 +65,7 @@ def apply_config(*, in_path: str, key_path: str, host: str, port: int, timeout: 
     keyp = Path(key_path)
     fp = fingerprint.strip() or ed25519_fp_hex_from_private_key(keyp)
 
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    base = base_url(host=host, port=port, scheme="https")
     apply_url = f"{base}/api/v0/config"
     state_url = f"{base}/api/v0/config/state"
 
@@ -160,7 +160,7 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
     fp = fingerprint.strip() or ed25519_fp_hex_from_private_key(keyp)
     signed_cfg = make_signed_config(unsigned_cfg, keyp.read_bytes(), fp)
 
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    base = base_url(host=host, port=port, scheme="https")
     patch_url = f"{base}/api/v0/config/patch"
     state_url = f"{base}/api/v0/config/state"
     try:
@@ -220,7 +220,7 @@ def config_patch(*, patch_path: str, patch_obj: dict | None, if_version: int, ke
 
 def certify_issue(*, host: str, port: int, timeout: int, key_path: str, serial: str, issue_id: str, title: str, expected: str, actual: str, repro: list[str], evidence: list[str], meta: list[str], nonce: str, cert_serial: str, no_upload_device_cert: bool, out_path: str) -> tuple[bool, str | None, dict]:
     keyp = Path(key_path)
-    base = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    base = base_url(host=host, port=port, scheme="https")
     state = get_json(f"{base}/api/v0/config/state", timeout=timeout)
     if not state.get("ok"):
         return False, "ERR_STATE_QUERY", {"state": state}

@@ -21,7 +21,7 @@ def run(args: argparse.Namespace) -> int:
             )
             return 1
 
-        b = base_url(host=host, port=int(args.port), scheme=os.getenv("AZT_SCHEME", "auto"))
+        b = base_url(host=host, port=int(args.port), scheme="https")
         res = get_json(f"{b}/api/v0/tls/state", timeout=int(args.timeout))
         ok = bool(res.get("ok"))
         emit_envelope(

@@ -24,7 +24,7 @@ def _nonce_matches(payload_nonce: str, requested_nonce: str) -> bool:
 
 
 def verify_attestation(*, host: str, port: int, nonce: str, timeout: int) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
     att = get_json(
         f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}",

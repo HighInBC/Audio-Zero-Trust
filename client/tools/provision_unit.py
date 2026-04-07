@@ -371,7 +371,7 @@ def main() -> int:
     (out_dir / 'config_bootstrap.json').write_text(json.dumps(unsigned_cfg, indent=2))
     (out_dir / 'config_signed.json').write_text(json.dumps(signed, indent=2))
 
-    base = f'http://{device_ip}:8080'
+    base = f'https://{device_ip}:8443'
     state0 = None
     try:
         state0 = http_json('GET', base + '/api/v0/config/state')
@@ -397,7 +397,7 @@ def main() -> int:
         if ip_from_serial:
             device_ip = ip_from_serial
             print({'ip_detected_after_serial_bootstrap': device_ip})
-        base = f'http://{device_ip}:8080'
+        base = f'https://{device_ip}:8443'
         time.sleep(1.5)
         try:
             state1 = http_json('GET', base + '/api/v0/config/state')

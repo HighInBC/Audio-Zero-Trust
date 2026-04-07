@@ -52,7 +52,7 @@ def _validate_attestation(*, att: dict, state: dict, host: str, port: int, attes
 
 
 def revoke_certificate(*, host: str, port: int, timeout: int, key_path: str, cert_serial: str = "") -> tuple[bool, str | None, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     state = state_get(host=host, port=port, timeout=timeout)
     if not bool(state.get("ok")):
         return False, "STATE_GET_FAILED", {"state": state}
@@ -102,7 +102,7 @@ def revoke_certificate(*, host: str, port: int, timeout: int, key_path: str, cer
 
 
 def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, attestation_path: str | None, attestation_max_age_s: int, cert_serial: str, valid_until_utc: str, auto_record: bool = False, auto_decode: bool = False, out_path: str | None = None) -> tuple[bool, str | None, dict]:
-    b = base_url(host=host, port=port, scheme=os.getenv("AZT_SCHEME", "auto"))
+    b = base_url(host=host, port=port, scheme="https")
     state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
     if not bool(state.get("ok")):
         return False, "STATE_GET_FAILED", {"state": state}

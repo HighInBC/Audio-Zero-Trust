@@ -21,7 +21,7 @@ def run(args: argparse.Namespace) -> int:
             admin_key_path=str(args.key_path),
             cert_serial=cert_serial,
             valid_days=int(args.valid_days),
-            scheme="http",
+            scheme="https",
         )
         payload["next_steps"] = [
             f"python3 client/tools/azt_tool.py state-get --host {host} --port 8443",

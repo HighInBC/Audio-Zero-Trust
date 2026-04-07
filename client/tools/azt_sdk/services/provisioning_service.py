@@ -286,7 +286,7 @@ def configure_device(
     state0_err = None
     state0_url = None
     if device_ip:
-        base = base_url(host=device_ip, port=8080, scheme=os.getenv("AZT_SCHEME", "auto"))
+        base = base_url(host=device_ip, port=8443, scheme="https")
         state0_url = base + "/api/v0/config/state"
         try:
             state0 = http_json("GET", state0_url)
@@ -365,7 +365,7 @@ def configure_device(
                 **common,
                 "detail": "HTTP state unreachable and serial bootstrap not allowed",
                 "where": "provisioning_service.configure_device.serial_gate",
-            }, "Device state is unreachable over HTTP and serial bootstrap is disabled.")
+            }, "Device state is unreachable over HTTPS and serial bootstrap is disabled.")
 
         ok_serial, ip_from_serial, serial_detail = serial_apply_signed_config(
             port,
@@ -454,7 +454,7 @@ def configure_device(
         time.sleep(1.0)
         # Post-serial liveness check should not depend on AZT_SCHEME auto-selection.
         # Force HTTP bootstrap endpoint here to avoid premature HTTPS-only probes.
-        base_after = base_url(host=device_ip, port=8080, scheme="http")
+        base_after = base_url(host=device_ip, port=8443, scheme="https")
 
         state1 = None
         postcheck_err = None

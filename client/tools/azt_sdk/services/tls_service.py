@@ -366,7 +366,7 @@ def tls_bootstrap(*,
         admin_key_path=admin_key_path,
         cert_serial=serial_value,
         valid_days=int(valid_days),
-        scheme="http",
+        scheme="https",
         ca_key_path=ca_key_path,
         ca_cert_path=ca_cert_path,
         san_hosts=san_hosts,
@@ -397,9 +397,9 @@ def tls_bootstrap(*,
         if not isinstance(admin_priv, ed25519.Ed25519PrivateKey):
             raise RuntimeError("admin key must be Ed25519 private key")
 
-        http_base = base_url(host=host, port=int(http_port), scheme="http")
-        challenge_url = f"{http_base}/api/v0/device/reboot/challenge"
-        reboot_url = f"{http_base}/api/v0/device/reboot"
+        api_base = base_url(host=host, port=int(https_port), scheme="https")
+        challenge_url = f"{api_base}/api/v0/device/reboot/challenge"
+        reboot_url = f"{api_base}/api/v0/device/reboot"
         try:
             ch = get_json(challenge_url, timeout=int(timeout))
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
