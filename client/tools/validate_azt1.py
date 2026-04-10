@@ -12,6 +12,7 @@ Focuses on container/format semantics:
 
 from __future__ import annotations
 import argparse, base64, json, struct, sys, hashlib
+from cryptography.hazmat.primitives import hmac
 from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding
@@ -99,11 +100,11 @@ def main() -> int:
         if reqs(plain, "next_header_ciphertext_hash_alg") != "sha256":
             fail("ERR_HEADER_FIELD", "next_header_ciphertext_hash_alg must be sha256")
 
-        if reqs(plain, "chain_alg") != "sha256-link":
-            fail("ERR_HEADER_FIELD", "public_chain_alg must be sha256-link")
-        if reqs(plain, "chain_domain") != "AZT1-CHAIN-V1":
+        if reqs(plain, "chain_alg") != "hmac-sha256-link":
+            fail("ERR_HEADER_FIELD", "public_chain_alg must be hmac-sha256-link")
+        if reqs(plain, "chain_domain") != "AZT1-CHAIN-V2":
             fail("ERR_HEADER_FIELD", "public_chain_domain mismatch")
-        if reqs(plain, "chain_root_mode") != "first-record-hash":
+        if reqs(plain, "chain_root_mode") != "genesis-signature-block":
             fail("ERR_HEADER_FIELD", "public_chain_root_mode mismatch")
         if reqs(plain, "chunk_record_format") != "seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32":
             fail("ERR_HEADER_FIELD", "public_chunk_record_format mismatch")
@@ -187,8 +188,10 @@ def main() -> int:
             fail("ERR_ENC_HEADER_LENGTH", "next_header plaintext hash mismatch")
 
         # encrypted-header expectations
-        if reqs(dec, "chain_alg") != "sha256-link":
-            fail("ERR_ENC_HEADER_JSON", "chain_alg must be sha256-link")
+        if reqs(dec, "chain_alg") != "hmac-sha256-link":
+            fail("ERR_ENC_HEADER_JSON", "chain_alg must be hmac-sha256-link")
+        if reqs(dec, "chain_domain") != "AZT1-CHAIN-V2":
+            fail("ERR_ENC_HEADER_JSON", "chain_domain must be AZT1-CHAIN-V2")
 
         # Optional device certificate included in plaintext header for portable provenance.
         cert_doc = plain.get("device_certificate")
@@ -225,8 +228,10 @@ def main() -> int:
 
         audio_key = b64d(reqs(dec, "audio_key_b64"), "audio_key_b64")
         nonce_prefix = b64d(reqs(dec, "audio_nonce_prefix_b64"), "audio_nonce_prefix_b64")
-        if len(audio_key) != 32 or len(nonce_prefix) != 4:
-            fail("ERR_ENC_HEADER_JSON", "invalid key/nonce fields")
+        chain_key = b64d(reqs(dec, "chain_key_b64"), "chain_key_b64")
+        chain_genesis_secret = b64d(reqs(dec, "chain_genesis_secret_b64"), "chain_genesis_secret_b64")
+        if len(audio_key) != 32 or len(nonce_prefix) != 4 or len(chain_key) != 32 or len(chain_genesis_secret) != 32:
+            fail("ERR_ENC_HEADER_JSON", "invalid key/nonce/genesis fields")
 
         device_sign_pub_raw = b64d(reqs(dec, "device_sign_public_key_b64"), "device_sign_public_key_b64")
         device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
@@ -275,16 +280,21 @@ def main() -> int:
 
             # verify chain
             core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
-            if seq == 1:
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
-            else:
+            hm = hmac.HMAC(chain_key, hashes.SHA256())
+            hm.update(b"AZT1-CHAIN-V2")
+            if seq > 1:
                 if v_prev is None:
                     fail("ERR_CHAIN", "missing prior chain value for seq>1")
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
+                hm.update(v_prev)
+            hm.update(core)
+            v_calc = hm.finalize()
             if v_calc != v_cur:
                 fail("ERR_CHAIN", f"chain mismatch at seq={seq}")
             v_prev = v_cur
             seq_to_chain_v[seq] = v_cur
+
+            if seq == 1 and block_type != 1:
+                fail("ERR_PACKETIZATION", "block1 must be signature block")
 
             # encryption class expectations
             if block_type in (0, 3):
@@ -309,10 +319,15 @@ def main() -> int:
                         fail("ERR_PACKETIZATION", f"signature block len must be 68, got {len(body)}")
                     ref_seq = struct.unpack(">I", body[:4])[0]
                     sig = body[4:]
-                    ref_v = seq_to_chain_v.get(ref_seq)
-                    if ref_v is None:
-                        fail("ERR_PACKETIZATION", f"signature ref_seq={ref_seq} not seen yet")
-                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + ref_v
+                    if seq == 1 and ref_seq != 0:
+                        fail("ERR_PACKETIZATION", "block1 signature must use ref_seq=0")
+                    if ref_seq == 0:
+                        msg = b"AZT1SIG0" + chain_genesis_secret
+                    else:
+                        ref_v = seq_to_chain_v.get(ref_seq)
+                        if ref_v is None:
+                            fail("ERR_PACKETIZATION", f"signature ref_seq={ref_seq} not seen yet")
+                        msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + ref_v
                     try:
                         device_sign_pub.verify(sig, msg)
                     except Exception as e:

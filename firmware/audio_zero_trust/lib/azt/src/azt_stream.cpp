@@ -360,6 +360,26 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   std::vector<uint8_t> rec;
   rec.reserve(4 + 4 + 1 + kMicFrameBytes + 16 + 32);
 
+  {
+    unsigned char sig0[crypto_sign_ed25519_BYTES] = {0};
+    unsigned long long sig0_len = 0;
+    uint8_t msg0[8 + 32];
+    memcpy(msg0, "AZT1SIG0", 8);
+    memcpy(msg0 + 8, sc.chain_genesis_secret, 32);
+    if (crypto_sign_ed25519_detached(sig0, &sig0_len, msg0, sizeof(msg0), sign_sk) != 0 ||
+        sig0_len != crypto_sign_ed25519_BYTES ||
+        !encrypt_signature_block_and_chain(sc, 0, sig0, rec) ||
+        !send_chunked(client, rec.data(), rec.size())) {
+      mic_ring->stop = true;
+      vTaskDelay(pdMS_TO_TICKS(constants::runtime::kMicReaderShutdownDelayMs));
+      signer.stop();
+      delete mic_ring;
+      client.print("0\r\n\r\n");
+      client.flush();
+      return;
+    }
+  }
+
   const bool finite_stream = seconds > 0;
   const uint64_t stream_start_us = static_cast<uint64_t>(esp_timer_get_time());
   const uint64_t deadline = finite_stream

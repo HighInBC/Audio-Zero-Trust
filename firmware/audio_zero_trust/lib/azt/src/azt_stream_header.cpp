@@ -21,8 +21,18 @@ bool build_header_prefix(StreamCtx& sc,
   out_prefix.clear();
   esp_fill_random(sc.audio_key, sizeof(sc.audio_key));
   esp_fill_random(sc.nonce_prefix, sizeof(sc.nonce_prefix));
+  esp_fill_random(sc.chain_key, sizeof(sc.chain_key));
+  memset(sc.chain_genesis_secret, 0, sizeof(sc.chain_genesis_secret));
   memset(sc.v_prev, 0, sizeof(sc.v_prev));
   sc.seq = 0;
+
+  {
+    crypto_auth_hmacsha256_state gs;
+    crypto_auth_hmacsha256_init(&gs, sc.chain_key, sizeof(sc.chain_key));
+    static const uint8_t kGenesisDomain[] = {'A','Z','T','1','-','G','E','N','E','S','I','S','-','V','1'};
+    crypto_auth_hmacsha256_update(&gs, kGenesisDomain, sizeof(kGenesisDomain));
+    crypto_auth_hmacsha256_final(&gs, sc.chain_genesis_secret);
+  }
 
   String dec_header = "{";
   dec_header += "\"audio_cipher\":\"aes-256-gcm-mixed-blocks-sha256-chain\",";
@@ -46,13 +56,17 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"encrypted_block_types\":[0,3],";
   dec_header += "\"plaintext_block_types\":[1,2],";
   dec_header += "\"signature_checkpoint_alg\":\"ed25519\",";
-  dec_header += "\"signature_checkpoint_domain\":\"AZT1SIG1||ref_seq_u32be||chain_v32\",";
+  dec_header += "\"signature_checkpoint_domain\":\"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)\",";
+  dec_header += "\"chain_genesis_secret_b64\":\"" + b64(sc.chain_genesis_secret, sizeof(sc.chain_genesis_secret)) + "\",";
+  dec_header += "\"block1_must_be_signature_ref_seq0\":true,";
   dec_header += "\"signature_checkpoint_min_interval\":" + String(sig_checkpoint_min_interval) + ",";
   dec_header += "\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 + "\",";
   dec_header += "\"device_sign_fingerprint_hex\":\"" + state.device_sign_fingerprint_hex + "\",";
   dec_header += "\"device_chip_id_hex\":\"" + state.device_chip_id_hex + "\",";
-  dec_header += "\"chain_alg\":\"sha256-link\",";
-  dec_header += "\"chain_root_mode\":\"first-record-hash\",";
+  dec_header += "\"chain_alg\":\"hmac-sha256-link\",";
+  dec_header += "\"chain_domain\":\"AZT1-CHAIN-V2\",";
+  dec_header += "\"chain_key_b64\":\"" + b64(sc.chain_key, sizeof(sc.chain_key)) + "\",";
+  dec_header += "\"chain_root_mode\":\"genesis-signature-block\",";
   dec_header += "\"chunk_record_format\":\"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32\",";
   dec_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   dec_header += "\"dropped_frames_block_body_format\":\"missed_frames_u16be\",";
@@ -61,8 +75,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"chain_verify_procedure\":[";
   dec_header += "\"For each chunk record read seq_u32be, block_type_u8, body_len_u32be, tag_len_u8, body, tag, chain_v32.\",";
   dec_header += "\"Let CORE = seq_u32be||block_type_u8||body_len_u32be||tag_len_u8||body||tag.\",";
-  dec_header += "\"If seq==1: V_calc = SHA256(\\\"AZT1-CHAIN-V1\\\"||CORE).\",";
-  dec_header += "\"If seq>1: V_calc = SHA256(\\\"AZT1-CHAIN-V1\\\"||V_prev||CORE).\",";
+  dec_header += "\"If seq==1: V_calc = HMAC_SHA256(chain_key, \\\"AZT1-CHAIN-V2\\\"||CORE).\",";
+  dec_header += "\"If seq>1: V_calc = HMAC_SHA256(chain_key, \\\"AZT1-CHAIN-V2\\\"||V_prev||CORE).\",";
   dec_header += "\"Require V_calc == chain_v32; then set V_prev = chain_v32.\",";
   dec_header += "\"For block_type in [0,3], derive nonce as audio_nonce_prefix_b64 (4 bytes) || seq_u32be || 0x00000000 and AES-GCM decrypt body||tag with aad=none. For block_type in [1,2], body is plaintext and tag_len must be 0.\"";
   dec_header += "],";
@@ -79,7 +93,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"block_type is in plaintext framing. block_type 0x00 and 0x03 bodies are AES-GCM encrypted.\",";
   dec_header += "\"block_type 0x01 and 0x02 bodies are plaintext by design for zero-knowledge verification and duration estimation.\",";
   dec_header += "\"block_type 0x01 means checkpoint signature block; body format is ref_seq_u32be|sig_ed25519_64.\",";
-  dec_header += "\"To verify block_type 0x01 signature: message = AZT1SIG1||ref_seq_u32be||chain_v32(ref_seq), then verify with device_sign_public_key_b64 using signature_checkpoint_alg.\",";
+  dec_header += "\"To verify block_type 0x01 signature: if ref_seq==0 then message = AZT1SIG0||chain_genesis_secret32; else message = AZT1SIG1||ref_seq_u32be||chain_v32(ref_seq). Verify with device_sign_public_key_b64 using signature_checkpoint_alg.\",";
+  dec_header += "\"Block seq=1 MUST be a signature block with ref_seq=0, anchoring the stream to encrypted chain_genesis_secret32.\",";
   dec_header += "\"A valid checkpoint signature means all records up to ref_seq are authenticated by device signing key; chain verification still applies to all records.\",";
   dec_header += "\"block_type 0x02 is dropped frame notice; block_body is missed_frames_u16be and means that many PCM frames were intentionally skipped due to network backpressure.\",";
   dec_header += "\"block_type 0x03 is telemetry snapshot; use telemetry_block_body_format to parse ring-buffer occupancy stats.\",";
@@ -161,14 +176,14 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"next_header_ciphertext_sha256_b64\":\"" + b64(enc_header_sha256, sizeof(enc_header_sha256)) + "\",";
   plain_header += "\"next_header_ciphertext_len\":" + String(static_cast<unsigned>(header_ct.size())) + ",";
   plain_header += "\"chunk_record_format\":\"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32\",";
-  plain_header += "\"chain_alg\":\"sha256-link\",";
-  plain_header += "\"chain_domain\":\"AZT1-CHAIN-V1\",";
-  plain_header += "\"chain_root_mode\":\"first-record-hash\",";
+  plain_header += "\"chain_alg\":\"hmac-sha256-link\",";
+  plain_header += "\"chain_domain\":\"AZT1-CHAIN-V2\",";
+  plain_header += "\"chain_root_mode\":\"genesis-signature-block\",";
   plain_header += "\"chain_record_bytes_format\":\"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag\",";
   plain_header += "\"chain_excludes_field\":\"chain_v32\",";
   plain_header += "\"chain_link_formula\":[";
-  plain_header += "\"For seq==1: chain_v32 = SHA256(chain_domain_bytes || record_bytes).\",";
-  plain_header += "\"For seq>1: chain_v32 = SHA256(chain_domain_bytes || prev_chain_v32 || record_bytes).\"";
+  plain_header += "\"For seq==1: chain_v32 = HMAC_SHA256(chain_key, chain_domain_bytes || record_bytes).\",";
+  plain_header += "\"For seq>1: chain_v32 = HMAC_SHA256(chain_key, chain_domain_bytes || prev_chain_v32 || record_bytes).\"";
   plain_header += "],";
   plain_header += "\"encrypted_block_types\":[0,3],";
   plain_header += "\"plaintext_block_types\":[1,2],";
@@ -176,11 +191,13 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   plain_header += "\"dropped_frames_block_body_format\":\"missed_frames_u16be\",";
   plain_header += "\"signature_checkpoint_alg\":\"ed25519\",";
-  plain_header += "\"signature_checkpoint_domain\":\"AZT1SIG1||ref_seq_u32be||chain_v32\",";
+  plain_header += "\"signature_checkpoint_domain\":\"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)\",";
+  plain_header += "\"block1_must_be_signature_ref_seq0\":true,";
   plain_header += "\"signature_verification_procedure\":[";
   plain_header += "\"For block_type=1 parse body as ref_seq_u32be|sig_ed25519_64.\",";
-  plain_header += "\"Find chain_v32(ref_seq) from prior records by sequence number.\",";
-  plain_header += "\"Build message bytes as AZT1SIG1||ref_seq_u32be||chain_v32(ref_seq).\",";
+  plain_header += "\"Require block seq=1 to be block_type=1 with ref_seq=0.\",";
+  plain_header += "\"If ref_seq==0, build message bytes as AZT1SIG0||chain_genesis_secret32 from decrypted inner header.\",";
+  plain_header += "\"If ref_seq>0, find chain_v32(ref_seq) from prior records by sequence number and build message bytes as AZT1SIG1||ref_seq_u32be||chain_v32(ref_seq).\",";
   plain_header += "\"Verify Ed25519 signature with trusted device signing public key selected by this_header_signing_key_fingerprint_hex.\"";
   plain_header += "],";
   plain_header += "\"pcm_blocks_are_single_frame\":true,";
@@ -212,6 +229,7 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"If N != 0xFFFF: next header is encrypted/ciphertext and exactly N raw bytes follow.\",";
   plain_header += "\"If N == 0xFFFF: next header is decrypted plaintext JSON (UTF-8) and is newline-terminated (read until LF / 0x0A).\",";
   plain_header += "\"Chunk stream checkpoint signatures use the same signing algorithm/key family as this_header_signature_alg and are selected via this_header_signing_key_fingerprint_hex trust lookup.\",";
+  plain_header += "\"Special rule: block seq=1 MUST be a signature block whose ref_seq=0. This block signs encrypted-only chain_genesis_secret32 and cannot be re-signed without inner-header decryption.\",";
   plain_header += "\"Use RSA private key to recover/decrypt encrypted header metadata when N != 0xFFFF.\",";
   plain_header += "\"Remaining bytes are chunk records: seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32.\",";
   plain_header += "\"Silently discard trailing partial/incomplete chunk records at end-of-file.\",";

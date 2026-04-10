@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include <sodium.h>
+
 #include "azt_crypto.h"
 
 namespace azt {
@@ -60,15 +62,15 @@ static bool encrypt_payload_and_chain(StreamCtx& sc,
   core.insert(core.end(), body.begin(), body.end());
   if (tag_len > 0) core.insert(core.end(), tag, tag + tag_len);
 
-  std::vector<uint8_t> hmsg;
-  hmsg.reserve(13 + 32 + core.size());
-  static const uint8_t kDomain[] = {'A','Z','T','1','-','C','H','A','I','N','-','V','1'};
-  hmsg.insert(hmsg.end(), kDomain, kDomain + sizeof(kDomain));
-  if (sc.seq > 1) hmsg.insert(hmsg.end(), sc.v_prev, sc.v_prev + 32);
-  hmsg.insert(hmsg.end(), core.begin(), core.end());
+  crypto_auth_hmacsha256_state hs;
+  crypto_auth_hmacsha256_init(&hs, sc.chain_key, sizeof(sc.chain_key));
+  static const uint8_t kDomain[] = {'A','Z','T','1','-','C','H','A','I','N','-','V','2'};
+  crypto_auth_hmacsha256_update(&hs, kDomain, sizeof(kDomain));
+  if (sc.seq > 1) crypto_auth_hmacsha256_update(&hs, sc.v_prev, 32);
+  crypto_auth_hmacsha256_update(&hs, core.data(), core.size());
 
   uint8_t v_new[32];
-  if (!sha256_bytes(hmsg.data(), hmsg.size(), v_new)) return false;
+  crypto_auth_hmacsha256_final(&hs, v_new);
 
   rec_out.reserve(core.size() + tag_len + 32);
   rec_out.insert(rec_out.end(), core.begin(), core.end());

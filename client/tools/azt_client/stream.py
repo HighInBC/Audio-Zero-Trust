@@ -150,9 +150,11 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             header_plaintext_hash_verified = True
 
     # Chain verification is over framed record bytes; can run without decrypt key.
-    chain_alg = str((dec or plain).get("chain_alg", "sha256-link"))
+    chain_alg = str((dec or plain).get("chain_alg", "hmac-sha256-link"))
     v_prev = None
     chain_key = _b64d(dec["chain_key_b64"]) if (dec is not None and "chain_key_b64" in dec) else None
+    chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None
+    require_block1_sig0 = bool((dec or plain).get("block1_must_be_signature_ref_seq0") is True)
 
     device_sign_pub = None
     if dec is not None and "device_sign_public_key_b64" in dec:
@@ -225,6 +227,9 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         record_seqs.append(seq)
         record_types.append(block_type)
 
+        if require_block1_sig0 and seq == 1 and block_type != 0x01:
+            raise ValueError("ERR_BLOCK1_MUST_BE_SIG")
+
         if chain_alg == "sha256-link":
             core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
             if seq == 1:
@@ -235,19 +240,25 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
                 v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
             if v_calc != v_cur:
                 raise ValueError("ERR_CHAIN")
-        else:
-            if chain_key is None or v_prev is None:
+        elif chain_alg == "hmac-sha256-link":
+            if chain_key is None:
                 raise ValueError("ERR_CHAIN_STATE")
             hm = hmac.HMAC(chain_key, hashes.SHA256())
+            hm.update(b"AZT1-CHAIN-V2")
+            if seq > 1:
+                if v_prev is None:
+                    raise ValueError("ERR_CHAIN_STATE")
+                hm.update(v_prev)
             hm.update(struct.pack(">I", seq))
             hm.update(bytes([block_type]))
             hm.update(struct.pack(">I", body_len))
             hm.update(bytes([tag_len]))
             hm.update(body)
             hm.update(tag)
-            hm.update(v_prev)
             if hm.finalize() != v_cur:
                 raise ValueError("ERR_CHAIN")
+        else:
+            raise ValueError("ERR_CHAIN_ALG")
         v_prev = v_cur
         seq_to_chain_v[seq] = v_cur
 
@@ -271,15 +282,28 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             pcm_blocks += 1
         elif block_type == 0x01:
             sig_blocks += 1
+            if require_block1_sig0 and seq == 1:
+                if len(block_body) < 68:
+                    raise ValueError("ERR_BLOCK1_SIG_FORMAT")
+                first_ref = struct.unpack(">I", block_body[:4])[0]
+                if first_ref != 0:
+                    raise ValueError("ERR_BLOCK1_SIG_REF")
             if len(block_body) >= 68:
                 ref_seq = struct.unpack(">I", block_body[:4])[0]
                 sig = block_body[4:68]
-                if device_sign_pub is not None and ref_seq in seq_to_chain_v:
-                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
-                    device_sign_pub.verify(sig, msg)
-                    sig_verified += 1
-                    if ref_seq > max_verified_ref_seq:
-                        max_verified_ref_seq = ref_seq
+                if device_sign_pub is not None:
+                    if ref_seq == 0:
+                        if chain_genesis_secret is None:
+                            raise ValueError("ERR_GENESIS_SECRET_MISSING")
+                        msg = b"AZT1SIG0" + chain_genesis_secret
+                        device_sign_pub.verify(sig, msg)
+                        sig_verified += 1
+                    elif ref_seq in seq_to_chain_v:
+                        msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                        device_sign_pub.verify(sig, msg)
+                        sig_verified += 1
+                        if ref_seq > max_verified_ref_seq:
+                            max_verified_ref_seq = ref_seq
         elif block_type == 0x02:
             dropped_notice_blocks += 1
             if len(block_body) >= 2:
@@ -491,9 +515,11 @@ def decode_azt1_stream_to_wav(
                 raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH")
             header_plaintext_hash_verified = True
 
-    chain_alg = str((dec or plain).get("chain_alg", "sha256-link"))
+    chain_alg = str((dec or plain).get("chain_alg", "hmac-sha256-link"))
     v_prev = None
     chain_key = _b64d(dec["chain_key_b64"]) if (dec is not None and "chain_key_b64" in dec) else None
+    chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None
+    require_block1_sig0 = bool((dec or plain).get("block1_must_be_signature_ref_seq0") is True)
 
     device_sign_pub = None
     if dec is not None and "device_sign_public_key_b64" in dec:
@@ -578,6 +604,9 @@ def decode_azt1_stream_to_wav(
 
         record_seqs.append(seq)
 
+        if require_block1_sig0 and seq == 1 and block_type != 0x01:
+            raise ValueError("ERR_BLOCK1_MUST_BE_SIG")
+
         if chain_alg == "sha256-link":
             core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
             if seq == 1:
@@ -588,19 +617,25 @@ def decode_azt1_stream_to_wav(
                 v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
             if v_calc != v_cur:
                 raise ValueError("ERR_CHAIN")
-        else:
-            if chain_key is None or v_prev is None:
+        elif chain_alg == "hmac-sha256-link":
+            if chain_key is None:
                 raise ValueError("ERR_CHAIN_STATE")
             hm = hmac.HMAC(chain_key, hashes.SHA256())
+            hm.update(b"AZT1-CHAIN-V2")
+            if seq > 1:
+                if v_prev is None:
+                    raise ValueError("ERR_CHAIN_STATE")
+                hm.update(v_prev)
             hm.update(struct.pack(">I", seq))
             hm.update(bytes([block_type]))
             hm.update(struct.pack(">I", body_len))
             hm.update(bytes([tag_len]))
             hm.update(body)
             hm.update(tag)
-            hm.update(v_prev)
             if hm.finalize() != v_cur:
                 raise ValueError("ERR_CHAIN")
+        else:
+            raise ValueError("ERR_CHAIN_ALG")
         v_prev = v_cur
         seq_to_chain_v[seq] = v_cur
 
@@ -634,15 +669,28 @@ def decode_azt1_stream_to_wav(
                 pcm_chunks.append((seq, bytes(chunk)))
         elif block_type == 0x01:
             sig_blocks += 1
+            if require_block1_sig0 and seq == 1:
+                if len(block_body) < 68:
+                    raise ValueError("ERR_BLOCK1_SIG_FORMAT")
+                first_ref = struct.unpack(">I", block_body[:4])[0]
+                if first_ref != 0:
+                    raise ValueError("ERR_BLOCK1_SIG_REF")
             if len(block_body) >= 68:
                 ref_seq = struct.unpack(">I", block_body[:4])[0]
                 sig = block_body[4:68]
-                if device_sign_pub is not None and ref_seq in seq_to_chain_v:
-                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
-                    device_sign_pub.verify(sig, msg)
-                    sig_verified += 1
-                    if ref_seq > max_verified_ref_seq:
-                        max_verified_ref_seq = ref_seq
+                if device_sign_pub is not None:
+                    if ref_seq == 0:
+                        if chain_genesis_secret is None:
+                            raise ValueError("ERR_GENESIS_SECRET_MISSING")
+                        msg = b"AZT1SIG0" + chain_genesis_secret
+                        device_sign_pub.verify(sig, msg)
+                        sig_verified += 1
+                    elif ref_seq in seq_to_chain_v:
+                        msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                        device_sign_pub.verify(sig, msg)
+                        sig_verified += 1
+                        if ref_seq > max_verified_ref_seq:
+                            max_verified_ref_seq = ref_seq
         elif block_type == 0x02:
             dropped_notice_blocks += 1
             if len(block_body) >= 2:
