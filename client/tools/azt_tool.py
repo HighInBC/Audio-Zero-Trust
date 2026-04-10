@@ -122,6 +122,18 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     if mdns_enabled and mdns_disabled:
         emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "cannot set both --mdns-enabled and --mdns-disabled"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
+
+    sh_auto_record = bool(getattr(args, "stream_header_auto_record", False))
+    sh_no_auto_record = bool(getattr(args, "stream_header_no_auto_record", False))
+    sh_auto_decode = bool(getattr(args, "stream_header_auto_decode", False))
+    sh_no_auto_decode = bool(getattr(args, "stream_header_no_auto_decode", False))
+
+    if sh_auto_record and sh_no_auto_record:
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "cannot set both --stream-header-auto-record and --stream-header-no-auto-record"}, as_json=bool(getattr(args, "as_json", False)))
+        return 1
+    if sh_auto_decode and sh_no_auto_decode:
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "cannot set both --stream-header-auto-decode and --stream-header-no-auto-decode"}, as_json=bool(getattr(args, "as_json", False)))
+        return 1
     if mdns_enabled or mdns_disabled or mdns_hostname:
         if not _is_valid_mdns_hostname(mdns_hostname):
             emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": f"invalid --mdns-hostname '{mdns_hostname}' (must match ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$)"}, as_json=bool(getattr(args, "as_json", False)))
@@ -133,6 +145,17 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
             pm["enabled"] = False
         if mdns_hostname:
             pm["hostname"] = mdns_hostname
+
+    if sh_auto_record or sh_no_auto_record or sh_auto_decode or sh_no_auto_decode:
+        ps = _ensure_obj(patch_obj, "stream_header_flags")
+        if sh_auto_record:
+            ps["auto_record"] = True
+        if sh_no_auto_record:
+            ps["auto_record"] = False
+        if sh_auto_decode:
+            ps["auto_decode"] = True
+        if sh_no_auto_decode:
+            ps["auto_decode"] = False
 
     device_label = (getattr(args, "device_label", "") or "").strip()
     if device_label:
@@ -221,7 +244,7 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
         patch_obj["audio"] = pa
 
     if not patch_obj:
-        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "provide --patch or patch flags (device/wifi/authorized listeners/time/mdns/listener-key/recorder-auth-key)"}, as_json=bool(getattr(args, "as_json", False)))
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "provide --patch or patch flags (device/wifi/authorized listeners/time/mdns/stream-header-flags/listener-key/recorder-auth-key)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
 
     if_version = int(args.if_version)
