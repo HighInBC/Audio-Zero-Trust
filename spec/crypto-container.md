@@ -65,17 +65,19 @@ Required keys used by current validators/generator:
 - `this_header_signature_domain` = `"this_header_json_utf8"`
 - `this_header_signing_key_fingerprint_alg` = `"sha256-raw-ed25519-pub"`
 - `this_header_signing_key_fingerprint_hex`
+- `this_header_signing_key_b64`
 - `device_certificate_serial` (string, optional but recommended when certified)
 - `device_certificate` (JSON object, optional; full signed certificate document as returned by `/api/v0/device/certificate`)
 - `stream_auth_nonce` (string; single-use stream challenge nonce bound to stream-start authorization)
 - `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
-- `chain_alg` = `"sha256-link"`
-- `chain_domain` = `"AZT1-CHAIN-V1"`
-- `chain_root_mode` = `"first-record-hash"`
+- `chain_alg` = `"hmac-sha256-link"`
+- `chain_domain` = `"AZT1-CHAIN-V2"`
+- `chain_root_mode` = `"genesis-signature-block"`
 - `encrypted_block_types` = `[0,3]`
 - `plaintext_block_types` = `[1,2]`
 - `signature_checkpoint_alg` = `"ed25519"`
-- `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32"`
+- `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)"`
+- `block1_must_be_signature_ref_seq0` = `true`
 - `pcm_blocks_are_single_frame` = `true`
 - `audio_frame_duration_ms` (number)
 - `estimated_frames_formula` = `"COUNT(block_type=0) + SUM(block_type=2.missed_frames_u16be)"`
@@ -114,11 +116,15 @@ Current profile expects:
 - `encrypted_block_types` = `[0,3]`
 - `plaintext_block_types` = `[1,2]`
 - `signature_checkpoint_alg` = `"ed25519"`
-- `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32"`
+- `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)"`
 - `device_sign_public_key_b64` (base64 Ed25519 pubkey, 32 bytes)
 - `device_sign_fingerprint_hex`
-- `chain_alg` = `"sha256-link"`
-- `chain_root_mode` = `"first-record-hash"`
+- `chain_alg` = `"hmac-sha256-link"`
+- `chain_domain` = `"AZT1-CHAIN-V2"`
+- `chain_key_b64` (base64, 32 bytes)
+- `chain_genesis_secret_b64` (base64, 32 bytes)
+- `block1_must_be_signature_ref_seq0` = `true`
+- `chain_root_mode` = `"genesis-signature-block"`
 - `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
 - `signature_block_body_format` = `"ref_seq_u32be|sig_ed25519_64"`
 - `dropped_frames_block_body_format` = `"missed_frames_u16be"`
@@ -140,12 +146,12 @@ Each chunk record:
 - `tag_len_u8`
 - `body` (`body_len` bytes)
 - `tag` (`tag_len` bytes)
-- `chain_v32` (32-byte SHA-256 link)
+- `chain_v32` (32-byte HMAC-SHA256 link)
 
-Chain rule (`sha256-link`):
+Chain rule (`hmac-sha256-link`):
 
-- `seq == 1`: `V = SHA256("AZT1-CHAIN-V1" || record_bytes)`
-- `seq > 1`: `V = SHA256("AZT1-CHAIN-V1" || prev_V || record_bytes)`
+- `seq == 1`: `V = HMAC_SHA256(chain_key, "AZT1-CHAIN-V2" || record_bytes)`
+- `seq > 1`: `V = HMAC_SHA256(chain_key, "AZT1-CHAIN-V2" || prev_V || record_bytes)`
 - `record_bytes = seq_u32be || block_type_u8 || body_len_u32be || tag_len_u8 || body || tag`
 
 `block_type` classes:
@@ -161,7 +167,14 @@ Encrypted block nonce:
 
 Signature block verification message:
 
-- `AZT1SIG1 || ref_seq_u32be || chain_v32(ref_seq)`
+- If `ref_seq == 0`: `AZT1SIG0 || chain_genesis_secret32`
+- If `ref_seq > 0`: `AZT1SIG1 || ref_seq_u32be || chain_v32(ref_seq)`
+
+Mandatory genesis anchor rule:
+
+- `seq == 1` MUST be `block_type == 0x01` (signature block)
+- block 1 MUST set `ref_seq == 0`
+- this signs encrypted-only genesis secret and prevents blind re-signing by actors without inner-header decrypt capability.
 
 ---
 
@@ -175,10 +188,11 @@ Signature block verification message:
 6. If `N != 0xFFFF`, verify ciphertext length/hash commitments from outer header.
 7. If private key provided, unwrap/decrypt next header and verify plaintext hash commitment.
 8. Parse chunk records to EOF (allow trailing partial bytes).
-9. Verify chain link per record (`sha256-link`).
-10. For encrypted block types `(0,3)`, enforce `tag_len=16` and decrypt when audio key is available.
-11. For plaintext block types `(1,2)`, enforce `tag_len=0`.
-12. For type `0x01`, verify Ed25519 checkpoint signatures when signing key is available.
+9. Verify chain link per record (`hmac-sha256-link`, domain `AZT1-CHAIN-V2`).
+10. Enforce genesis-anchor rule: first record must be signature block with `ref_seq=0`.
+11. For encrypted block types `(0,3)`, enforce `tag_len=16` and decrypt when audio key is available.
+12. For plaintext block types `(1,2)`, enforce `tag_len=0`.
+13. For type `0x01`, verify Ed25519 checkpoint signatures (`AZT1SIG0` for `ref_seq=0`, `AZT1SIG1` otherwise) when signing key is available.
 
 ---
 
