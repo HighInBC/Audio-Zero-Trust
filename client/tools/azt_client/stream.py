@@ -26,6 +26,37 @@ def _b64d(s: str) -> bytes:
     return base64.b64decode(s, validate=True)
 
 
+def _extract_auto_grants(plain: dict) -> dict:
+    cert_consumers: set[str] = set()
+    cert_doc = plain.get("device_certificate")
+    if isinstance(cert_doc, dict):
+        payload_b64 = cert_doc.get("certificate_payload_b64")
+        if isinstance(payload_b64, str) and payload_b64:
+            payload_raw = _b64d(payload_b64)
+            payload = json.loads(payload_raw.decode("utf-8"))
+            consumers = payload.get("authorized_consumers") or []
+            if isinstance(consumers, list):
+                for c in consumers:
+                    if isinstance(c, str):
+                        cert_consumers.add(c)
+
+    header_auto_record = bool(plain.get("stream_header_auto_record") is True)
+    header_auto_decode = bool(plain.get("stream_header_auto_decode") is True)
+
+    cert_auto_record = "auto-record" in cert_consumers
+    cert_auto_decode = "auto-decode" in cert_consumers
+
+    return {
+        "certificate_authorized_consumers": sorted(cert_consumers),
+        "header_auto_record": header_auto_record,
+        "header_auto_decode": header_auto_decode,
+        "certificate_auto_record": cert_auto_record,
+        "certificate_auto_decode": cert_auto_decode,
+        "effective_auto_record": cert_auto_record and header_auto_record,
+        "effective_auto_decode": cert_auto_decode and header_auto_decode,
+    }
+
+
 def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None = None) -> dict:
     priv = load_private_key_auto(admin_private_key_pem, purpose="stream private key") if admin_private_key_pem else None
 
@@ -323,6 +354,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     unsigned_tail_seconds = (unsigned_tail_frames * frame_duration_ms) / 1000.0 if frame_duration_ms > 0 else None
 
     dec_or_plain = (dec or plain)
+    auto_grants = _extract_auto_grants(plain)
     out = {
         "ok": True,
         "inner_header_mode": next_header_mode,
@@ -352,6 +384,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         "unsigned_tail_seconds": unsigned_tail_seconds,
         "bytes_total": len(data),
         "bytes_consumed": off,
+        **auto_grants,
     }
     if audio_key is not None and nonce_prefix is not None:
         out["pcm_bytes"] = pcm_bytes
@@ -475,6 +508,28 @@ def decode_azt1_stream_to_wav(
         outer_sig = _b64d(outer_sig_b64)
         device_sign_pub.verify(outer_sig, plain_line)
         header_sig_verified = True
+
+    cert_in_header = isinstance(plain.get("device_certificate"), dict)
+    if cert_in_header and dec is not None:
+        cert_doc = plain.get("device_certificate")
+        cert_payload_b64 = cert_doc.get("certificate_payload_b64")
+        if not isinstance(cert_payload_b64, str) or not cert_payload_b64:
+            raise ValueError("ERR_DEVICE_CERT_SCHEMA")
+        cert_payload_raw = _b64d(cert_payload_b64)
+        cert_payload = json.loads(cert_payload_raw.decode("utf-8"))
+        if cert_payload.get("device_sign_public_key_b64") != dec.get("device_sign_public_key_b64"):
+            raise ValueError("ERR_DEVICE_CERT_BINDING")
+        cert_fp = cert_payload.get("device_sign_fingerprint_hex")
+        if cert_fp is None:
+            cert_fp = cert_payload.get("device_sign_public_key_fingerprint_hex")
+        if cert_fp != dec.get("device_sign_fingerprint_hex"):
+            raise ValueError("ERR_DEVICE_CERT_BINDING")
+        if cert_payload.get("device_chip_id_hex") != plain.get("device_chip_id_hex"):
+            raise ValueError("ERR_DEVICE_CERT_BINDING")
+        header_cert_serial = plain.get("device_certificate_serial")
+        if isinstance(header_cert_serial, str) and header_cert_serial:
+            if cert_payload.get("certificate_serial") != header_cert_serial:
+                raise ValueError("ERR_DEVICE_CERT_SERIAL")
 
     audio_key = _b64d(dec["audio_key_b64"]) if dec is not None else None
     nonce_prefix = _b64d(dec["audio_nonce_prefix_b64"]) if dec is not None else None
@@ -656,6 +711,8 @@ def decode_azt1_stream_to_wav(
     unsigned_tail_frames = unsigned_tail_pcm_blocks + unsigned_tail_dropped_frames
     unsigned_tail_seconds = (unsigned_tail_frames * frame_duration_ms) / 1000.0 if frame_duration_ms > 0 else None
 
+    auto_grants = _extract_auto_grants(plain)
+
     warnings: list[str] = []
     if unsigned_tail_frames > 0:
         if unsigned_tail_seconds is not None:
@@ -712,4 +769,5 @@ def decode_azt1_stream_to_wav(
         "unsigned_tail_trimmed": unsigned_tail_trimmed and (unsigned_tail_frames > 0),
         "unsigned_tail_preserved": preserve_tail and (unsigned_tail_frames > 0),
         "messages": messages,
+        **auto_grants,
     }

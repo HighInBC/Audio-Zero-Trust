@@ -204,7 +204,9 @@ def main() -> int:
             if not isinstance(cert_payload, dict):
                 fail("ERR_HEADER_FIELD", "device_certificate payload must be json object")
             cert_dev_pub = cert_payload.get("device_sign_public_key_b64")
-            cert_dev_fp = cert_payload.get("device_sign_public_key_fingerprint_hex")
+            cert_dev_fp = cert_payload.get("device_sign_fingerprint_hex")
+            if cert_dev_fp is None:
+                cert_dev_fp = cert_payload.get("device_sign_public_key_fingerprint_hex")
             cert_chip = cert_payload.get("device_chip_id_hex")
             if cert_dev_pub != dec.get("device_sign_public_key_b64"):
                 fail("ERR_HEADER_FIELD", "device_certificate device_sign_public_key_b64 mismatch")
@@ -331,6 +333,22 @@ def main() -> int:
         estimated_frames = pcm_blocks + dropped_frames_total
         estimated_duration_seconds = (estimated_frames * frame_duration_ms) / 1000.0 if frame_duration_ms > 0 else None
 
+        cert_consumers = []
+        cert_doc2 = plain.get("device_certificate")
+        if isinstance(cert_doc2, dict):
+            payload_b64 = cert_doc2.get("certificate_payload_b64")
+            if isinstance(payload_b64, str) and payload_b64:
+                payload_raw = b64d(payload_b64, "device_certificate.certificate_payload_b64")
+                payload = json.loads(payload_raw.decode("utf-8"))
+                c = payload.get("authorized_consumers") or []
+                if isinstance(c, list):
+                    cert_consumers = [x for x in c if isinstance(x, str)]
+
+        header_auto_record = plain.get("stream_header_auto_record") is True
+        header_auto_decode = plain.get("stream_header_auto_decode") is True
+        cert_auto_record = "auto-record" in cert_consumers
+        cert_auto_decode = "auto-decode" in cert_consumers
+
         out = {
             "ok": True,
             "infile": args.infile,
@@ -347,6 +365,13 @@ def main() -> int:
             "bytes_total": len(data),
             "trailing_partial_bytes": trailing_partial_bytes,
             "bytes_consumed": consumed,
+            "certificate_authorized_consumers": cert_consumers,
+            "header_auto_record": header_auto_record,
+            "header_auto_decode": header_auto_decode,
+            "certificate_auto_record": cert_auto_record,
+            "certificate_auto_decode": cert_auto_decode,
+            "effective_auto_record": cert_auto_record and header_auto_record,
+            "effective_auto_decode": cert_auto_decode and header_auto_decode,
         }
         print(json.dumps(out, indent=2) if args.json else out)
         return 0

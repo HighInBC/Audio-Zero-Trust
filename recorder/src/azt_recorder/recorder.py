@@ -76,6 +76,34 @@ def _readline_limited(resp, max_len: int = 1 << 20) -> bytes:
     return line
 
 
+def _extract_cert_authorized_consumers_from_plain_header(plain: dict) -> set[str]:
+    cert_doc = plain.get("device_certificate")
+    if not isinstance(cert_doc, dict):
+        raise AuthorizationError("stream_header_device_certificate_missing")
+
+    payload_b64 = cert_doc.get("certificate_payload_b64")
+    if not isinstance(payload_b64, str) or not payload_b64:
+        raise AuthorizationError("stream_header_device_certificate_payload_missing")
+
+    try:
+        payload_raw = base64.b64decode(payload_b64)
+        payload = json.loads(payload_raw.decode("utf-8"))
+    except Exception as e:
+        raise AuthorizationError("stream_header_device_certificate_payload_invalid") from e
+
+    consumers = payload.get("authorized_consumers")
+    if not isinstance(consumers, list):
+        return set()
+
+    out: set[str] = set()
+    for item in consumers:
+        if isinstance(item, str):
+            tok = item.strip()
+            if tok:
+                out.add(tok)
+    return out
+
+
 def _preflight_stream_header(resp, expected_device_fp_hex: str) -> tuple[bytes, dict]:
     prefix = bytearray()
 
@@ -117,6 +145,14 @@ def _preflight_stream_header(resp, expected_device_fp_hex: str) -> tuple[bytes, 
         ed25519.Ed25519PublicKey.from_public_bytes(pub_raw).verify(sig_raw, header_raw)
     except Exception as e:
         raise AuthorizationError("stream_header_signature_invalid") from e
+
+    cert_consumers = _extract_cert_authorized_consumers_from_plain_header(plain)
+    cert_auto_record = "auto-record" in cert_consumers
+    header_auto_record = bool(plain.get("stream_header_auto_record") is True)
+    if not cert_auto_record:
+        raise AuthorizationError("stream_header_cert_missing_auto_record")
+    if not header_auto_record:
+        raise AuthorizationError("stream_header_missing_auto_record")
 
     len_bytes = resp.read(2)
     if len(len_bytes) != 2:

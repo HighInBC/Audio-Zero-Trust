@@ -608,6 +608,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   bool new_mdns_enabled = state.mdns_enabled;
   String new_mdns_hostname = state.mdns_hostname;
+  bool new_stream_header_auto_record = state.stream_header_auto_record;
+  bool new_stream_header_auto_decode = state.stream_header_auto_decode;
   uint8_t new_audio_preamp_gain = state.audio_preamp_gain;
   uint8_t new_audio_adc_gain = state.audio_adc_gain;
   JsonVariant mdns = doc["mdns"];
@@ -652,6 +654,21 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
         return r;
       }
       new_audio_adc_gain = static_cast<uint8_t>(v);
+    }
+  }
+
+  JsonVariant shf = doc["stream_header_flags"];
+  if (!shf.isNull()) {
+    if (!shf.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid stream_header_flags object\"}";
+      return r;
+    }
+    if (!shf["auto_record"].isNull()) {
+      new_stream_header_auto_record = shf["auto_record"].as<bool>();
+    }
+    if (!shf["auto_decode"].isNull()) {
+      new_stream_header_auto_decode = shf["auto_decode"].as<bool>();
     }
   }
 
@@ -779,6 +796,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
     state.audio_preamp_gain = new_audio_preamp_gain;
     state.audio_adc_gain = new_audio_adc_gain;
+    state.stream_header_auto_record = new_stream_header_auto_record;
+    state.stream_header_auto_decode = new_stream_header_auto_decode;
     if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_recorder_auth_pub, new_recorder_auth_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
       r.code = 500;
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
@@ -887,6 +906,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
 
   state.audio_preamp_gain = new_audio_preamp_gain;
   state.audio_adc_gain = new_audio_adc_gain;
+  state.stream_header_auto_record = new_stream_header_auto_record;
+  state.stream_header_auto_decode = new_stream_header_auto_decode;
   if (!save_config_state(state, new_admin_pem, new_admin_fp, new_listener_pem, new_listener_fp, new_recorder_auth_pub, new_recorder_auth_fp, new_device_label, new_wifi_mode, new_wifi_ssid, new_wifi_pass, new_wifi_ap_ssid, new_wifi_ap_pass, true, auth_ips_csv, time_servers_csv, new_mdns_enabled, new_mdns_hostname)) {
     r.code = 500;
     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
@@ -1047,6 +1068,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   String time_servers_csv = state.time_servers_csv;
   bool new_mdns_enabled = state.mdns_enabled;
   String new_mdns_hostname = state.mdns_hostname;
+  bool new_stream_header_auto_record = state.stream_header_auto_record;
+  bool new_stream_header_auto_decode = state.stream_header_auto_decode;
   uint8_t new_audio_preamp_gain = state.audio_preamp_gain;
   uint8_t new_audio_adc_gain = state.audio_adc_gain;
 
@@ -1131,6 +1154,21 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     }
   }
 
+  if (!patch["stream_header_flags"].isNull()) {
+    JsonVariant pshf = patch["stream_header_flags"];
+    if (!pshf.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid stream_header_flags object\"}";
+      return r;
+    }
+    if (!pshf["auto_record"].isNull()) {
+      new_stream_header_auto_record = pshf["auto_record"].as<bool>();
+    }
+    if (!pshf["auto_decode"].isNull()) {
+      new_stream_header_auto_decode = pshf["auto_decode"].as<bool>();
+    }
+  }
+
   if (!patch["mdns"].isNull()) {
     JsonVariant pm = patch["mdns"];
     if (!pm.is<JsonObject>()) {
@@ -1151,6 +1189,8 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
 
   state.audio_preamp_gain = new_audio_preamp_gain;
   state.audio_adc_gain = new_audio_adc_gain;
+  state.stream_header_auto_record = new_stream_header_auto_record;
+  state.stream_header_auto_decode = new_stream_header_auto_decode;
   if (!save_config_state(state,
                          state.admin_pubkey_pem,
                          state.admin_fingerprint_hex,
@@ -1961,6 +2001,8 @@ HttpDispatchResult dispatch_request(const String& method,
              ",\"recorder_auth_key_configured\":" + String(state.recorder_auth_pubkey_b64.length() > 0 && state.recorder_auth_fingerprint_hex.length() == 64 ? "true" : "false") +
              ",\"recorder_auth_public_key_b64\":" + json_quote(state.recorder_auth_pubkey_b64) +
              ",\"recorder_auth_fingerprint_hex\":\"" + state.recorder_auth_fingerprint_hex + "\"" +
+             ",\"stream_header_auto_record\":" + String(state.stream_header_auto_record ? "true" : "false") +
+             ",\"stream_header_auto_decode\":" + String(state.stream_header_auto_decode ? "true" : "false") +
              ",\"device_sign_alg\":\"ed25519\"" +
              ",\"firmware_build_number\":\"" + String(AZT_STR(AZT_BUILD_NUMBER)) +
              "\",\"firmware_build_id\":\"" + String(AZT_STR(AZT_BUILD_ID)) +

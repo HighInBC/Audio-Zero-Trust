@@ -148,6 +148,8 @@ static bool ensure_device_keypair(AppState& state) {
   state.discovery_announcement_json = "";
   state.tls_certificate_serial = "";
   state.tls_san_hosts_csv = "";
+  state.stream_header_auto_record = true;
+  state.stream_header_auto_decode = true;
   state.tls_server_cert_configured = false;
   state.tls_server_key_configured = false;
   state.tls_ca_cert_configured = false;
@@ -229,6 +231,8 @@ void load_config_state(AppState& state) {
   state.time_servers_csv = g_prefs.getString("time_srv", "");
   state.mdns_enabled = g_prefs.getBool("mdns_en", false);
   state.mdns_hostname = g_prefs.getString("mdns_host", "");
+  state.stream_header_auto_record = g_prefs.getBool("hdr_auto_rec", true);
+  state.stream_header_auto_decode = g_prefs.getBool("hdr_auto_dec", true);
   state.device_certificate_serial = g_prefs.getString("dev_cert_sn", "");
   state.device_certificate_json = "";
   state.discovery_announcement_json = g_prefs.getString("disc_json", "");
@@ -361,6 +365,8 @@ bool save_config_state(AppState& state,
     g_prefs.remove("time_srv");
   }
   ok = ok && g_prefs.putBool("mdns_en", mdns_enabled);
+  ok = ok && g_prefs.putBool("hdr_auto_rec", state.stream_header_auto_record);
+  ok = ok && g_prefs.putBool("hdr_auto_dec", state.stream_header_auto_decode);
   ok = ok && g_prefs.putUChar("aud_micg", state.audio_preamp_gain);
   ok = ok && g_prefs.putUChar("aud_adcg", state.audio_adc_gain);
   if (mdns_hostname.length() > 0) {
@@ -447,6 +453,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   g_prefs.remove("time_srv");
   g_prefs.remove("mdns_en");
   g_prefs.remove("mdns_host");
+  g_prefs.remove("hdr_auto_rec");
+  g_prefs.remove("hdr_auto_dec");
   g_prefs.remove("device_cert");
   g_prefs.remove("dev_cert_sn");
   g_prefs.remove("disc_json");
@@ -485,6 +493,8 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.discovery_announcement_json = "";
   state.tls_certificate_serial = "";
   state.tls_san_hosts_csv = "";
+  state.stream_header_auto_record = true;
+  state.stream_header_auto_decode = true;
   state.tls_server_cert_configured = false;
   state.tls_server_key_configured = false;
   state.tls_ca_cert_configured = false;

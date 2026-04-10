@@ -143,12 +143,19 @@ bool build_header_prefix(StreamCtx& sc,
   if (state.device_certificate_json.length() > 0) {
     plain_header += "\"device_certificate\":" + state.device_certificate_json + ",";
   }
+  if (state.stream_header_auto_record) {
+    plain_header += "\"stream_header_auto_record\":true,";
+  }
+  if (state.stream_header_auto_decode) {
+    plain_header += "\"stream_header_auto_decode\":true,";
+  }
   plain_header += "\"certificate_verification_procedure\":[";
   plain_header += "\"If device_certificate is present, parse certificate_payload_b64 and signature_b64.\",";
   plain_header += "\"Verify certificate signature with trusted admin signing key using certificate.signature_algorithm.\",";
   plain_header += "\"Require certificate payload device_sign_public_key_b64 to equal next-header device_sign_public_key_b64.\",";
   plain_header += "\"Require certificate payload device_sign_fingerprint_hex to equal next-header device_sign_fingerprint_hex.\",";
   plain_header += "\"Require certificate payload device_chip_id_hex to equal outer header device_chip_id_hex.\",";
+  plain_header += "\"If stream_header_auto_record/stream_header_auto_decode are present, treat them as per-recording grants that must be combined with certificate authorized_consumers (logical AND).\",";
   plain_header += "\"If device_certificate_serial is present in outer header, require it equals certificate payload certificate_serial.\"";
   plain_header += "],";
   plain_header += "\"next_header_ciphertext_sha256_b64\":\"" + b64(enc_header_sha256, sizeof(enc_header_sha256)) + "\",";

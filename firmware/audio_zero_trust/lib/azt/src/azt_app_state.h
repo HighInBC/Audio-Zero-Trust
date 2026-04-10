@@ -28,6 +28,8 @@ struct AppState {
   String device_certificate_serial;
   String device_certificate_json;
   String discovery_announcement_json;
+  bool stream_header_auto_record = true;
+  bool stream_header_auto_decode = true;
 
   // TLS server certificate state (certificate material is stored in prefs).
   String tls_certificate_serial;
