@@ -181,14 +181,9 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
                 setattr(args, "mdns_hostname", expanded)
 
     if command == "config-patch":
-        # For config-patch, only inherit local operator resources (keys/paths).
-        # Do NOT inherit device-setting defaults (mdns/time/auth IPs/wifi/etc).
-        if "recorder_key_path" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
-            _set_if_unset(args, "recorder_auth_key_path", str(conf_defaults["recorder_key_path"]))
-        elif "recorder_auth_creds_dir" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
-            _set_if_unset(args, "recorder_auth_key_path", str(Path(str(conf_defaults["recorder_auth_creds_dir"])) / "private_key.pem"))
-        elif "admin_key_path" in conf_defaults and _is_unset(args, "recorder_auth_key_path"):
-            _set_if_unset(args, "recorder_auth_key_path", str(conf_defaults["admin_key_path"]))
+        # For config-patch, do not implicitly set recorder_auth_key_path from defaults.
+        # recorder_auth_key should be opt-in only via explicit --recorder-auth-key.
+        pass
 
     if command == "ota-bundle-create":
         for ck, an in [
