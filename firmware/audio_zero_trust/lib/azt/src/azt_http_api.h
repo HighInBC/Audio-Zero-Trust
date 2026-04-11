@@ -19,7 +19,12 @@ struct HttpDispatchResult {
   bool reboot_after_response = false;
 };
 
-bool parse_wifi_values(JsonDocument& doc, String& ssid, String& pass);
+bool parse_wifi_values(JsonDocument& doc,
+                       String& mode,
+                       String& ssid,
+                       String& pass,
+                       String& ap_ssid,
+                       String& ap_pass);
 bool parse_header_key_values(JsonDocument& doc, String& admin_pem, String& admin_fp);
 
 bool parse_request_line(const String& req, String& method, String& path);
@@ -50,8 +55,6 @@ bool ota_stream_read_failed(int n_read);
 bool ota_update_write_mismatch(size_t wrote, int expected);
 bool ota_begin_failed(bool begin_ok);
 bool ota_sha_mismatch(const String& got_sha, const String& expected_sha);
-bool ota_end_failed(bool end_ok);
-bool ota_should_abort_on_error(bool has_error);
 
 void handle_client(WiFiClient& client, AppState& state);
 void handle_client_api_only(WiFiClient& client, AppState& state);

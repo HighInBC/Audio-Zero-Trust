@@ -163,13 +163,7 @@ bool test_ota_update_flow_error_helpers(Context&) {
   if (azt::ota_begin_failed(true)) return false;
 
   if (!azt::ota_sha_mismatch("aa", "bb")) return false;
-  if (azt::ota_sha_mismatch("cc", "cc")) return false;
-
-  if (!azt::ota_end_failed(false)) return false;
-  if (azt::ota_end_failed(true)) return false;
-
-  if (!azt::ota_should_abort_on_error(true)) return false;
-  return !azt::ota_should_abort_on_error(false);
+  return !azt::ota_sha_mismatch("cc", "cc");
 }
 
 bool test_dispatch_request_basic_routes(Context&) {
@@ -204,27 +198,32 @@ bool test_dispatch_request_basic_routes(Context&) {
 
 bool test_parse_wifi_values(Context&) {
   JsonDocument doc_ok;
-  deserializeJson(doc_ok, "{\"wifi\":{\"ssid\":\"A\",\"password\":\"B\"}}");
-  String ssid, pass;
-  if (!azt::parse_wifi_values(doc_ok, ssid, pass)) return false;
-  if (ssid != "A" || pass != "B") return false;
+  deserializeJson(doc_ok, "{\"wifi\":{\"mode\":\"sta\",\"ssid\":\"A\",\"password\":\"B\"}}");
+  String mode, ssid, pass, ap_ssid, ap_pass;
+  if (!azt::parse_wifi_values(doc_ok, mode, ssid, pass, ap_ssid, ap_pass)) return false;
+  if (mode != "sta" || ssid != "A" || pass != "B") return false;
 
   JsonDocument doc_bad1;
   deserializeJson(doc_bad1, "{}");
-  if (azt::parse_wifi_values(doc_bad1, ssid, pass)) return false;
+  if (azt::parse_wifi_values(doc_bad1, mode, ssid, pass, ap_ssid, ap_pass)) return false;
 
   JsonDocument doc_bad2;
-  deserializeJson(doc_bad2, "{\"wifi\":{\"ssid\":\"\",\"password\":\"x\"}}");
-  if (azt::parse_wifi_values(doc_bad2, ssid, pass)) return false;
+  deserializeJson(doc_bad2, "{\"wifi\":{\"mode\":\"sta\",\"ssid\":\"\",\"password\":\"x\"}}");
+  if (azt::parse_wifi_values(doc_bad2, mode, ssid, pass, ap_ssid, ap_pass)) return false;
 
   JsonDocument doc_bad3;
   deserializeJson(doc_bad3, "{\"wifi\":\"oops\"}");
-  if (azt::parse_wifi_values(doc_bad3, ssid, pass)) return false;
+  if (azt::parse_wifi_values(doc_bad3, mode, ssid, pass, ap_ssid, ap_pass)) return false;
 
   JsonDocument doc_spaces;
-  deserializeJson(doc_spaces, "{\"wifi\":{\"ssid\":\"  A  \",\"password\":\"  B  \"}}");
-  if (!azt::parse_wifi_values(doc_spaces, ssid, pass)) return false;
+  deserializeJson(doc_spaces, "{\"wifi\":{\"mode\":\"sta\",\"ssid\":\"  A  \",\"password\":\"  B  \"}}");
+  if (!azt::parse_wifi_values(doc_spaces, mode, ssid, pass, ap_ssid, ap_pass)) return false;
   if (ssid != "  A  " || pass != "  B  ") return false;
+
+  JsonDocument doc_ap;
+  deserializeJson(doc_ap, "{\"wifi\":{\"mode\":\"ap\",\"ap_ssid\":\"Hotspot\",\"ap_password\":\"password8\"}}");
+  if (!azt::parse_wifi_values(doc_ap, mode, ssid, pass, ap_ssid, ap_pass)) return false;
+  if (mode != "ap" || ap_ssid != "Hotspot" || ap_pass != "password8") return false;
 
   return true;
 }
