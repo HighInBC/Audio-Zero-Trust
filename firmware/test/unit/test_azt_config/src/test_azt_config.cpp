@@ -106,7 +106,7 @@ bool test_config_save_load_roundtrip(Context& ctx) {
   if (!test_admin_pub_b64_and_fp(admin_pub_b64, fp)) return false;
 
   azt::AppState st;
-  bool ok = azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "ssid-test", "pass-test", true);
+  bool ok = azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "sta", "ssid-test", "pass-test", "", "", true);
   if (!ok) return false;
 
   azt::AppState loaded;
@@ -121,12 +121,12 @@ bool test_config_signed_flag_transition(Context& ctx) {
   if (!test_admin_pub_b64_and_fp(admin_pub_b64, fp)) return false;
 
   azt::AppState st;
-  if (!azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "ssid-a", "pass-a", false)) return false;
+  if (!azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "sta", "ssid-a", "pass-a", "", "", false)) return false;
   azt::AppState l1;
   azt::load_config_state(l1);
   if (!l1.managed || l1.signed_config_ready) return false;
 
-  if (!azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "ssid-a", "pass-a", true)) return false;
+  if (!azt::save_config_state(st, admin_pub_b64, fp, "TestDevice", "sta", "ssid-a", "pass-a", "", "", true)) return false;
   azt::AppState l2;
   azt::load_config_state(l2);
   return l2.managed && l2.signed_config_ready;
@@ -143,7 +143,7 @@ bool test_config_boot_cert_verify_valid(Context&) {
 
   azt::AppState st;
   if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
-                              "TestDevice", "ssid-cert", "pass-cert", true)) return false;
+                              "TestDevice", "sta", "ssid-cert", "pass-cert", "", "", true)) return false;
 
   if (!write_test_device_certificate(current.device_sign_public_key_b64,
                                      current.device_sign_fingerprint_hex,
@@ -246,10 +246,7 @@ bool test_save_config_state_legacy_overload_sets_listener_from_admin(Context&) {
   if (!azt::save_config_state(st,
                               admin_pub_b64,
                               admin_fp,
-                              "LegacySave",
-                              "ssid-legacy",
-                              "pass-legacy",
-                              true)) {
+                              "LegacySave", "sta", "ssid-legacy", "pass-legacy", "", "", true)) {
     return false;
   }
 
@@ -267,7 +264,7 @@ bool test_reset_managed_preserves_device_keys(Context&) {
 
   azt::AppState st;
   if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
-                              "ResetDevice", "ssid-r", "pass-r", true)) return false;
+                              "ResetDevice", "sta", "ssid-r", "pass-r", "", "", true)) return false;
 
   if (!azt::reset_managed_config_preserve_device_keys(st)) return false;
 
@@ -320,7 +317,7 @@ bool test_tampered_cert_signature_is_cleared_on_load(Context&) {
 
   azt::AppState st;
   if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
-                              "TestDevice", "ssid-cert", "pass-cert", true)) return false;
+                              "TestDevice", "sta", "ssid-cert", "pass-cert", "", "", true)) return false;
 
   if (!write_test_device_certificate(current.device_sign_public_key_b64,
                                      current.device_sign_fingerprint_hex,
@@ -357,7 +354,7 @@ bool test_cert_device_fp_mismatch_is_cleared_on_load(Context&) {
 
   azt::AppState st;
   if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
-                              "TestDevice", "ssid-cert", "pass-cert", true)) return false;
+                              "TestDevice", "sta", "ssid-cert", "pass-cert", "", "", true)) return false;
 
   if (!write_test_device_certificate(current.device_sign_public_key_b64,
                                      current.device_sign_fingerprint_hex,
@@ -392,7 +389,7 @@ bool test_cert_admin_fp_mismatch_is_cleared_on_load(Context&) {
 
   azt::AppState st;
   if (!azt::save_config_state(st, admin_pub_b64, admin_fp,
-                              "TestDevice", "ssid-cert", "pass-cert", true)) return false;
+                              "TestDevice", "sta", "ssid-cert", "pass-cert", "", "", true)) return false;
 
   // Use a different admin fingerprint in cert payload to trigger mismatch.
   String bad_admin_fp = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
