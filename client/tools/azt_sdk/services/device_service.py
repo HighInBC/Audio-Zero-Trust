@@ -22,6 +22,10 @@ from tools.provision_unit import detect_device_ip_from_serial
 from tools.azt_sdk.services.url_service import base_url
 
 
+def _api_scheme() -> str:
+    return (os.getenv("AZT_SCHEME", "https") or "https").strip().lower()
+
+
 def _error_detail(*, where: str, exc: Exception, url: str | None = None, context: dict | None = None) -> dict:
     out = {
         "where": where,
@@ -53,13 +57,13 @@ def _get_json_safe(*, url: str, timeout: int, where: str, error: str) -> dict:
 
 
 def _state_get_v0(*, host: str, port: int, timeout: int) -> dict:
-    b = base_url(host=host, port=port, scheme="https")
+    b = base_url(host=host, port=port, scheme=_api_scheme())
     url = f"{b}/api/v0/config/state"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v0", error="STATE_GET_V0_FAILED")
 
 
 def _state_get_v1_legacy(*, host: str, port: int, timeout: int) -> dict:
-    b = base_url(host=host, port=port, scheme="https")
+    b = base_url(host=host, port=port, scheme=_api_scheme())
     url = f"{b}/api/v1/config/state"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.state_get.v1_legacy", error="STATE_GET_V1_LEGACY_FAILED")
 
@@ -89,19 +93,19 @@ def state_get(*, host: str, port: int, timeout: int) -> dict:
 
 
 def attestation_get(*, host: str, port: int, timeout: int, nonce: str) -> dict:
-    b = base_url(host=host, port=port, scheme="https")
+    b = base_url(host=host, port=port, scheme=_api_scheme())
     url = f"{b}/api/v0/device/attestation?nonce={quote(nonce, safe='')}"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.attestation_get", error="ATTESTATION_GET_FAILED")
 
 
 def certificate_get(*, host: str, port: int, timeout: int) -> dict:
-    b = base_url(host=host, port=port, scheme="https")
+    b = base_url(host=host, port=port, scheme=_api_scheme())
     url = f"{b}/api/v0/device/certificate"
     return _get_json_safe(url=url, timeout=timeout, where="device_service.certificate_get", error="CERTIFICATE_GET_FAILED")
 
 
 def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> dict:
-    b = base_url(host=host, port=port, scheme="https")
+    b = base_url(host=host, port=port, scheme=_api_scheme())
     url = f"{b}/api/v0/device/certificate"
     try:
         return http_json("POST", url, payload, timeout=timeout)
@@ -120,7 +124,7 @@ def certificate_post(*, host: str, port: int, timeout: int, payload: dict) -> di
 
 
 def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
-    b = base_url(host=host, port=port, scheme="https")
+    b = base_url(host=host, port=port, scheme=_api_scheme())
     challenge_url = f"{b}/api/v0/device/reboot/challenge"
     ch = _get_json_safe(url=challenge_url, timeout=timeout, where="device_service.reboot_device.challenge", error="REBOOT_CHALLENGE_REQUEST_FAILED")
     if not ch.get("ok"):
@@ -168,7 +172,7 @@ def reboot_device(*, host: str, port: int, timeout: int, key_path: str) -> dict:
 
 
 def signing_key_check(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme="https")
+    b = base_url(host=host, port=port, scheme=_api_scheme())
     pem_url = f"{b}/api/v0/device/signing-public-key.pem"
     alias_url = f"{b}/api/v0/device/signing-public-key"
     try:
@@ -294,7 +298,8 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
 
 
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
-    b = base_url(host=host, port=port, scheme="https")
+    api_b = base_url(host=host, port=port, scheme=_api_scheme())
+    stream_b = base_url(host=host, port=8081, scheme="http")
     total = 0
     import time
     from pathlib import Path
@@ -314,38 +319,43 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                 "detail": _error_detail(where="device_service.stream_read.key", exc=e),
             }
 
-    # Stream freshness challenge (required by firmware).
-    try:
-        challenge = get_json(f"{api_b}/api/v0/device/stream/challenge", timeout=timeout)
-    except Exception as e:
-        return False, {
-            "error": "STREAM_CHALLENGE_FAILED",
-            "detail": _error_detail(where="device_service.stream_read.challenge", exc=e, url=f"{api_b}/api/v0/device/stream/challenge"),
-        }
-    nonce = str((challenge or {}).get("nonce") or "").strip()
-    if not nonce:
-        return False, {"error": "STREAM_CHALLENGE_FAILED", "detail": "missing nonce"}
-
-    params = {"nonce": nonce}
-    if bool((challenge or {}).get("recorder_auth_required")):
-        if not key_path:
-            return False, {"error": "STREAM_AUTH_KEY_REQUIRED", "detail": "device requires recorder auth signature"}
+    params: dict[str, str] = {}
+    # Probe mode remains backwards-compatible with plain stream reads.
+    if not probe:
+        # Stream freshness challenge (required by firmware).
         try:
-            priv = load_private_key_auto(Path(str(key_path)), purpose=str(key_path))
-            if not isinstance(priv, ed25519.Ed25519PrivateKey):
-                return False, {"error": "STREAM_AUTH_KEY", "detail": "recorder auth key must be Ed25519 private key"}
-            signer_fp = ed25519_fp_hex_from_private_key(Path(str(key_path)))
-            device_fp = str((challenge or {}).get("device_sign_fingerprint_hex") or "").strip().lower()
-            msg = f"stream:{nonce}:{device_fp}".encode("utf-8")
-            sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
-            params.update({"sig_alg": "ed25519", "sig": sig_b64, "signer_fp": signer_fp})
+            challenge = get_json(f"{api_b}/api/v0/device/stream/challenge", timeout=timeout)
         except Exception as e:
             return False, {
-                "error": "STREAM_AUTH_KEY",
-                "detail": _error_detail(where="device_service.stream_read.auth", exc=e),
+                "error": "STREAM_CHALLENGE_FAILED",
+                "detail": _error_detail(where="device_service.stream_read.challenge", exc=e, url=f"{api_b}/api/v0/device/stream/challenge"),
             }
+        nonce = str((challenge or {}).get("nonce") or "").strip()
+        if not nonce:
+            return False, {"error": "STREAM_CHALLENGE_FAILED", "detail": "missing nonce"}
 
-    url = f"{stream_b}/stream?{urlencode(params)}"
+        params["nonce"] = nonce
+        if bool((challenge or {}).get("recorder_auth_required")):
+            if not key_path:
+                return False, {"error": "STREAM_AUTH_KEY_REQUIRED", "detail": "device requires recorder auth signature"}
+            try:
+                priv = load_private_key_auto(Path(str(key_path)), purpose=str(key_path))
+                if not isinstance(priv, ed25519.Ed25519PrivateKey):
+                    return False, {"error": "STREAM_AUTH_KEY", "detail": "recorder auth key must be Ed25519 private key"}
+                signer_fp = ed25519_fp_hex_from_private_key(Path(str(key_path)))
+                device_fp = str((challenge or {}).get("device_sign_fingerprint_hex") or "").strip().lower()
+                msg = f"stream:{nonce}:{device_fp}".encode("utf-8")
+                sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
+                params.update({"sig_alg": "ed25519", "sig": sig_b64, "signer_fp": signer_fp})
+            except Exception as e:
+                return False, {
+                    "error": "STREAM_AUTH_KEY",
+                    "detail": _error_detail(where="device_service.stream_read.auth", exc=e),
+                }
+
+    url = f"{stream_b}/stream"
+    if params:
+        url = f"{url}?{urlencode(params)}"
 
     out_file = None
     resolved_out = ""

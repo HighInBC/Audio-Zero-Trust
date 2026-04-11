@@ -58,7 +58,7 @@ def configure_device(
     *,
     admin_creds_dir: str,
     listener_creds_dir: str | None,
-    recorder_auth_creds_dir: str | None,
+    recorder_auth_creds_dir: str | None = None,
     identity: str,
     wifi_ssid: str,
     wifi_password: str,
