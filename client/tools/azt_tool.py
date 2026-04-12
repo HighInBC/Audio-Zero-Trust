@@ -9,6 +9,8 @@ import re
 import sys
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+
 CLIENT_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(CLIENT_ROOT) not in sys.path:
@@ -192,7 +194,30 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
 
     listener_key_pem_path = (getattr(args, "listener_key_pem", "") or "").strip()
     if listener_key_pem_path:
-        patch_obj["listener_key"] = {"public_key_pem": Path(listener_key_pem_path).read_text()}
+        listener_pub_pem = Path(listener_key_pem_path).read_text()
+        try:
+            listener_pub = serialization.load_pem_public_key(listener_pub_pem.encode("utf-8"))
+            listener_pub_der = listener_pub.public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            listener_fp_hex = hashlib.sha256(listener_pub_der).hexdigest()
+        except Exception:
+            emit_envelope(
+                command="config-patch",
+                ok=False,
+                error="CONFIG_PATCH_ARGS",
+                payload={"detail": f"invalid --listener-key-pem: {listener_key_pem_path}"},
+                as_json=bool(getattr(args, "as_json", False)),
+            )
+            return 1
+
+        patch_obj["listener_key"] = {
+            "alg": "rsa-oaep-sha256",
+            "public_key_pem": listener_pub_pem,
+            "fingerprint_alg": "sha256-spki-der",
+            "fingerprint_hex": listener_fp_hex,
+        }
 
     recorder_auth_key_path = (getattr(args, "recorder_auth_key_path", "") or "").strip()
     if recorder_auth_key_path:
