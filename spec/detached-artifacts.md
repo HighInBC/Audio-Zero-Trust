@@ -47,6 +47,9 @@ Current exporter emits:
 - `payload_offset_bytes` (integer, required)
 - `payload_len_bytes` (integer, required)
 - `payload_sha256_hex` (string, required; SHA-256 over remaining payload bytes)
+- `detached_decode_certificate_mode` (string, required; `"auto"|"always"|"none"`)
+- `header_effective_auto_decode` (boolean, required)
+- `detached_decode_certificate_attached` (boolean, required)
 
 Mode-specific:
 
@@ -55,7 +58,52 @@ Mode-specific:
 - if `next_header_mode == "plaintext"`:
   - `next_header_plaintext_json_utf8` (string, required)
 
-### 2.3 `original_base_name` derivation
+Conditional:
+
+- if `detached_decode_certificate_attached == true`:
+  - `detached_decode_certificate` (object, required)
+
+### 2.3 Optional detached decode certificate object
+
+When attached, `detached_decode_certificate` has:
+
+- `signature_algorithm` = `"ed25519"`
+- `signer_fingerprint_hex` (string)
+- `certificate_payload_b64` (string; base64 of canonical JSON payload)
+- `signature_b64` (string; Ed25519 signature over raw `certificate_payload_b64` decoded bytes)
+
+Decoded certificate payload JSON (current writer format):
+
+- `schema` = `"azt.detached-decode-cert.v1"`
+- `certificate_type` = `"detached_decode_authorization"`
+- `grant` object:
+  - `action` = `"decode"`
+  - `bind_by` = `"plain_header_signature_line_b64"`
+  - `plain_header_signature_line_b64` (string)
+  - `original_base_name` (string)
+- `issuer` object:
+  - `signer_alg` = `"ed25519"`
+  - `signer_fingerprint_hex` (string)
+
+Payload serialization at signing time is canonicalized by current exporter as:
+- UTF-8 JSON with `sort_keys=true` and compact separators `(',', ':')`.
+
+### 2.4 Detached certificate attachment behavior (export)
+
+Exporter supports `detached_decode_cert_mode`:
+
+- `none`: never attach certificate
+- `always`: always attach certificate
+- `auto` (default): attach only when `header_effective_auto_decode == false`
+
+`header_effective_auto_decode` is evaluated from outer-header material as logical AND:
+
+- `stream_header_auto_decode == true` in plaintext outer header, and
+- embedded device certificate `authorized_consumers` contains `"auto-decode"`.
+
+If attachment is required by mode (`always` or `auto` with ineffective auto-decode), exporter requires admin signing key input; otherwise export fails.
+
+### 2.5 `original_base_name` derivation
 
 Current exporter derives `original_base_name` from input filename by removing the first matching suffix in this ordered set:
 
@@ -67,7 +115,7 @@ Current exporter derives `original_base_name` from input filename by removing th
 
 If no suffix matches, basename is used unchanged.
 
-### 2.4 Request consumer requirements (`decode` path)
+### 2.6 Request consumer requirements (`decode` path)
 
 For detached decode input, consumer must:
 
@@ -76,6 +124,8 @@ For detached decode input, consumer must:
 3. require `next_header_mode == "encrypted"`,
 4. read `plain_header_json_utf8` and parse as JSON,
 5. read `next_header_ciphertext_b64` and base64-decode ciphertext bytes.
+
+Current decode path does not require detached certificate fields to decrypt next header; policy enforcement is caller/system responsibility.
 
 Legacy compatibility (name propagation only):
 
@@ -152,6 +202,8 @@ Current operations use (non-exhaustive) error codes including:
 - `ERR_DETACHED_MODE`
 - `ERR_DETACHED_PLAIN_HEADER`
 - `ERR_DETACHED_CIPHERTEXT`
+- `ERR_DETACHED_CERT_MODE`
+- `ERR_DETACHED_CERT_KEY_REQUIRED`
 - `ERR_ENC_HEADER_LENGTH`
 - `ERR_ENC_HEADER_TRUNCATED`
 - `ERR_ALREADY_DECODED_NEXT_HEADER`
