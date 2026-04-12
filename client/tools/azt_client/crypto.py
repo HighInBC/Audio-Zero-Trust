@@ -115,7 +115,7 @@ def load_private_key_auto(source: Path | bytes, *, purpose: str = "private key")
 
 def gen_rsa_keypair_with_fingerprint(out_dir: Path, *, password_protected: bool = False) -> tuple[str, str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=4096)
     pub = priv.public_key()
 
     priv_pem = priv.private_bytes(
