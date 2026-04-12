@@ -627,6 +627,7 @@ def separate_headers(*, in_path: str, out_headers: str) -> tuple[bool, dict]:
     pkg: dict = {
         "schema": "azt.header-separation.v1",
         "source_file": str(in_path),
+        "original_filename": Path(in_path).name,
         "plain_header_json_utf8": plain_line.decode("utf-8"),
         "plain_header_signature_line_b64": sig_line.decode("utf-8"),
         "next_header_len_u16": next_len,
@@ -676,6 +677,7 @@ def decode_next_header(*, in_path: str, key_path: str, out_path: str, out_decode
     header_ct: bytes
     payload: bytes = b""
     input_mode = "azt"
+    original_filename = Path(in_path).name
 
     if data.startswith(b"AZT1\n"):
         off = 5
@@ -712,6 +714,7 @@ def decode_next_header(*, in_path: str, key_path: str, out_path: str, out_decode
             return False, {"error": "ERR_MAGIC"}
         if not isinstance(req, dict) or req.get("schema") != "azt.header-separation.v1":
             return False, {"error": "ERR_MAGIC"}
+        original_filename = str(req.get("original_filename") or original_filename)
         if str(req.get("next_header_mode") or "") != "encrypted":
             return False, {"error": "ERR_DETACHED_MODE", "detail": "request package is not encrypted mode"}
         plain_line = str(req.get("plain_header_json_utf8") or "").encode("utf-8")
@@ -741,7 +744,13 @@ def decode_next_header(*, in_path: str, key_path: str, out_path: str, out_decode
     if (out_decoded_next_header_path or "").strip():
         dnp = Path(out_decoded_next_header_path)
         dnp.parent.mkdir(parents=True, exist_ok=True)
-        dnp.write_bytes(header_pt)
+        key_pkg = {
+            "schema": "azt.detached-key.v1",
+            "original_filename": dnp.name,
+            "source_original_filename": original_filename,
+            "next_header_plaintext_b64": base64.b64encode(header_pt).decode("ascii"),
+        }
+        dnp.write_text(json.dumps(key_pkg, indent=2) + "\n", encoding="utf-8")
         decoded_path_out = str(dnp)
 
     out_written = ""
@@ -798,7 +807,18 @@ def combine_headers(*, in_path: str, headers_path: str, decoded_next_header_path
     sig_line = str(hdr["plain_header_signature_line_b64"]).encode("utf-8")
 
     if decoded_next_header_path:
-        next_header = Path(decoded_next_header_path).read_bytes()
+        key_raw = Path(decoded_next_header_path).read_bytes()
+        try:
+            key_obj = json.loads(key_raw.decode("utf-8"))
+            if isinstance(key_obj, dict) and key_obj.get("schema") == "azt.detached-key.v1":
+                key_b64 = str(key_obj.get("next_header_plaintext_b64") or "")
+                if not key_b64:
+                    return False, {"error": "ERR_DECODED_NEXT_HEADER_REQUIRED", "detail": "missing next_header_plaintext_b64"}
+                next_header = base64.b64decode(key_b64, validate=True)
+            else:
+                next_header = key_raw
+        except Exception:
+            next_header = key_raw
     elif isinstance(hdr.get("next_header_plaintext_json_utf8"), str):
         next_header = str(hdr["next_header_plaintext_json_utf8"]).encode("utf-8")
     else:
