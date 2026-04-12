@@ -25,6 +25,15 @@ from tools.azt_sdk.services.url_service import base_url
 import os
 
 
+def _original_base_name_from_path(path: str) -> str:
+    name = Path(path).name
+    for suf in (".azt.request", ".request", ".azt.key", ".key", ".azt"):
+        if name.endswith(suf):
+            name = name[: -len(suf)]
+            break
+    return name
+
+
 def _error_detail(*, where: str, exc: Exception, url: str | None = None, context: dict | None = None) -> dict:
     out = {
         "where": where,
@@ -627,7 +636,7 @@ def separate_headers(*, in_path: str, out_headers: str) -> tuple[bool, dict]:
     pkg: dict = {
         "schema": "azt.header-separation.v1",
         "source_file": str(in_path),
-        "original_filename": Path(in_path).name,
+        "original_base_name": _original_base_name_from_path(in_path),
         "plain_header_json_utf8": plain_line.decode("utf-8"),
         "plain_header_signature_line_b64": sig_line.decode("utf-8"),
         "next_header_len_u16": next_len,
@@ -677,7 +686,7 @@ def decode_next_header(*, in_path: str, key_path: str, out_path: str, out_decode
     header_ct: bytes
     payload: bytes = b""
     input_mode = "azt"
-    original_filename = Path(in_path).name
+    original_base_name = _original_base_name_from_path(in_path)
 
     if data.startswith(b"AZT1\n"):
         off = 5
@@ -714,7 +723,12 @@ def decode_next_header(*, in_path: str, key_path: str, out_path: str, out_decode
             return False, {"error": "ERR_MAGIC"}
         if not isinstance(req, dict) or req.get("schema") != "azt.header-separation.v1":
             return False, {"error": "ERR_MAGIC"}
-        original_filename = str(req.get("original_filename") or original_filename)
+        original_base_name = str(
+            req.get("original_base_name")
+            or req.get("source_original_filename")
+            or req.get("original_filename")
+            or original_base_name
+        )
         if str(req.get("next_header_mode") or "") != "encrypted":
             return False, {"error": "ERR_DETACHED_MODE", "detail": "request package is not encrypted mode"}
         plain_line = str(req.get("plain_header_json_utf8") or "").encode("utf-8")
@@ -746,8 +760,7 @@ def decode_next_header(*, in_path: str, key_path: str, out_path: str, out_decode
         dnp.parent.mkdir(parents=True, exist_ok=True)
         key_pkg = {
             "schema": "azt.detached-key.v1",
-            "original_filename": dnp.name,
-            "source_original_filename": original_filename,
+            "original_base_name": original_base_name,
             "next_header_plaintext_b64": base64.b64encode(header_pt).decode("ascii"),
         }
         dnp.write_text(json.dumps(key_pkg, indent=2) + "\n", encoding="utf-8")
