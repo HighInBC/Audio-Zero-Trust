@@ -485,7 +485,12 @@ def cmd_ota_bundle_post(args: argparse.Namespace) -> int:
 def cmd_separate_headers(args: argparse.Namespace) -> int:
     in_path = str(args.in_path)
     out_headers = (getattr(args, "out_headers", "") or "").strip() or (in_path + ".request")
-    ok, payload = ops.separate_headers(in_path=in_path, out_headers=out_headers)
+    ok, payload = ops.separate_headers(
+        in_path=in_path,
+        out_headers=out_headers,
+        detached_decode_cert_mode=str(getattr(args, "detached_decode_cert_mode", "auto") or "auto"),
+        detached_decode_signing_key_path=str(getattr(args, "detached_decode_signing_key_path", "") or ""),
+    )
     emit_envelope(command="detached-headers-export", ok=ok, error=None if ok else "SEPARATE_HEADERS_FAILED", payload=payload, as_json=bool(getattr(args, "as_json", False)))
     return 0 if ok else 1
 

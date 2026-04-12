@@ -127,6 +127,8 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     ssh = sub.add_parser("detached-headers-export", help="Export detached header request package from AZT1")
     ssh.add_argument("--in", dest="in_path", required=True, help="Input AZT1 file")
     ssh.add_argument("--out-headers", default="", help="Output detached request package (default: <in>.request)")
+    ssh.add_argument("--detached-decode-cert", dest="detached_decode_cert_mode", choices=["auto", "always", "none"], default="auto", help="Attach detached decode certificate: auto (only when not effective auto-decode), always, or none")
+    ssh.add_argument("--detached-decode-signing-key", dest="detached_decode_signing_key_path", default="", help="Admin Ed25519 private key PEM used to sign detached decode certificate")
     ssh.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     ssh.set_defaults(func=handlers.cmd_separate_headers)
 
@@ -150,6 +152,8 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     ssh_old = sub.add_parser("separate-headers", help=argparse.SUPPRESS)
     ssh_old.add_argument("--in", dest="in_path", required=True)
     ssh_old.add_argument("--out-headers", default="")
+    ssh_old.add_argument("--detached-decode-cert", dest="detached_decode_cert_mode", choices=["auto", "always", "none"], default="auto")
+    ssh_old.add_argument("--detached-decode-signing-key", dest="detached_decode_signing_key_path", default="")
     ssh_old.add_argument("--json", dest="as_json", action="store_true")
     ssh_old.set_defaults(func=handlers.cmd_separate_headers)
 

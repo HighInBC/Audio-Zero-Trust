@@ -609,7 +609,33 @@ def ota_bundle_post(*,
         return False, "ERR_OTA_BUNDLE_POST", payload
 
 
-def separate_headers(*, in_path: str, out_headers: str) -> tuple[bool, dict]:
+def _header_effective_auto_decode(plain: dict) -> bool:
+    cert_consumers: set[str] = set()
+    cert_doc = plain.get("device_certificate")
+    if isinstance(cert_doc, dict):
+        payload_b64 = cert_doc.get("certificate_payload_b64")
+        if isinstance(payload_b64, str) and payload_b64:
+            try:
+                payload_raw = base64.b64decode(payload_b64, validate=True)
+                payload = json.loads(payload_raw.decode("utf-8"))
+                consumers = payload.get("authorized_consumers") or []
+                if isinstance(consumers, list):
+                    for c in consumers:
+                        if isinstance(c, str):
+                            cert_consumers.add(c)
+            except Exception:
+                pass
+
+    header_auto_decode = bool(plain.get("stream_header_auto_decode") is True)
+    cert_auto_decode = "auto-decode" in cert_consumers
+    return cert_auto_decode and header_auto_decode
+
+
+def separate_headers(*,
+                    in_path: str,
+                    out_headers: str,
+                    detached_decode_cert_mode: str = "auto",
+                    detached_decode_signing_key_path: str = "") -> tuple[bool, dict]:
     data = Path(in_path).read_bytes()
     if not data.startswith(b"AZT1\n"):
         return False, {"error": "ERR_MAGIC"}
@@ -662,6 +688,47 @@ def separate_headers(*, in_path: str, out_headers: str) -> tuple[bool, dict]:
     pkg["payload_offset_bytes"] = off
     pkg["payload_len_bytes"] = len(payload)
     pkg["payload_sha256_hex"] = hashlib.sha256(payload).hexdigest()
+
+    mode = str(detached_decode_cert_mode or "auto").strip().lower()
+    if mode not in ("auto", "always", "none"):
+        return False, {"error": "ERR_DETACHED_CERT_MODE", "detail": "detached_decode_cert_mode must be auto|always|none"}
+
+    effective_auto_decode = _header_effective_auto_decode(plain)
+    should_attach_detached_cert = (mode == "always") or (mode == "auto" and not effective_auto_decode)
+
+    if should_attach_detached_cert:
+        key_path = str(detached_decode_signing_key_path or "").strip()
+        if not key_path:
+            return False, {"error": "ERR_DETACHED_CERT_KEY_REQUIRED", "detail": "admin signing key required when detached decode cert is requested"}
+        keyp = Path(key_path)
+        signer_fp = ed25519_fp_hex_from_private_key(keyp)
+
+        cert_payload = {
+            "schema": "azt.detached-decode-cert.v1",
+            "certificate_type": "detached_decode_authorization",
+            "grant": {
+                "action": "decode",
+                "bind_by": "plain_header_signature_line_b64",
+                "plain_header_signature_line_b64": sig_line.decode("utf-8"),
+                "original_base_name": _original_base_name_from_path(in_path),
+            },
+            "issuer": {
+                "signer_alg": "ed25519",
+                "signer_fingerprint_hex": signer_fp,
+            },
+        }
+        cert_payload_raw = json.dumps(cert_payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        cert_sig_raw = sign_bytes(keyp.read_bytes(), cert_payload_raw)
+        pkg["detached_decode_certificate"] = {
+            "signature_algorithm": "ed25519",
+            "signer_fingerprint_hex": signer_fp,
+            "certificate_payload_b64": base64.b64encode(cert_payload_raw).decode("ascii"),
+            "signature_b64": base64.b64encode(cert_sig_raw).decode("ascii"),
+        }
+
+    pkg["detached_decode_certificate_mode"] = mode
+    pkg["header_effective_auto_decode"] = effective_auto_decode
+    pkg["detached_decode_certificate_attached"] = bool("detached_decode_certificate" in pkg)
 
     outp = Path(out_headers)
     outp.parent.mkdir(parents=True, exist_ok=True)
