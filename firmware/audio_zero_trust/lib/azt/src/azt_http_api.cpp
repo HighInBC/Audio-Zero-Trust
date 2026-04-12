@@ -786,6 +786,10 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     return r;
   }
 
+  const bool listener_key_changed =
+      (new_listener_pem != state.listener_pubkey_pem) ||
+      (new_listener_fp != state.listener_fingerprint_hex);
+
   String sig_err;
   if (!state.managed) {
     if (!verify_config_signature_envelope(doc, new_admin_fp, new_admin_pem, sig_err)) {
@@ -890,6 +894,10 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       }
     }
 
+    if (listener_key_changed) {
+      request_stream_shutdown();
+    }
+
     r.code = 200;
     r.body = "{\"ok\":true,\"state\":\"MANAGED\",\"signed_config_ready\":true,\"admin_fingerprint_hex\":\"" + state.admin_fingerprint_hex + "\",\"config_revision\":" + String(state.config_revision) + "}";
     if (tls_set) {
@@ -919,6 +927,10 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
   if (p.begin("aztcfg", false)) {
     p.putString("disc_json", state.discovery_announcement_json);
     p.end();
+  }
+
+  if (listener_key_changed) {
+    request_stream_shutdown();
   }
 
   if (tls_set) {
@@ -1187,6 +1199,10 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     }
   }
 
+  const bool listener_key_changed =
+      (new_listener_pem != state.listener_pubkey_pem) ||
+      (new_listener_fp != state.listener_fingerprint_hex);
+
   state.audio_preamp_gain = new_audio_preamp_gain;
   state.audio_adc_gain = new_audio_adc_gain;
   state.stream_header_auto_record = new_stream_header_auto_record;
@@ -1219,6 +1235,10 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   if (p.begin("aztcfg", false)) {
     p.putString("disc_json", state.discovery_announcement_json);
     p.end();
+  }
+
+  if (listener_key_changed) {
+    request_stream_shutdown();
   }
 
   r.code = 200;
