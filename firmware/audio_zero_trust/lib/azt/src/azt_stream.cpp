@@ -19,7 +19,11 @@
 
 namespace azt {
 
+#if CONFIG_IDF_TARGET_ESP32S3
+static constexpr float kRecommendedDecodeGain = 1.0f;
+#else
 static constexpr float kRecommendedDecodeGain = 4.0f;
+#endif
 static constexpr uint32_t kSigCheckpointMinInterval = 10;
 static constexpr uint32_t kSigCheckpointMaxInterval = 160;
 static constexpr uint32_t kTelemetryIntervalBlocks = 50;
