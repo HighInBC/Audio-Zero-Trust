@@ -19,6 +19,7 @@
 #include "azt_constants.h"
 #include "azt_crypto.h"
 #include "azt_discovery.h"
+#include "azt_kv_store.h"
 #include "azt_stream.h"
 
 namespace azt {
@@ -276,7 +277,7 @@ static bool is_valid_attestation_nonce(const String& nonce) {
 static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETKEYBYTES]) {
   Preferences p;
   if (!p.begin("aztcfg", true)) return false;
-  String sk_b64 = p.getString("dev_sign_priv", "");
+  String sk_b64 = kv_get_string(p, "dev_sign_priv", "");
   p.end();
   if (sk_b64.length() == 0) return false;
 
@@ -810,7 +811,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
     Preferences p;
     if (p.begin("aztcfg", false)) {
-      p.putString("disc_json", state.discovery_announcement_json);
+      kv_set_string(p, "disc_json", state.discovery_announcement_json);
       p.end();
     }
 
@@ -818,16 +819,16 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       Preferences tp;
       if (tp.begin("aztcfg", false)) {
         bool ok_put = true;
-        ok_put = ok_put && tp.putString("tls_srv_key", tls_srv_key) > 0;
-        ok_put = ok_put && tp.putString("tls_srv_cert", tls_srv_cert) > 0;
+        ok_put = ok_put && kv_set_string(tp, "tls_srv_key", tls_srv_key) > 0;
+        ok_put = ok_put && kv_set_string(tp, "tls_srv_cert", tls_srv_cert) > 0;
         if (tls_ca_cert.length() > 0) {
-          ok_put = ok_put && tp.putString("tls_ca_cert", tls_ca_cert) > 0;
+          ok_put = ok_put && kv_set_string(tp, "tls_ca_cert", tls_ca_cert) > 0;
         }
-        ok_put = ok_put && tp.putString("tls_cert_sn", tls_cert_serial) > 0;
+        ok_put = ok_put && kv_set_string(tp, "tls_cert_sn", tls_cert_serial) > 0;
         if (tls_san_csv.length() > 0) {
-          ok_put = ok_put && tp.putString("tls_san_csv", tls_san_csv) > 0;
+          ok_put = ok_put && kv_set_string(tp, "tls_san_csv", tls_san_csv) > 0;
         } else {
-          tp.remove("tls_san_csv");
+          kv_remove_key(tp, "tls_san_csv");
         }
         tp.end();
         if (!ok_put) {
@@ -847,8 +848,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       Preferences op;
       if (op.begin("aztcfg", false)) {
         if (ota_signer_clear) {
-          op.remove("ota_signer_pem");
-          op.remove("ota_signer_fp");
+          kv_remove_key(op, "ota_signer_pem");
+          kv_remove_key(op, "ota_signer_fp");
           state.ota_signer_override_public_key_pem = "";
           state.ota_signer_override_fingerprint_hex = "";
         } else if (ota_signer_pem.length() > 0) {
@@ -868,8 +869,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
             return r;
           }
           ota_fp = hex_lower(h, sizeof(h));
-          op.putString("ota_signer_pem", ota_signer_pem);
-          op.putString("ota_signer_fp", ota_fp);
+          kv_set_string(op, "ota_signer_pem", ota_signer_pem);
+          kv_set_string(op, "ota_signer_fp", ota_fp);
           state.ota_signer_override_public_key_pem = ota_signer_pem;
           state.ota_signer_override_fingerprint_hex = ota_fp;
         }
@@ -878,12 +879,12 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
           op.putULong64("ota_last_vc", ota_version_value);
           state.last_ota_version_code = ota_version_value;
           state.last_ota_version = String((unsigned long long)ota_version_value);
-          op.putString("ota_last_ver", state.last_ota_version);
+          kv_set_string(op, "ota_last_ver", state.last_ota_version);
         }
 
         if (ota_floor_clear) {
-          op.remove("ota_min_vc");
-          op.remove("ota_min_ver_code");
+          kv_remove_key(op, "ota_min_vc");
+          kv_remove_key(op, "ota_min_ver_code");
           state.ota_min_allowed_version_code = 0;
         } else if (ota_floor_set) {
           op.putULong64("ota_min_vc", ota_floor_value);
@@ -925,7 +926,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
   state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
   Preferences p;
   if (p.begin("aztcfg", false)) {
-    p.putString("disc_json", state.discovery_announcement_json);
+    kv_set_string(p, "disc_json", state.discovery_announcement_json);
     p.end();
   }
 
@@ -937,16 +938,16 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     Preferences tp;
     if (tp.begin("aztcfg", false)) {
       bool ok_put = true;
-      ok_put = ok_put && tp.putString("tls_srv_key", tls_srv_key) > 0;
-      ok_put = ok_put && tp.putString("tls_srv_cert", tls_srv_cert) > 0;
+      ok_put = ok_put && kv_set_string(tp, "tls_srv_key", tls_srv_key) > 0;
+      ok_put = ok_put && kv_set_string(tp, "tls_srv_cert", tls_srv_cert) > 0;
       if (tls_ca_cert.length() > 0) {
-        ok_put = ok_put && tp.putString("tls_ca_cert", tls_ca_cert) > 0;
+        ok_put = ok_put && kv_set_string(tp, "tls_ca_cert", tls_ca_cert) > 0;
       }
-      ok_put = ok_put && tp.putString("tls_cert_sn", tls_cert_serial) > 0;
+      ok_put = ok_put && kv_set_string(tp, "tls_cert_sn", tls_cert_serial) > 0;
       if (tls_san_csv.length() > 0) {
-        ok_put = ok_put && tp.putString("tls_san_csv", tls_san_csv) > 0;
+        ok_put = ok_put && kv_set_string(tp, "tls_san_csv", tls_san_csv) > 0;
       } else {
-        tp.remove("tls_san_csv");
+        kv_remove_key(tp, "tls_san_csv");
       }
       tp.end();
       if (!ok_put) {
@@ -966,8 +967,8 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     Preferences op;
     if (op.begin("aztcfg", false)) {
       if (ota_signer_clear) {
-        op.remove("ota_signer_pem");
-        op.remove("ota_signer_fp");
+        kv_remove_key(op, "ota_signer_pem");
+        kv_remove_key(op, "ota_signer_fp");
         state.ota_signer_override_public_key_pem = "";
         state.ota_signer_override_fingerprint_hex = "";
       } else if (ota_signer_pem.length() > 0) {
@@ -987,15 +988,15 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
           return r;
         }
         ota_fp = hex_lower(h, sizeof(h));
-        op.putString("ota_signer_pem", ota_signer_pem);
-        op.putString("ota_signer_fp", ota_fp);
+        kv_set_string(op, "ota_signer_pem", ota_signer_pem);
+        kv_set_string(op, "ota_signer_fp", ota_fp);
         state.ota_signer_override_public_key_pem = ota_signer_pem;
         state.ota_signer_override_fingerprint_hex = ota_fp;
       }
 
       if (ota_floor_clear) {
-        op.remove("ota_min_vc");
-        op.remove("ota_min_ver_code");
+        kv_remove_key(op, "ota_min_vc");
+        kv_remove_key(op, "ota_min_ver_code");
         state.ota_min_allowed_version_code = 0;
       } else if (ota_floor_set) {
         op.putULong64("ota_min_vc", ota_floor_value);
@@ -1233,7 +1234,7 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
   Preferences p;
   if (p.begin("aztcfg", false)) {
-    p.putString("disc_json", state.discovery_announcement_json);
+    kv_set_string(p, "disc_json", state.discovery_announcement_json);
     p.end();
   }
 
@@ -1588,7 +1589,7 @@ HttpDispatchResult dispatch_request(const String& method,
       r.content_type = "application/json";
       return r;
     }
-    String cert_json = p.getString("device_cert", "");
+    String cert_json = kv_get_string(p, "device_cert", "");
     p.end();
     if (cert_json.length() == 0) {
       r.code = 404;
@@ -1705,15 +1706,15 @@ HttpDispatchResult dispatch_request(const String& method,
       state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
 
       Preferences p;
-      if (!p.begin("aztcfg", false) || p.putString("disc_json", state.discovery_announcement_json) == 0) {
+      if (!p.begin("aztcfg", false) || kv_set_string(p, "disc_json", state.discovery_announcement_json) == 0) {
         p.end();
         r.code = 500;
         r.body = "{\"ok\":false,\"error\":\"ERR_CERT_STORE\"}";
         r.content_type = "application/json";
         return r;
       }
-      p.remove("device_cert");
-      p.remove("dev_cert_sn");
+      kv_remove_key(p, "device_cert");
+      kv_remove_key(p, "dev_cert_sn");
       p.end();
 
       consume_nonce(g_cert_nonce, g_cert_nonce_expires_ms);
@@ -1780,9 +1781,9 @@ HttpDispatchResult dispatch_request(const String& method,
 
     Preferences p;
     if (!p.begin("aztcfg", false) ||
-        p.putString("device_cert", cert_json) == 0 ||
-        p.putString("dev_cert_sn", cert_serial) == 0 ||
-        p.putString("disc_json", state.discovery_announcement_json) == 0) {
+        kv_set_string(p, "device_cert", cert_json) == 0 ||
+        kv_set_string(p, "dev_cert_sn", cert_serial) == 0 ||
+        kv_set_string(p, "disc_json", state.discovery_announcement_json) == 0) {
       p.end();
       r.code = 500;
       r.body = "{\"ok\":false,\"error\":\"ERR_CERT_STORE\"}";
@@ -1930,12 +1931,12 @@ HttpDispatchResult dispatch_request(const String& method,
       return r;
     }
     bool ok_put = true;
-    ok_put = ok_put && p.putString("tls_srv_key", tls_srv_key) > 0;
-    ok_put = ok_put && p.putString("tls_srv_cert", tls_srv_cert) > 0;
+    ok_put = ok_put && kv_set_string(p, "tls_srv_key", tls_srv_key) > 0;
+    ok_put = ok_put && kv_set_string(p, "tls_srv_cert", tls_srv_cert) > 0;
     if (tls_ca_cert.length() > 0) {
-      ok_put = ok_put && p.putString("tls_ca_cert", tls_ca_cert) > 0;
+      ok_put = ok_put && kv_set_string(p, "tls_ca_cert", tls_ca_cert) > 0;
     }
-    ok_put = ok_put && p.putString("tls_cert_sn", cert_serial) > 0;
+    ok_put = ok_put && kv_set_string(p, "tls_cert_sn", cert_serial) > 0;
     p.end();
 
     if (!ok_put) {
@@ -2184,8 +2185,8 @@ HttpDispatchResult apply_ota_controls_json_from_serial(AppState& state, const St
   }
 
   if (ota_signer_clear) {
-    op.remove("ota_signer_pem");
-    op.remove("ota_signer_fp");
+    kv_remove_key(op, "ota_signer_pem");
+    kv_remove_key(op, "ota_signer_fp");
     state.ota_signer_override_public_key_pem = "";
     state.ota_signer_override_fingerprint_hex = "";
   } else if (ota_signer_pem.length() > 0) {
@@ -2205,8 +2206,8 @@ HttpDispatchResult apply_ota_controls_json_from_serial(AppState& state, const St
       return r;
     }
     ota_fp = hex_lower(h, sizeof(h));
-    op.putString("ota_signer_pem", ota_signer_pem);
-    op.putString("ota_signer_fp", ota_fp);
+    kv_set_string(op, "ota_signer_pem", ota_signer_pem);
+    kv_set_string(op, "ota_signer_fp", ota_fp);
     state.ota_signer_override_public_key_pem = ota_signer_pem;
     state.ota_signer_override_fingerprint_hex = ota_fp;
   }
@@ -2215,12 +2216,12 @@ HttpDispatchResult apply_ota_controls_json_from_serial(AppState& state, const St
     op.putULong64("ota_last_vc", ota_version_value);
     state.last_ota_version_code = ota_version_value;
     state.last_ota_version = String((unsigned long long)ota_version_value);
-    op.putString("ota_last_ver", state.last_ota_version);
+    kv_set_string(op, "ota_last_ver", state.last_ota_version);
   }
 
   if (ota_floor_clear) {
-    op.remove("ota_min_vc");
-    op.remove("ota_min_ver_code");
+    kv_remove_key(op, "ota_min_vc");
+    kv_remove_key(op, "ota_min_ver_code");
     state.ota_min_allowed_version_code = 0;
   } else if (ota_floor_set) {
     uint64_t next_floor = state.ota_min_allowed_version_code;
@@ -2989,7 +2990,7 @@ static bool handle_ota_upgrade_bundle_post(WiFiClient& client, int content_len, 
 
   Preferences p;
   if (p.begin("aztcfg", false)) {
-    p.putString("ota_last_ver", state.last_ota_version);
+    kv_set_string(p, "ota_last_ver", state.last_ota_version);
     p.putULong64("ota_last_vc", state.last_ota_version_code);
     p.putULong64("ota_min_vc", state.ota_min_allowed_version_code);
     p.end();

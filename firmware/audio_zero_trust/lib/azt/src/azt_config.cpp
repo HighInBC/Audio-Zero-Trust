@@ -7,6 +7,7 @@
 
 #include "azt_constants.h"
 #include "azt_crypto.h"
+#include "azt_kv_store.h"
 
 namespace azt {
 
@@ -98,9 +99,9 @@ static bool generate_device_ed25519(String& out_priv_b64,
 
 static bool ensure_device_keypair(AppState& state) {
   g_prefs.begin("aztcfg", true);
-  String priv_b64 = g_prefs.getString("dev_sign_priv", "");
-  String pub_b64 = g_prefs.getString("dev_sign_pub", "");
-  String fp_hex = g_prefs.getString("dev_sign_fp", "");
+  String priv_b64 = kv_get_string(g_prefs, "dev_sign_priv", "");
+  String pub_b64 = kv_get_string(g_prefs, "dev_sign_pub", "");
+  String fp_hex = kv_get_string(g_prefs, "dev_sign_fp", "");
   g_prefs.end();
 
   if (priv_b64.length() > 0 && pub_b64.length() > 0 && fp_hex.length() == 64) {
@@ -118,9 +119,9 @@ static bool ensure_device_keypair(AppState& state) {
 
   g_prefs.begin("aztcfg", false);
   bool ok = true;
-  ok = ok && g_prefs.putString("dev_sign_priv", priv_b64) > 0;
-  ok = ok && g_prefs.putString("dev_sign_pub", pub_b64) > 0;
-  ok = ok && g_prefs.putString("dev_sign_fp", fp_hex) > 0;
+  ok = ok && kv_set_string(g_prefs, "dev_sign_priv", priv_b64) > 0;
+  ok = ok && kv_set_string(g_prefs, "dev_sign_pub", pub_b64) > 0;
+  ok = ok && kv_set_string(g_prefs, "dev_sign_fp", fp_hex) > 0;
   g_prefs.end();
 
   if (!ok) return false;
@@ -212,40 +213,40 @@ void load_config_state(AppState& state) {
   g_prefs.begin("aztcfg", true);
   state.managed = g_prefs.getBool("managed", false);
   state.signed_config_ready = g_prefs.getBool("signed_ok", false);
-  state.admin_pubkey_pem = g_prefs.getString("admin_pem", "");
-  state.admin_fingerprint_hex = g_prefs.getString("admin_fp", "");
-  state.listener_pubkey_pem = g_prefs.getString("rec_pem", "");
-  state.listener_fingerprint_hex = g_prefs.getString("rec_fp", "");
-  state.recorder_auth_pubkey_b64 = g_prefs.getString("rec_auth_pub", "");
-  state.recorder_auth_fingerprint_hex = g_prefs.getString("rec_auth_fp", "");
-  state.device_label = g_prefs.getString("dev_label", "");
-  state.wifi_mode = g_prefs.getString("wifi_mode", "sta");
+  state.admin_pubkey_pem = kv_get_string(g_prefs, "admin_pem", "");
+  state.admin_fingerprint_hex = kv_get_string(g_prefs, "admin_fp", "");
+  state.listener_pubkey_pem = kv_get_string(g_prefs, "rec_pem", "");
+  state.listener_fingerprint_hex = kv_get_string(g_prefs, "rec_fp", "");
+  state.recorder_auth_pubkey_b64 = kv_get_string(g_prefs, "rec_auth_pub", "");
+  state.recorder_auth_fingerprint_hex = kv_get_string(g_prefs, "rec_auth_fp", "");
+  state.device_label = kv_get_string(g_prefs, "dev_label", "");
+  state.wifi_mode = kv_get_string(g_prefs, "wifi_mode", "sta");
   state.wifi_mode.trim();
   state.wifi_mode.toLowerCase();
   if (state.wifi_mode != "sta" && state.wifi_mode != "ap") state.wifi_mode = "sta";
-  state.wifi_ssid = g_prefs.getString("wifi_ssid", "");
-  state.wifi_pass = g_prefs.getString("wifi_pass", "");
-  state.wifi_ap_ssid = g_prefs.getString("wifi_ap_ssid", "");
-  state.wifi_ap_pass = g_prefs.getString("wifi_ap_pass", "");
-  state.authorized_listener_ips_csv = g_prefs.getString("auth_ips", "");
-  state.time_servers_csv = g_prefs.getString("time_srv", "");
+  state.wifi_ssid = kv_get_string(g_prefs, "wifi_ssid", "");
+  state.wifi_pass = kv_get_string(g_prefs, "wifi_pass", "");
+  state.wifi_ap_ssid = kv_get_string(g_prefs, "wifi_ap_ssid", "");
+  state.wifi_ap_pass = kv_get_string(g_prefs, "wifi_ap_pass", "");
+  state.authorized_listener_ips_csv = kv_get_string(g_prefs, "auth_ips", "");
+  state.time_servers_csv = kv_get_string(g_prefs, "time_srv", "");
   state.mdns_enabled = g_prefs.getBool("mdns_en", false);
-  state.mdns_hostname = g_prefs.getString("mdns_host", "");
+  state.mdns_hostname = kv_get_string(g_prefs, "mdns_host", "");
   state.stream_header_auto_record = g_prefs.getBool("hdr_auto_rec", true);
   state.stream_header_auto_decode = g_prefs.getBool("hdr_auto_dec", true);
-  state.device_certificate_serial = g_prefs.getString("dev_cert_sn", "");
+  state.device_certificate_serial = kv_get_string(g_prefs, "dev_cert_sn", "");
   state.device_certificate_json = "";
-  state.discovery_announcement_json = g_prefs.getString("disc_json", "");
-  state.tls_certificate_serial = g_prefs.getString("tls_cert_sn", "");
-  state.tls_san_hosts_csv = g_prefs.getString("tls_san_csv", "");
-  state.tls_server_cert_configured = g_prefs.getString("tls_srv_cert", "").length() > 0;
-  state.tls_server_key_configured = g_prefs.getString("tls_srv_key", "").length() > 0;
-  state.tls_ca_cert_configured = g_prefs.getString("tls_ca_cert", "").length() > 0;
-  state.device_sign_public_key_b64 = g_prefs.getString("dev_sign_pub", state.device_sign_public_key_b64);
-  state.device_sign_fingerprint_hex = g_prefs.getString("dev_sign_fp", state.device_sign_fingerprint_hex);
-  state.ota_signer_override_public_key_pem = g_prefs.getString("ota_signer_pem", "");
-  state.ota_signer_override_fingerprint_hex = g_prefs.getString("ota_signer_fp", "");
-  state.last_ota_version = g_prefs.getString("ota_last_ver", "");
+  state.discovery_announcement_json = kv_get_string(g_prefs, "disc_json", "");
+  state.tls_certificate_serial = kv_get_string(g_prefs, "tls_cert_sn", "");
+  state.tls_san_hosts_csv = kv_get_string(g_prefs, "tls_san_csv", "");
+  state.tls_server_cert_configured = kv_get_string(g_prefs, "tls_srv_cert", "").length() > 0;
+  state.tls_server_key_configured = kv_get_string(g_prefs, "tls_srv_key", "").length() > 0;
+  state.tls_ca_cert_configured = kv_get_string(g_prefs, "tls_ca_cert", "").length() > 0;
+  state.device_sign_public_key_b64 = kv_get_string(g_prefs, "dev_sign_pub", state.device_sign_public_key_b64);
+  state.device_sign_fingerprint_hex = kv_get_string(g_prefs, "dev_sign_fp", state.device_sign_fingerprint_hex);
+  state.ota_signer_override_public_key_pem = kv_get_string(g_prefs, "ota_signer_pem", "");
+  state.ota_signer_override_fingerprint_hex = kv_get_string(g_prefs, "ota_signer_fp", "");
+  state.last_ota_version = kv_get_string(g_prefs, "ota_last_ver", "");
   // NVS key names max 15 chars. Use short keys and fall back to legacy names.
   state.last_ota_version_code = g_prefs.getULong64("ota_last_vc", 0);
   if (state.last_ota_version_code == 0) {
@@ -262,7 +263,7 @@ void load_config_state(AppState& state) {
   state.last_reset_unexpected = g_prefs.getBool("last_rst_unexp", false);
   state.unexpected_reset_count = g_prefs.getUInt("unx_rst_cnt", 0);
   state.last_reset_reason = String(reset_reason_to_string(static_cast<esp_reset_reason_t>(state.last_reset_reason_code)));
-  String stored_cert_json = g_prefs.getString("device_cert", "");
+  String stored_cert_json = kv_get_string(g_prefs, "device_cert", "");
   g_prefs.end();
 
   // Capture this boot's reset reason (once per boot) and persist for /config/state.
@@ -274,8 +275,8 @@ void load_config_state(AppState& state) {
     state.listener_fingerprint_hex = state.admin_fingerprint_hex;
     if (state.listener_pubkey_pem.length() > 0 && state.listener_fingerprint_hex.length() == 64) {
       g_prefs.begin("aztcfg", false);
-      g_prefs.putString("rec_pem", state.listener_pubkey_pem);
-      g_prefs.putString("rec_fp", state.listener_fingerprint_hex);
+      kv_set_string(g_prefs, "rec_pem", state.listener_pubkey_pem);
+      kv_set_string(g_prefs, "rec_fp", state.listener_fingerprint_hex);
       g_prefs.end();
     }
   }
@@ -286,9 +287,9 @@ void load_config_state(AppState& state) {
 
     if (!cert_ok) {
       g_prefs.begin("aztcfg", false);
-      g_prefs.remove("device_cert");
-      g_prefs.remove("dev_cert_sn");
-      g_prefs.remove("disc_json");
+      kv_remove_key(g_prefs, "device_cert");
+      kv_remove_key(g_prefs, "dev_cert_sn");
+      kv_remove_key(g_prefs, "disc_json");
       g_prefs.end();
       state.device_certificate_serial = "";
       state.device_certificate_json = "";
@@ -296,7 +297,7 @@ void load_config_state(AppState& state) {
     } else {
       if (state.device_certificate_serial != cert_serial_verified) {
         g_prefs.begin("aztcfg", false);
-        g_prefs.putString("dev_cert_sn", cert_serial_verified);
+        kv_set_string(g_prefs, "dev_cert_sn", cert_serial_verified);
         g_prefs.end();
       }
       state.device_certificate_serial = cert_serial_verified;
@@ -330,39 +331,39 @@ bool save_config_state(AppState& state,
   ok = ok && g_prefs.putBool("managed", true);
   ok = ok && g_prefs.putBool("signed_ok", signed_ok);
   ok = ok && g_prefs.putUInt("cfg_rev", next_rev);
-  ok = ok && g_prefs.putString("admin_pem", admin_pem) > 0;
-  ok = ok && g_prefs.putString("admin_fp", admin_fp) > 0;
-  ok = ok && g_prefs.putString("rec_pem", listener_pem) > 0;
-  ok = ok && g_prefs.putString("rec_fp", listener_fp) > 0;
+  ok = ok && kv_set_string(g_prefs, "admin_pem", admin_pem) > 0;
+  ok = ok && kv_set_string(g_prefs, "admin_fp", admin_fp) > 0;
+  ok = ok && kv_set_string(g_prefs, "rec_pem", listener_pem) > 0;
+  ok = ok && kv_set_string(g_prefs, "rec_fp", listener_fp) > 0;
   if (recorder_auth_pub_b64.length() > 0 && recorder_auth_fp.length() == 64) {
-    ok = ok && g_prefs.putString("rec_auth_pub", recorder_auth_pub_b64) > 0;
-    ok = ok && g_prefs.putString("rec_auth_fp", recorder_auth_fp) > 0;
+    ok = ok && kv_set_string(g_prefs, "rec_auth_pub", recorder_auth_pub_b64) > 0;
+    ok = ok && kv_set_string(g_prefs, "rec_auth_fp", recorder_auth_fp) > 0;
   } else {
-    g_prefs.remove("rec_auth_pub");
-    g_prefs.remove("rec_auth_fp");
+    kv_remove_key(g_prefs, "rec_auth_pub");
+    kv_remove_key(g_prefs, "rec_auth_fp");
   }
-  ok = ok && g_prefs.putString("dev_label", device_label) > 0;
-  ok = ok && g_prefs.putString("wifi_mode", wifi_mode) > 0;
+  ok = ok && kv_set_string(g_prefs, "dev_label", device_label) > 0;
+  ok = ok && kv_set_string(g_prefs, "wifi_mode", wifi_mode) > 0;
   if (wifi_mode == "ap") {
-    ok = ok && g_prefs.putString("wifi_ap_ssid", wifi_ap_ssid) > 0;
-    ok = ok && g_prefs.putString("wifi_ap_pass", wifi_ap_pass) > 0;
-    g_prefs.remove("wifi_ssid");
-    g_prefs.remove("wifi_pass");
+    ok = ok && kv_set_string(g_prefs, "wifi_ap_ssid", wifi_ap_ssid) > 0;
+    ok = ok && kv_set_string(g_prefs, "wifi_ap_pass", wifi_ap_pass) > 0;
+    kv_remove_key(g_prefs, "wifi_ssid");
+    kv_remove_key(g_prefs, "wifi_pass");
   } else {
-    ok = ok && g_prefs.putString("wifi_ssid", wifi_ssid) > 0;
-    ok = ok && g_prefs.putString("wifi_pass", wifi_pass) > 0;
-    g_prefs.remove("wifi_ap_ssid");
-    g_prefs.remove("wifi_ap_pass");
+    ok = ok && kv_set_string(g_prefs, "wifi_ssid", wifi_ssid) > 0;
+    ok = ok && kv_set_string(g_prefs, "wifi_pass", wifi_pass) > 0;
+    kv_remove_key(g_prefs, "wifi_ap_ssid");
+    kv_remove_key(g_prefs, "wifi_ap_pass");
   }
   if (authorized_listener_ips_csv.length() > 0) {
-    ok = ok && g_prefs.putString("auth_ips", authorized_listener_ips_csv) > 0;
+    ok = ok && kv_set_string(g_prefs, "auth_ips", authorized_listener_ips_csv) > 0;
   } else {
-    g_prefs.remove("auth_ips");
+    kv_remove_key(g_prefs, "auth_ips");
   }
   if (time_servers_csv.length() > 0) {
-    ok = ok && g_prefs.putString("time_srv", time_servers_csv) > 0;
+    ok = ok && kv_set_string(g_prefs, "time_srv", time_servers_csv) > 0;
   } else {
-    g_prefs.remove("time_srv");
+    kv_remove_key(g_prefs, "time_srv");
   }
   ok = ok && g_prefs.putBool("mdns_en", mdns_enabled);
   ok = ok && g_prefs.putBool("hdr_auto_rec", state.stream_header_auto_record);
@@ -370,9 +371,9 @@ bool save_config_state(AppState& state,
   ok = ok && g_prefs.putUChar("aud_micg", state.audio_preamp_gain);
   ok = ok && g_prefs.putUChar("aud_adcg", state.audio_adc_gain);
   if (mdns_hostname.length() > 0) {
-    ok = ok && g_prefs.putString("mdns_host", mdns_hostname) > 0;
+    ok = ok && kv_set_string(g_prefs, "mdns_host", mdns_hostname) > 0;
   } else {
-    g_prefs.remove("mdns_host");
+    kv_remove_key(g_prefs, "mdns_host");
   }
   g_prefs.end();
 
@@ -436,38 +437,38 @@ bool save_config_state(AppState& state,
 
 bool reset_managed_config_preserve_device_keys(AppState& state) {
   g_prefs.begin("aztcfg", false);
-  g_prefs.remove("managed");
-  g_prefs.remove("signed_ok");
-  g_prefs.remove("admin_pem");
-  g_prefs.remove("admin_fp");
-  g_prefs.remove("rec_pem");
-  g_prefs.remove("rec_fp");
-  g_prefs.remove("rec_auth_pub");
-  g_prefs.remove("rec_auth_fp");
-  g_prefs.remove("wifi_mode");
-  g_prefs.remove("wifi_ssid");
-  g_prefs.remove("wifi_pass");
-  g_prefs.remove("wifi_ap_ssid");
-  g_prefs.remove("wifi_ap_pass");
-  g_prefs.remove("auth_ips");
-  g_prefs.remove("time_srv");
-  g_prefs.remove("mdns_en");
-  g_prefs.remove("mdns_host");
-  g_prefs.remove("hdr_auto_rec");
-  g_prefs.remove("hdr_auto_dec");
-  g_prefs.remove("device_cert");
-  g_prefs.remove("dev_cert_sn");
-  g_prefs.remove("disc_json");
-  g_prefs.remove("ota_signer_pem");
-  g_prefs.remove("ota_signer_fp");
-  g_prefs.remove("tls_srv_key");
-  g_prefs.remove("tls_srv_cert");
-  g_prefs.remove("tls_ca_cert");
-  g_prefs.remove("tls_cert_sn");
-  g_prefs.remove("tls_san_csv");
-  g_prefs.remove("cfg_rev");
-  g_prefs.remove("aud_micg");
-  g_prefs.remove("aud_adcg");
+  kv_remove_key(g_prefs, "managed");
+  kv_remove_key(g_prefs, "signed_ok");
+  kv_remove_key(g_prefs, "admin_pem");
+  kv_remove_key(g_prefs, "admin_fp");
+  kv_remove_key(g_prefs, "rec_pem");
+  kv_remove_key(g_prefs, "rec_fp");
+  kv_remove_key(g_prefs, "rec_auth_pub");
+  kv_remove_key(g_prefs, "rec_auth_fp");
+  kv_remove_key(g_prefs, "wifi_mode");
+  kv_remove_key(g_prefs, "wifi_ssid");
+  kv_remove_key(g_prefs, "wifi_pass");
+  kv_remove_key(g_prefs, "wifi_ap_ssid");
+  kv_remove_key(g_prefs, "wifi_ap_pass");
+  kv_remove_key(g_prefs, "auth_ips");
+  kv_remove_key(g_prefs, "time_srv");
+  kv_remove_key(g_prefs, "mdns_en");
+  kv_remove_key(g_prefs, "mdns_host");
+  kv_remove_key(g_prefs, "hdr_auto_rec");
+  kv_remove_key(g_prefs, "hdr_auto_dec");
+  kv_remove_key(g_prefs, "device_cert");
+  kv_remove_key(g_prefs, "dev_cert_sn");
+  kv_remove_key(g_prefs, "disc_json");
+  kv_remove_key(g_prefs, "ota_signer_pem");
+  kv_remove_key(g_prefs, "ota_signer_fp");
+  kv_remove_key(g_prefs, "tls_srv_key");
+  kv_remove_key(g_prefs, "tls_srv_cert");
+  kv_remove_key(g_prefs, "tls_ca_cert");
+  kv_remove_key(g_prefs, "tls_cert_sn");
+  kv_remove_key(g_prefs, "tls_san_csv");
+  kv_remove_key(g_prefs, "cfg_rev");
+  kv_remove_key(g_prefs, "aud_micg");
+  kv_remove_key(g_prefs, "aud_adcg");
   g_prefs.end();
 
   state.managed = false;

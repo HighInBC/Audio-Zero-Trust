@@ -13,6 +13,7 @@
 #include "azt_constants.h"
 #include "azt_crypto.h"
 #include "azt_device_io.h"
+#include "azt_kv_store.h"
 #include "azt_stream_header.h"
 #include "azt_stream_record.h"
 #include "azt_stream_signer.h"
@@ -206,7 +207,7 @@ static bool is_active_certificate_serial(const String& cert_serial) {
   if (cert_serial.length() == 0) return false;
   Preferences p;
   if (!p.begin("aztcfg", true)) return false;
-  String stored = p.getString("dev_cert_sn", "");
+  String stored = kv_get_string(p, "dev_cert_sn", "");
   p.end();
   return stored.length() > 0 && stored == cert_serial;
 }
@@ -216,8 +217,8 @@ static bool get_active_recorder_auth_state(bool& configured, String& fp_hex) {
   fp_hex = "";
   Preferences p;
   if (!p.begin("aztcfg", true)) return false;
-  String pub = p.getString("rec_auth_pub", "");
-  String fp = p.getString("rec_auth_fp", "");
+  String pub = kv_get_string(p, "rec_auth_pub", "");
+  String fp = kv_get_string(p, "rec_auth_fp", "");
   p.end();
   configured = pub.length() > 0 && fp.length() == 64;
   fp_hex = fp;
@@ -227,7 +228,7 @@ static bool get_active_recorder_auth_state(bool& configured, String& fp_hex) {
 static bool load_device_sign_sk(unsigned char out_sk[crypto_sign_ed25519_SECRETKEYBYTES]) {
   Preferences p;
   p.begin("aztcfg", true);
-  String sk_b64 = p.getString("dev_sign_priv", "");
+  String sk_b64 = kv_get_string(p, "dev_sign_priv", "");
   p.end();
   if (sk_b64.length() == 0) return false;
 
