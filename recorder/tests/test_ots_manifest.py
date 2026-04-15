@@ -9,6 +9,7 @@ from azt_recorder.recorder import (
     embed_ots_sidecar_into_timestamp_tar,
     ots_sidecar_path,
     ots_status_for_recording,
+    ots_tsr_sidecar_path,
     timestamp_tar_path,
 )
 
@@ -26,21 +27,26 @@ def test_ots_sidecar_embedding_and_manifest(tmp_path: Path) -> None:
 
     assert ots_status_for_recording(recording) == "missing"
 
-    sidecar = ots_sidecar_path(recording)
-    sidecar.write_bytes(b"pending-ots-proof")
+    azt_sidecar = ots_sidecar_path(recording)
+    tsr_sidecar = ots_tsr_sidecar_path(recording)
+    azt_sidecar.write_bytes(b"pending-ots-proof-azt")
+    tsr_sidecar.write_bytes(b"pending-ots-proof-tsr")
     assert ots_status_for_recording(recording) == "sidecar"
 
     embed_ots_sidecar_into_timestamp_tar(recording, remove_sidecar=True)
 
-    assert not sidecar.exists()
+    assert not azt_sidecar.exists()
+    assert not tsr_sidecar.exists()
     assert ots_status_for_recording(recording) == "embedded"
 
     with tarfile.open(tar_path, "r") as tf:
         names = {m.name for m in tf.getmembers() if m.isfile()}
         assert "manifest.json" in names
-        assert sidecar.name in names
+        assert azt_sidecar.name in names
+        assert tsr_sidecar.name in names
 
         manifest_raw = tf.extractfile("manifest.json").read()
         manifest = json.loads(manifest_raw.decode("utf-8"))
         manifest_paths = {entry["path"] for entry in manifest["entries"]}
-        assert sidecar.name in manifest_paths
+        assert azt_sidecar.name in manifest_paths
+        assert tsr_sidecar.name in manifest_paths

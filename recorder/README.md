@@ -17,7 +17,7 @@ Discovery + trust-decision + recording daemon for Audio-Zero-Trust devices.
 - Writes `.azt` files under configured output path
 - Auto-timestamps completed recordings via TSA (`.timestamp.tar`)
 - Writes `manifest.json` inside each `.timestamp.tar` (JSON hashes for all archive members)
-- Supports OTS sidecar workflow (`.azt.ots`) and embedding upgraded proofs into `.timestamp.tar`
+- Supports OTS sidecar workflow for both recording + TSA response (`.azt.ots` and `.azt.tsr.ots`) and embeds both upgraded proofs into `.timestamp.tar`
 
 ## Run (dev)
 

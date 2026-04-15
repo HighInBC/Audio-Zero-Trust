@@ -187,6 +187,10 @@ def ots_sidecar_path(file_path: Path) -> Path:
     return Path(str(file_path) + ".ots")
 
 
+def ots_tsr_sidecar_path(file_path: Path) -> Path:
+    return Path(str(file_path) + ".tsr.ots")
+
+
 def _sha256_bytes(data: bytes) -> str:
     h = hashlib.sha256()
     h.update(data)
@@ -250,49 +254,46 @@ def _read_timestamp_tar_members(tar_path: Path) -> list[tuple[str, bytes]]:
 
 def ots_status_for_recording(file_path: Path) -> str:
     tar_path = timestamp_tar_path(file_path)
-    sidecar = ots_sidecar_path(file_path)
+    azt_sidecar = ots_sidecar_path(file_path)
+    tsr_sidecar = ots_tsr_sidecar_path(file_path)
 
+    expected_embedded = {azt_sidecar.name, tsr_sidecar.name}
     if tar_path.exists():
         try:
             with tarfile.open(tar_path, "r") as tf:
-                if any(m.isfile() and m.name.endswith(".ots") for m in tf.getmembers()):
-                    return "embedded"
+                names = {m.name for m in tf.getmembers() if m.isfile()}
+            if expected_embedded.issubset(names):
+                return "embedded"
         except Exception:
             # Fall through to sidecar check for recovery workflows.
             pass
 
-    if sidecar.exists():
+    if azt_sidecar.exists() or tsr_sidecar.exists():
         return "sidecar"
     return "missing"
 
 
 def embed_ots_sidecar_into_timestamp_tar(file_path: Path, *, remove_sidecar: bool = True) -> Path:
     tar_path = timestamp_tar_path(file_path)
-    sidecar = ots_sidecar_path(file_path)
+    sidecars = [ots_sidecar_path(file_path), ots_tsr_sidecar_path(file_path)]
     if not tar_path.exists():
         raise FileNotFoundError(f"timestamp tar missing: {tar_path}")
-    if not sidecar.exists():
-        raise FileNotFoundError(f"ots sidecar missing: {sidecar}")
+    for sidecar in sidecars:
+        if not sidecar.exists():
+            raise FileNotFoundError(f"ots sidecar missing: {sidecar}")
 
     members = _read_timestamp_tar_members(tar_path)
-    ots_arcname = sidecar.name
-    ots_data = sidecar.read_bytes()
+    by_name = {name: data for name, data in members}
 
-    replaced = False
-    out_members: list[tuple[str, bytes]] = []
-    for name, data in members:
-        if name == ots_arcname:
-            out_members.append((name, ots_data))
-            replaced = True
-        else:
-            out_members.append((name, data))
-    if not replaced:
-        out_members.append((ots_arcname, ots_data))
+    for sidecar in sidecars:
+        by_name[sidecar.name] = sidecar.read_bytes()
 
+    out_members = [(name, data) for name, data in sorted(by_name.items(), key=lambda item: item[0])]
     _write_manifested_timestamp_tar(tar_path=tar_path, recording_path=file_path, members=out_members)
 
     if remove_sidecar:
-        sidecar.unlink(missing_ok=True)
+        for sidecar in sidecars:
+            sidecar.unlink(missing_ok=True)
 
     return tar_path
 
@@ -329,11 +330,11 @@ def _ots_verify_sidecar_with_tsr(sidecar_path: Path, tsr_bytes: bytes, *, ots_cl
         return p.returncode == 0
 
 
-def _stamp_sidecar_from_tsr_bytes(sidecar_path: Path, tsr_name: str, tsr_bytes: bytes, *, ots_client_cmd: str) -> None:
+def _stamp_sidecar_from_target_bytes(sidecar_path: Path, target_name: str, target_bytes: bytes, *, ots_client_cmd: str) -> None:
     with tempfile.TemporaryDirectory(prefix="azt-ots-stamp-") as td:
-        target_name = Path(tsr_name).name or "timestamp-response.tsr"
-        target_path = Path(td) / target_name
-        target_path.write_bytes(tsr_bytes)
+        name = Path(target_name).name or "target.bin"
+        target_path = Path(td) / name
+        target_path.write_bytes(target_bytes)
 
         p = _run_ots(["stamp", str(target_path)], ots_client_cmd=ots_client_cmd)
         if p.returncode != 0:
@@ -346,6 +347,15 @@ def _stamp_sidecar_from_tsr_bytes(sidecar_path: Path, tsr_name: str, tsr_bytes: 
         shutil.move(str(stamped_path), str(sidecar_path))
 
 
+def _stamp_sidecar_from_tsr_bytes(sidecar_path: Path, tsr_name: str, tsr_bytes: bytes, *, ots_client_cmd: str) -> None:
+    _stamp_sidecar_from_target_bytes(sidecar_path, tsr_name, tsr_bytes, ots_client_cmd=ots_client_cmd)
+
+
+def _ots_verify_sidecar_with_file(sidecar_path: Path, target_file_path: Path, *, ots_client_cmd: str) -> bool:
+    p = _run_ots(["verify", str(sidecar_path), "-f", str(target_file_path)], ots_client_cmd=ots_client_cmd)
+    return p.returncode == 0
+
+
 def process_timestamp_tar_ots(tar_path: Path, *, ots_client_cmd: str = "ots") -> str:
     if not tar_path.exists():
         return "missing_tar"
@@ -356,16 +366,31 @@ def process_timestamp_tar_ots(tar_path: Path, *, ots_client_cmd: str = "ots") ->
         return "already_embedded"
 
     tsr_name, tsr_bytes = _extract_tsr_member_from_tar(tar_path)
-    sidecar = ots_sidecar_path(recording_path)
+    azt_sidecar = ots_sidecar_path(recording_path)
+    tsr_sidecar = ots_tsr_sidecar_path(recording_path)
 
-    if not sidecar.exists():
-        _stamp_sidecar_from_tsr_bytes(sidecar, tsr_name, tsr_bytes, ots_client_cmd=ots_client_cmd)
+    if not recording_path.exists():
+        return "missing_recording"
 
-    upgrade_result = _run_ots(["upgrade", str(sidecar)], ots_client_cmd=ots_client_cmd)
-    if upgrade_result.returncode != 0:
-        return "pending_upgrade"
+    if not azt_sidecar.exists():
+        _stamp_sidecar_from_target_bytes(
+            azt_sidecar,
+            recording_path.name,
+            recording_path.read_bytes(),
+            ots_client_cmd=ots_client_cmd,
+        )
 
-    if not _ots_verify_sidecar_with_tsr(sidecar, tsr_bytes, ots_client_cmd=ots_client_cmd):
+    if not tsr_sidecar.exists():
+        _stamp_sidecar_from_tsr_bytes(tsr_sidecar, tsr_name, tsr_bytes, ots_client_cmd=ots_client_cmd)
+
+    for sidecar in (azt_sidecar, tsr_sidecar):
+        upgrade_result = _run_ots(["upgrade", str(sidecar)], ots_client_cmd=ots_client_cmd)
+        if upgrade_result.returncode != 0:
+            return "pending_upgrade"
+
+    if not _ots_verify_sidecar_with_file(azt_sidecar, recording_path, ots_client_cmd=ots_client_cmd):
+        return "pending_verify"
+    if not _ots_verify_sidecar_with_tsr(tsr_sidecar, tsr_bytes, ots_client_cmd=ots_client_cmd):
         return "pending_verify"
 
     embed_ots_sidecar_into_timestamp_tar(recording_path, remove_sidecar=True)
