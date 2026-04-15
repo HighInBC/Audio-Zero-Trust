@@ -20,7 +20,7 @@ class RecordingConfig:
     recorder_auth_private_key_path: str = ""
     auto_ots_on_timestamp: bool = True
     ots_client_cmd: str = "ots"
-    ots_process_interval_seconds: int = 60
+    ots_process_interval_seconds: int = 3600
 
 
 @dataclass
