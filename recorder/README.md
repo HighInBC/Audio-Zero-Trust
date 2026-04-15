@@ -31,4 +31,7 @@ azt-recorder --config config/recorder.yaml
 
 - `recording.output_dir`: recording destination inside container/runtime
 - `recording.recorder_auth_private_key_path`: optional Ed25519 private key used for stream-start auth signatures
+- `recording.auto_ots_on_timestamp`: enable OTS sidecar/upgrade/embed backfill for `.timestamp.tar`
+- `recording.ots_client_cmd`: OpenTimestamps CLI command (default: `ots`)
+- `recording.ots_process_interval_seconds`: OTS backfill loop interval (default: 60)
 - Keep runtime config/secrets outside git in deployment environments.

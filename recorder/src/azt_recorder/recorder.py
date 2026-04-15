@@ -14,6 +14,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import shutil
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -294,6 +295,107 @@ def embed_ots_sidecar_into_timestamp_tar(file_path: Path, *, remove_sidecar: boo
         sidecar.unlink(missing_ok=True)
 
     return tar_path
+
+
+def recording_path_for_timestamp_tar(tar_path: Path) -> Path:
+    suffix = ".timestamp.tar"
+    name = tar_path.name
+    if not name.endswith(suffix):
+        raise ValueError(f"not a timestamp tar path: {tar_path}")
+    return tar_path.with_name(name[: -len(suffix)])
+
+
+def _extract_tsr_member_from_tar(tar_path: Path) -> tuple[str, bytes]:
+    with tarfile.open(tar_path, "r") as tf:
+        for member in tf.getmembers():
+            if member.isfile() and member.name.endswith(".tsr"):
+                f = tf.extractfile(member)
+                if f is None:
+                    continue
+                return member.name, f.read()
+    raise RuntimeError(f"ERR_OTS_NO_TSR_IN_TAR: {tar_path}")
+
+
+def _run_ots(args: list[str], *, ots_client_cmd: str) -> subprocess.CompletedProcess[str]:
+    cmd = [ots_client_cmd, *args]
+    return subprocess.run(cmd, text=True, capture_output=True)
+
+
+def _ots_verify_sidecar_with_tsr(sidecar_path: Path, tsr_bytes: bytes, *, ots_client_cmd: str) -> bool:
+    with tempfile.TemporaryDirectory(prefix="azt-ots-verify-") as td:
+        tsr_path = Path(td) / "verify_target.tsr"
+        tsr_path.write_bytes(tsr_bytes)
+        p = _run_ots(["verify", str(sidecar_path), "-f", str(tsr_path)], ots_client_cmd=ots_client_cmd)
+        return p.returncode == 0
+
+
+def _stamp_sidecar_from_tsr_bytes(sidecar_path: Path, tsr_name: str, tsr_bytes: bytes, *, ots_client_cmd: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="azt-ots-stamp-") as td:
+        target_name = Path(tsr_name).name or "timestamp-response.tsr"
+        target_path = Path(td) / target_name
+        target_path.write_bytes(tsr_bytes)
+
+        p = _run_ots(["stamp", str(target_path)], ots_client_cmd=ots_client_cmd)
+        if p.returncode != 0:
+            raise RuntimeError(f"ERR_OTS_STAMP: {p.stdout}\n{p.stderr}".strip())
+
+        stamped_path = Path(str(target_path) + ".ots")
+        if not stamped_path.exists():
+            raise RuntimeError(f"ERR_OTS_STAMP_NO_OUTPUT: {stamped_path}")
+        sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(stamped_path), str(sidecar_path))
+
+
+def process_timestamp_tar_ots(tar_path: Path, *, ots_client_cmd: str = "ots") -> str:
+    if not tar_path.exists():
+        return "missing_tar"
+
+    recording_path = recording_path_for_timestamp_tar(tar_path)
+    status = ots_status_for_recording(recording_path)
+    if status == "embedded":
+        return "already_embedded"
+
+    tsr_name, tsr_bytes = _extract_tsr_member_from_tar(tar_path)
+    sidecar = ots_sidecar_path(recording_path)
+
+    if not sidecar.exists():
+        _stamp_sidecar_from_tsr_bytes(sidecar, tsr_name, tsr_bytes, ots_client_cmd=ots_client_cmd)
+
+    upgrade_result = _run_ots(["upgrade", str(sidecar)], ots_client_cmd=ots_client_cmd)
+    if upgrade_result.returncode != 0:
+        return "pending_upgrade"
+
+    if not _ots_verify_sidecar_with_tsr(sidecar, tsr_bytes, ots_client_cmd=ots_client_cmd):
+        return "pending_verify"
+
+    embed_ots_sidecar_into_timestamp_tar(recording_path, remove_sidecar=True)
+    return "embedded"
+
+
+def find_timestamp_tars_needing_ots(output_dir: Path, *, older_than_seconds: int = 30) -> list[Path]:
+    if not output_dir.exists():
+        return []
+
+    now = time.time()
+    out: list[Path] = []
+    for tar_path in output_dir.rglob("*.azt.timestamp.tar"):
+        try:
+            st = tar_path.stat()
+        except FileNotFoundError:
+            continue
+        if (now - st.st_mtime) < older_than_seconds:
+            continue
+
+        try:
+            rec = recording_path_for_timestamp_tar(tar_path)
+        except ValueError:
+            continue
+        if ots_status_for_recording(rec) == "embedded":
+            continue
+        out.append(tar_path)
+
+    out.sort(key=lambda x: x.stat().st_mtime)
+    return out
 
 
 def is_file_in_use(file_path: Path) -> bool:
