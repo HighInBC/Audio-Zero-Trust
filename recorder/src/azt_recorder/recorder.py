@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tarfile
+import tempfile
 import time
 import urllib.request
 import urllib.parse
@@ -181,6 +182,120 @@ def timestamp_tar_path(file_path: Path) -> Path:
     return Path(str(file_path) + ".timestamp.tar")
 
 
+def ots_sidecar_path(file_path: Path) -> Path:
+    return Path(str(file_path) + ".ots")
+
+
+def _sha256_bytes(data: bytes) -> str:
+    h = hashlib.sha256()
+    h.update(data)
+    return h.hexdigest()
+
+
+def _build_tar_manifest(*, recording_path: Path, members: list[tuple[str, bytes]]) -> bytes:
+    generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    manifest = {
+        "schema": "azt.timestamp.manifest/v1",
+        "generated_at_utc": generated_at,
+        "recording_file": {
+            "name": recording_path.name,
+            "sha256": _sha256_bytes(recording_path.read_bytes()),
+            "size_bytes": recording_path.stat().st_size,
+        },
+        "entries": [
+            {
+                "path": name,
+                "sha256": _sha256_bytes(data),
+                "size_bytes": len(data),
+            }
+            for name, data in sorted(members, key=lambda item: item[0])
+        ],
+    }
+    return (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _write_manifested_timestamp_tar(*, tar_path: Path, recording_path: Path, members: list[tuple[str, bytes]]) -> None:
+    manifest_bytes = _build_tar_manifest(recording_path=recording_path, members=members)
+    final_members = [*members, ("manifest.json", manifest_bytes)]
+
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=tar_path.name + ".", suffix=".tmp", dir=str(tar_path.parent))
+    os.close(tmp_fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with tarfile.open(tmp_path, "w") as tf:
+            for name, data in final_members:
+                info = tarfile.TarInfo(name=name)
+                info.size = len(data)
+                tf.addfile(info, fileobj=io.BytesIO(data))
+        tmp_path.replace(tar_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _read_timestamp_tar_members(tar_path: Path) -> list[tuple[str, bytes]]:
+    members: list[tuple[str, bytes]] = []
+    with tarfile.open(tar_path, "r") as tf:
+        for member in tf.getmembers():
+            if not member.isfile():
+                continue
+            if member.name == "manifest.json":
+                continue
+            extracted = tf.extractfile(member)
+            if extracted is None:
+                continue
+            members.append((member.name, extracted.read()))
+    return members
+
+
+def ots_status_for_recording(file_path: Path) -> str:
+    tar_path = timestamp_tar_path(file_path)
+    sidecar = ots_sidecar_path(file_path)
+
+    if tar_path.exists():
+        try:
+            with tarfile.open(tar_path, "r") as tf:
+                if any(m.isfile() and m.name.endswith(".ots") for m in tf.getmembers()):
+                    return "embedded"
+        except Exception:
+            # Fall through to sidecar check for recovery workflows.
+            pass
+
+    if sidecar.exists():
+        return "sidecar"
+    return "missing"
+
+
+def embed_ots_sidecar_into_timestamp_tar(file_path: Path, *, remove_sidecar: bool = True) -> Path:
+    tar_path = timestamp_tar_path(file_path)
+    sidecar = ots_sidecar_path(file_path)
+    if not tar_path.exists():
+        raise FileNotFoundError(f"timestamp tar missing: {tar_path}")
+    if not sidecar.exists():
+        raise FileNotFoundError(f"ots sidecar missing: {sidecar}")
+
+    members = _read_timestamp_tar_members(tar_path)
+    ots_arcname = sidecar.name
+    ots_data = sidecar.read_bytes()
+
+    replaced = False
+    out_members: list[tuple[str, bytes]] = []
+    for name, data in members:
+        if name == ots_arcname:
+            out_members.append((name, ots_data))
+            replaced = True
+        else:
+            out_members.append((name, data))
+    if not replaced:
+        out_members.append((ots_arcname, ots_data))
+
+    _write_manifested_timestamp_tar(tar_path=tar_path, recording_path=file_path, members=out_members)
+
+    if remove_sidecar:
+        sidecar.unlink(missing_ok=True)
+
+    return tar_path
+
+
 def is_file_in_use(file_path: Path) -> bool:
     # Best-effort open-file check without external dependencies.
     # Compare several path forms because /proc fd symlinks can vary by namespace
@@ -321,13 +436,15 @@ def timestamp_recording(file_path: Path, tsa_url: str) -> tuple[Path, Path, Path
         "digest and chains to a trusted certificate authority in your CA bundle.\n"
     ).encode("utf-8")
 
-    with tarfile.open(tar_path, "w") as tf:
-        tf.add(tsq_path, arcname=tsq_path.name)
-        tf.add(tsr_path, arcname=tsr_path.name)
-
-        info = tarfile.TarInfo(name="README.txt")
-        info.size = len(readme)
-        tf.addfile(info, fileobj=io.BytesIO(readme))
+    _write_manifested_timestamp_tar(
+        tar_path=tar_path,
+        recording_path=file_path,
+        members=[
+            (tsq_path.name, tsq_path.read_bytes()),
+            (tsr_path.name, tsr_path.read_bytes()),
+            ("README.txt", readme),
+        ],
+    )
 
     # Retain only the combined artifact after successful archive creation.
     tsq_path.unlink(missing_ok=True)

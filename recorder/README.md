@@ -16,6 +16,8 @@ Discovery + trust-decision + recording daemon for Audio-Zero-Trust devices.
 - If device has `recorder_auth_key` configured, signs stream start with recorder Ed25519 key
 - Writes `.azt` files under configured output path
 - Auto-timestamps completed recordings via TSA (`.timestamp.tar`)
+- Writes `manifest.json` inside each `.timestamp.tar` (JSON hashes for all archive members)
+- Supports OTS sidecar workflow (`.azt.ots`) and embedding upgraded proofs into `.timestamp.tar`
 
 ## Run (dev)
 
