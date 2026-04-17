@@ -273,6 +273,28 @@ def ots_status_for_recording(file_path: Path) -> str:
     return "missing"
 
 
+def prune_ots_upgrade_backups_for_recording(file_path: Path) -> int:
+    """Delete OTS .bak files once proofs are embedded in the timestamp tar.
+
+    Safe guardrail: only remove backup sidecars if the canonical embedded state
+    is present in the tar for this recording.
+    """
+    if ots_status_for_recording(file_path) != "embedded":
+        return 0
+
+    backups = [
+        Path(str(ots_sidecar_path(file_path)) + ".bak"),
+        Path(str(ots_tsr_sidecar_path(file_path)) + ".bak"),
+    ]
+
+    removed = 0
+    for bak in backups:
+        if bak.exists():
+            bak.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
 def embed_ots_sidecar_into_timestamp_tar(file_path: Path, *, remove_sidecar: bool = True) -> Path:
     tar_path = timestamp_tar_path(file_path)
     sidecars = [ots_sidecar_path(file_path), ots_tsr_sidecar_path(file_path)]
@@ -363,6 +385,7 @@ def process_timestamp_tar_ots(tar_path: Path, *, ots_client_cmd: str = "ots") ->
     recording_path = recording_path_for_timestamp_tar(tar_path)
     status = ots_status_for_recording(recording_path)
     if status == "embedded":
+        prune_ots_upgrade_backups_for_recording(recording_path)
         return "already_embedded"
 
     tsr_name, tsr_bytes = _extract_tsr_member_from_tar(tar_path)
@@ -394,6 +417,7 @@ def process_timestamp_tar_ots(tar_path: Path, *, ots_client_cmd: str = "ots") ->
         return "pending_verify"
 
     embed_ots_sidecar_into_timestamp_tar(recording_path, remove_sidecar=True)
+    prune_ots_upgrade_backups_for_recording(recording_path)
     return "embedded"
 
 
