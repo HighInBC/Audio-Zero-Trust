@@ -273,6 +273,13 @@ def ots_status_for_recording(file_path: Path) -> str:
     return "missing"
 
 
+def _ots_upgrade_backup_paths(file_path: Path) -> list[Path]:
+    return [
+        Path(str(ots_sidecar_path(file_path)) + ".bak"),
+        Path(str(ots_tsr_sidecar_path(file_path)) + ".bak"),
+    ]
+
+
 def prune_ots_upgrade_backups_for_recording(file_path: Path) -> int:
     """Delete OTS .bak files once proofs are embedded in the timestamp tar.
 
@@ -282,13 +289,8 @@ def prune_ots_upgrade_backups_for_recording(file_path: Path) -> int:
     if ots_status_for_recording(file_path) != "embedded":
         return 0
 
-    backups = [
-        Path(str(ots_sidecar_path(file_path)) + ".bak"),
-        Path(str(ots_tsr_sidecar_path(file_path)) + ".bak"),
-    ]
-
     removed = 0
-    for bak in backups:
+    for bak in _ots_upgrade_backup_paths(file_path):
         if bak.exists():
             bak.unlink(missing_ok=True)
             removed += 1
@@ -439,8 +441,13 @@ def find_timestamp_tars_needing_ots(output_dir: Path, *, older_than_seconds: int
             rec = recording_path_for_timestamp_tar(tar_path)
         except ValueError:
             continue
-        if ots_status_for_recording(rec) == "embedded":
-            continue
+
+        status = ots_status_for_recording(rec)
+        if status == "embedded":
+            # Still re-queue embedded tars if OTS upgrade backups are present;
+            # process_timestamp_tar_ots() will prune stale .bak files.
+            if not any(p.exists() for p in _ots_upgrade_backup_paths(rec)):
+                continue
         out.append(tar_path)
 
     out.sort(key=lambda x: x.stat().st_mtime)

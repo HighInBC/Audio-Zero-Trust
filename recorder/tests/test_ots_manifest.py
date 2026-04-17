@@ -7,6 +7,7 @@ from pathlib import Path
 from azt_recorder.recorder import (
     _write_manifested_timestamp_tar,
     embed_ots_sidecar_into_timestamp_tar,
+    find_timestamp_tars_needing_ots,
     ots_sidecar_path,
     ots_status_for_recording,
     ots_tsr_sidecar_path,
@@ -51,6 +52,31 @@ def test_ots_sidecar_embedding_and_manifest(tmp_path: Path) -> None:
         manifest_paths = {entry["path"] for entry in manifest["entries"]}
         assert azt_sidecar.name in manifest_paths
         assert tsr_sidecar.name in manifest_paths
+
+
+def test_find_timestamp_tars_includes_embedded_when_bak_exists(tmp_path: Path) -> None:
+    recording = tmp_path / "sample.azt"
+    recording.write_bytes(b"sample-audio-bytes")
+
+    tar_path = timestamp_tar_path(recording)
+    _write_manifested_timestamp_tar(
+        tar_path=tar_path,
+        recording_path=recording,
+        members=[
+            (ots_sidecar_path(recording).name, b"embedded-azt-proof"),
+            (ots_tsr_sidecar_path(recording).name, b"embedded-tsr-proof"),
+            ("sample.azt.tsq", b"tsq"),
+            ("sample.azt.tsr", b"tsr"),
+        ],
+    )
+
+    # Embedded with no backup residue should not be queued.
+    assert find_timestamp_tars_needing_ots(tmp_path, older_than_seconds=0) == []
+
+    # Presence of .bak should re-queue this tar so the state machine can prune.
+    Path(str(ots_sidecar_path(recording)) + ".bak").write_bytes(b"old-proof")
+    queued = find_timestamp_tars_needing_ots(tmp_path, older_than_seconds=0)
+    assert queued == [tar_path]
 
 
 def test_prune_ots_upgrade_backups_only_when_embedded(tmp_path: Path) -> None:
