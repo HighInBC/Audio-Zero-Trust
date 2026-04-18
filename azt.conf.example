@@ -43,6 +43,11 @@ defaults:
   #   - pool.ntp.org
   # audio_preamp_gain: 4              # 1..8
   # audio_adc_gain: 32                # 0..255
+  # mqtt_broker_url: "mqtt://192.168.1.10:1883"
+  # mqtt_username: ""
+  # mqtt_password: ""
+  # mqtt_audio_rms_topic: "azt/house/audio/rms"
+  # mqtt_audio_rms_window_seconds: 10 # 1..3600
   # ca_key_path: client/tools/pki/ca_private_key.pem
   # ca_cert_path: client/tools/pki/ca_cert.pem
 
