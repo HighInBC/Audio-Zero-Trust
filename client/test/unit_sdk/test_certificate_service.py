@@ -364,3 +364,54 @@ def test_issue_certificate_authorized_consumers_flags(monkeypatch, tmp_path):
     raw = base64.b64decode(cert["certificate_payload_b64"])
     doc = json.loads(raw.decode("utf-8"))
     assert doc["authorized_consumers"] == ["auto-record", "auto-decode"]
+
+def test_issue_certificate_reencrypt_to_key_fingerprint(monkeypatch, tmp_path):
+    att_file = tmp_path / "att.json"
+    now = int(time.time())
+    att_file.write_text(json.dumps({
+        "issued_at_epoch_s": now,
+        "host": "h",
+        "port": 8080,
+        "schema_ok": True,
+        "sig_ok": True,
+        "admin_fingerprint_hex": "f" * 64,
+        "device_chip_id_hex": "chip1",
+    }))
+
+    monkeypatch.setattr(certificate_service, "base_url", lambda **k: "http://h:8080")
+    monkeypatch.setattr(certificate_service, "get_json", lambda *a, **k: {
+        "ok": True,
+        "admin_fingerprint_hex": "f" * 64,
+        "device_sign_public_key_b64": "pub",
+        "device_sign_fingerprint_hex": "dfp",
+        "device_chip_id_hex": "chip1",
+    })
+    monkeypatch.setattr(certificate_service, "ed25519_fp_hex_from_private_key", lambda p: "f" * 64)
+
+    class FakePriv:
+        def sign(self, payload: bytes) -> bytes:
+            return b"sig"
+
+    monkeypatch.setattr(certificate_service, "load_private_key_auto", lambda p, purpose=None: FakePriv())
+
+    ok, err, payload = certificate_service.issue_certificate(
+        host="h",
+        port=8080,
+        timeout=1,
+        key_path=str(tmp_path / "admin.pem"),
+        attestation_path=str(att_file),
+        attestation_max_age_s=120,
+        cert_serial="c1",
+        valid_until_utc="2027-01-01T00:00:00Z",
+        auto_decode=True,
+        reencrypt_to_key_fingerprint="SHA256:abc123",
+        out_path=str(tmp_path / "cert.json"),
+    )
+
+    assert ok is True
+    assert err is None
+    cert = payload["certificate"]
+    raw = base64.b64decode(cert["certificate_payload_b64"])
+    doc = json.loads(raw.decode("utf-8"))
+    assert doc["authorized_consumers"] == ["auto-decode"]
+    assert doc["reencrypt_to_key_fingerprint"] == "SHA256:abc123"

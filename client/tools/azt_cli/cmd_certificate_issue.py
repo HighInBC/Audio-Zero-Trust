@@ -1,11 +1,95 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+
 from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.certificate_service import issue_certificate
+
+
+def _normalize_fingerprint(s: str) -> str:
+    v = str(s or "").strip()
+    if not v:
+        return ""
+    if v.lower().startswith("sha256:"):
+        return "SHA256:" + v.split(":", 1)[1].strip()
+    return v
+
+
+def _fingerprint_from_pem_file(path: Path) -> str:
+    raw = path.read_bytes()
+    try:
+        pub = serialization.load_pem_public_key(raw)
+    except Exception:
+        priv = serialization.load_pem_private_key(raw, password=None)
+        pub = priv.public_key()
+    pub_der = pub.public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return "SHA256:" + hashlib.sha256(pub_der).hexdigest()
+
+
+def _resolve_auto_decode_target_key(raw_value: str) -> tuple[str, str | None]:
+    v = str(raw_value or "").strip()
+    if not v:
+        return "", None
+
+    p = Path(v)
+    if not p.exists():
+        return _normalize_fingerprint(v), None
+
+    if p.is_dir():
+        candidates: list[Path] = []
+        for name in (
+            "fingerprint.txt",
+            "fingerprint_hex.txt",
+            "public_key_fingerprint.txt",
+            "public_key_fingerprint_hex.txt",
+            "public_key_b64.txt",
+            "public_key.pem",
+            "private_key.pem",
+            "admin_private_key.pem",
+        ):
+            c = p / name
+            if c.exists() and c.is_file():
+                candidates.append(c)
+        if not candidates:
+            for c in sorted(p.iterdir()):
+                if c.is_file() and "fingerprint" in c.name.lower() and c.suffix.lower() in {".txt", ".fp", ".fingerprint"}:
+                    candidates.append(c)
+            for c in sorted(p.iterdir()):
+                if c.is_file() and c.suffix.lower() == ".pem":
+                    candidates.append(c)
+        for c in candidates:
+            if "fingerprint" in c.name.lower() or c.suffix.lower() in {".txt", ".fp", ".fingerprint"}:
+                txt = c.read_text(encoding="utf-8", errors="ignore").strip()
+                if txt:
+                    return _normalize_fingerprint(txt), None
+            if c.suffix.lower() == ".pem":
+                try:
+                    return _fingerprint_from_pem_file(c), None
+                except Exception:
+                    continue
+        return "", f"could not resolve fingerprint from directory: {v}"
+
+    if p.is_file():
+        if p.suffix.lower() in {".txt", ".fp", ".fingerprint"} or "fingerprint" in p.name.lower():
+            txt = p.read_text(encoding="utf-8", errors="ignore").strip()
+            if not txt:
+                return "", f"empty fingerprint file: {v}"
+            return _normalize_fingerprint(txt), None
+        if p.suffix.lower() == ".pem":
+            try:
+                return _fingerprint_from_pem_file(p), None
+            except Exception:
+                return "", f"could not derive fingerprint from PEM file: {v}"
+
+    return _normalize_fingerprint(v), None
 
 
 def run(args: argparse.Namespace) -> int:
@@ -42,6 +126,28 @@ def run(args: argparse.Namespace) -> int:
             )
             return 1
 
+        reencrypt_fp, resolve_err = _resolve_auto_decode_target_key(getattr(args, "auto_decode_target_key", ""))
+        if resolve_err:
+            emit_envelope(
+                command="certificate-issue",
+                ok=False,
+                error="CERTIFICATE_ISSUE_ARGS",
+                payload={"detail": f"invalid --auto-decode-target-key: {resolve_err}"},
+                as_json=bool(getattr(args, "as_json", False)),
+            )
+            return 1
+
+        auto_decode_enabled = bool(getattr(args, "auto_decode", False))
+        if reencrypt_fp and not auto_decode_enabled:
+            emit_envelope(
+                command="certificate-issue",
+                ok=False,
+                error="CERTIFICATE_ISSUE_ARGS",
+                payload={"detail": "--auto-decode-target-key requires --auto-decode"},
+                as_json=bool(getattr(args, "as_json", False)),
+            )
+            return 1
+
         ok, err, payload = issue_certificate(
             host=host,
             port=int(args.port),
@@ -52,7 +158,8 @@ def run(args: argparse.Namespace) -> int:
             cert_serial=cert_serial,
             valid_until_utc=args.valid_until_utc,
             auto_record=bool(getattr(args, "auto_record", False)),
-            auto_decode=bool(getattr(args, "auto_decode", False)),
+            auto_decode=auto_decode_enabled,
+            reencrypt_to_key_fingerprint=reencrypt_fp,
             out_path=(args.out_path or None),
         )
         cert_doc = payload.get("certificate") if isinstance(payload, dict) else None

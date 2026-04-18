@@ -101,7 +101,7 @@ def revoke_certificate(*, host: str, port: int, timeout: int, key_path: str, cer
     }
 
 
-def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, attestation_path: str | None, attestation_max_age_s: int, cert_serial: str, valid_until_utc: str, auto_record: bool = False, auto_decode: bool = False, out_path: str | None = None) -> tuple[bool, str | None, dict]:
+def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, attestation_path: str | None, attestation_max_age_s: int, cert_serial: str, valid_until_utc: str, auto_record: bool = False, auto_decode: bool = False, reencrypt_to_key_fingerprint: str = "", out_path: str | None = None) -> tuple[bool, str | None, dict]:
     b = base_url(host=host, port=port, scheme="https")
     state = get_json(f"{b}/api/v0/config/state", timeout=timeout)
     if not bool(state.get("ok")):
@@ -162,6 +162,9 @@ def issue_certificate(*, host: str, port: int, timeout: int, key_path: str, atte
         "nonce": cert_nonce,
         "signature_algorithm": "ed25519",
     }
+    reencrypt_fp = str(reencrypt_to_key_fingerprint or "").strip()
+    if reencrypt_fp:
+        payload["reencrypt_to_key_fingerprint"] = reencrypt_fp
     payload_raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     priv = load_private_key_auto(Path(key_path), purpose=str(key_path))
     sig = priv.sign(payload_raw)

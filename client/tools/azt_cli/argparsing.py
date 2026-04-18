@@ -333,6 +333,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     scerti.add_argument("--auto-record", dest="auto_record", action="store_true", help="Authorize recorder auto-record consumer in certificate")
     scerti.add_argument("--auto-listen", dest="auto_record", action="store_true", help=argparse.SUPPRESS)
     scerti.add_argument("--auto-decode", action="store_true", help="Authorize air-gap auto-decode consumer in certificate")
+    scerti.add_argument("--auto-decode-target-key", dest="auto_decode_target_key", default="", help="Optional key target for auto-decode re-encryption. Accepts fingerprint string, fingerprint file, PEM key file, or directory containing key/fingerprint artifacts")
     scerti.add_argument("--port", type=int, default=8080, help="Device API port")
     scerti.add_argument("--timeout", type=int, default=15, help="HTTP timeout seconds")
     scerti.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
