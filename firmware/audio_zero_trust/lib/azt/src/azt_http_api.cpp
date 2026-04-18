@@ -631,6 +631,43 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     }
   }
 
+  String new_mqtt_broker_url = state.mqtt_broker_url;
+  String new_mqtt_username = state.mqtt_username;
+  String new_mqtt_password = state.mqtt_password;
+  String new_mqtt_audio_rms_topic = state.mqtt_audio_rms_topic;
+  uint16_t new_mqtt_rms_window_seconds = state.mqtt_rms_window_seconds > 0 ? state.mqtt_rms_window_seconds : 10;
+
+  JsonVariant mqtt = doc["mqtt"];
+  if (!mqtt.isNull()) {
+    if (!mqtt.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mqtt object\"}";
+      return r;
+    }
+    if (!mqtt["broker_url"].isNull()) new_mqtt_broker_url = String((const char*)(mqtt["broker_url"] | ""));
+    if (!mqtt["username"].isNull()) new_mqtt_username = String((const char*)(mqtt["username"] | ""));
+    if (!mqtt["password"].isNull()) new_mqtt_password = String((const char*)(mqtt["password"] | ""));
+    if (!mqtt["audio_rms_topic"].isNull()) new_mqtt_audio_rms_topic = String((const char*)(mqtt["audio_rms_topic"] | ""));
+    if (!mqtt["rms_window_seconds"].isNull()) {
+      int v = mqtt["rms_window_seconds"].as<int>();
+      if (v < 1 || v > 3600) {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mqtt.rms_window_seconds (1..3600)\"}";
+        return r;
+      }
+      new_mqtt_rms_window_seconds = static_cast<uint16_t>(v);
+    }
+    new_mqtt_broker_url.trim();
+    new_mqtt_username.trim();
+    new_mqtt_password.trim();
+    new_mqtt_audio_rms_topic.trim();
+    if (new_mqtt_broker_url.length() > 0 && new_mqtt_audio_rms_topic.length() == 0) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"mqtt.audio_rms_topic required when mqtt.broker_url is set\"}";
+      return r;
+    }
+  }
+
   JsonVariant audio = doc["audio"];
   if (!audio.isNull()) {
     if (!audio.is<JsonObject>()) {
@@ -808,6 +845,22 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
       r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
       return r;
     }
+    {
+      Preferences mp;
+      if (mp.begin("aztcfg", false)) {
+        if (new_mqtt_broker_url.length() > 0) kv_set_string(mp, "mqtt_url", new_mqtt_broker_url); else kv_remove_key(mp, "mqtt_url");
+        if (new_mqtt_username.length() > 0) kv_set_string(mp, "mqtt_user", new_mqtt_username); else kv_remove_key(mp, "mqtt_user");
+        if (new_mqtt_password.length() > 0) kv_set_string(mp, "mqtt_pass", new_mqtt_password); else kv_remove_key(mp, "mqtt_pass");
+        if (new_mqtt_audio_rms_topic.length() > 0) kv_set_string(mp, "mqtt_topic", new_mqtt_audio_rms_topic); else kv_remove_key(mp, "mqtt_topic");
+        mp.putUShort("mqtt_rms_s", new_mqtt_rms_window_seconds > 0 ? new_mqtt_rms_window_seconds : 10);
+        mp.end();
+      }
+      state.mqtt_broker_url = new_mqtt_broker_url;
+      state.mqtt_username = new_mqtt_username;
+      state.mqtt_password = new_mqtt_password;
+      state.mqtt_audio_rms_topic = new_mqtt_audio_rms_topic;
+      state.mqtt_rms_window_seconds = new_mqtt_rms_window_seconds > 0 ? new_mqtt_rms_window_seconds : 10;
+    }
     state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
     Preferences p;
     if (p.begin("aztcfg", false)) {
@@ -921,6 +974,23 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     r.code = 500;
     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
     return r;
+  }
+
+  {
+    Preferences mp;
+    if (mp.begin("aztcfg", false)) {
+      if (new_mqtt_broker_url.length() > 0) kv_set_string(mp, "mqtt_url", new_mqtt_broker_url); else kv_remove_key(mp, "mqtt_url");
+      if (new_mqtt_username.length() > 0) kv_set_string(mp, "mqtt_user", new_mqtt_username); else kv_remove_key(mp, "mqtt_user");
+      if (new_mqtt_password.length() > 0) kv_set_string(mp, "mqtt_pass", new_mqtt_password); else kv_remove_key(mp, "mqtt_pass");
+      if (new_mqtt_audio_rms_topic.length() > 0) kv_set_string(mp, "mqtt_topic", new_mqtt_audio_rms_topic); else kv_remove_key(mp, "mqtt_topic");
+      mp.putUShort("mqtt_rms_s", new_mqtt_rms_window_seconds > 0 ? new_mqtt_rms_window_seconds : 10);
+      mp.end();
+    }
+    state.mqtt_broker_url = new_mqtt_broker_url;
+    state.mqtt_username = new_mqtt_username;
+    state.mqtt_password = new_mqtt_password;
+    state.mqtt_audio_rms_topic = new_mqtt_audio_rms_topic;
+    state.mqtt_rms_window_seconds = new_mqtt_rms_window_seconds > 0 ? new_mqtt_rms_window_seconds : 10;
   }
 
   state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
@@ -1081,6 +1151,11 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   String time_servers_csv = state.time_servers_csv;
   bool new_mdns_enabled = state.mdns_enabled;
   String new_mdns_hostname = state.mdns_hostname;
+  String new_mqtt_broker_url = state.mqtt_broker_url;
+  String new_mqtt_username = state.mqtt_username;
+  String new_mqtt_password = state.mqtt_password;
+  String new_mqtt_audio_rms_topic = state.mqtt_audio_rms_topic;
+  uint16_t new_mqtt_rms_window_seconds = state.mqtt_rms_window_seconds > 0 ? state.mqtt_rms_window_seconds : 10;
   bool new_stream_header_auto_record = state.stream_header_auto_record;
   bool new_stream_header_auto_decode = state.stream_header_auto_decode;
   uint8_t new_audio_preamp_gain = state.audio_preamp_gain;
@@ -1167,6 +1242,37 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     }
   }
 
+  if (!patch["mqtt"].isNull()) {
+    JsonVariant pmq = patch["mqtt"];
+    if (!pmq.is<JsonObject>()) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mqtt object\"}";
+      return r;
+    }
+    if (!pmq["broker_url"].isNull()) new_mqtt_broker_url = String((const char*)(pmq["broker_url"] | ""));
+    if (!pmq["username"].isNull()) new_mqtt_username = String((const char*)(pmq["username"] | ""));
+    if (!pmq["password"].isNull()) new_mqtt_password = String((const char*)(pmq["password"] | ""));
+    if (!pmq["audio_rms_topic"].isNull()) new_mqtt_audio_rms_topic = String((const char*)(pmq["audio_rms_topic"] | ""));
+    if (!pmq["rms_window_seconds"].isNull()) {
+      int v = pmq["rms_window_seconds"].as<int>();
+      if (v < 1 || v > 3600) {
+        r.code = 400;
+        r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"invalid mqtt.rms_window_seconds (1..3600)\"}";
+        return r;
+      }
+      new_mqtt_rms_window_seconds = static_cast<uint16_t>(v);
+    }
+    new_mqtt_broker_url.trim();
+    new_mqtt_username.trim();
+    new_mqtt_password.trim();
+    new_mqtt_audio_rms_topic.trim();
+    if (new_mqtt_broker_url.length() > 0 && new_mqtt_audio_rms_topic.length() == 0) {
+      r.code = 400;
+      r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_SCHEMA\",\"detail\":\"mqtt.audio_rms_topic required when mqtt.broker_url is set\"}";
+      return r;
+    }
+  }
+
   if (!patch["stream_header_flags"].isNull()) {
     JsonVariant pshf = patch["stream_header_flags"];
     if (!pshf.is<JsonObject>()) {
@@ -1229,6 +1335,23 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
     r.code = 500;
     r.body = "{\"ok\":false,\"error\":\"ERR_CONFIG_STATE\",\"detail\":\"failed to persist config\"}";
     return r;
+  }
+
+  {
+    Preferences mp;
+    if (mp.begin("aztcfg", false)) {
+      if (new_mqtt_broker_url.length() > 0) kv_set_string(mp, "mqtt_url", new_mqtt_broker_url); else kv_remove_key(mp, "mqtt_url");
+      if (new_mqtt_username.length() > 0) kv_set_string(mp, "mqtt_user", new_mqtt_username); else kv_remove_key(mp, "mqtt_user");
+      if (new_mqtt_password.length() > 0) kv_set_string(mp, "mqtt_pass", new_mqtt_password); else kv_remove_key(mp, "mqtt_pass");
+      if (new_mqtt_audio_rms_topic.length() > 0) kv_set_string(mp, "mqtt_topic", new_mqtt_audio_rms_topic); else kv_remove_key(mp, "mqtt_topic");
+      mp.putUShort("mqtt_rms_s", new_mqtt_rms_window_seconds > 0 ? new_mqtt_rms_window_seconds : 10);
+      mp.end();
+    }
+    state.mqtt_broker_url = new_mqtt_broker_url;
+    state.mqtt_username = new_mqtt_username;
+    state.mqtt_password = new_mqtt_password;
+    state.mqtt_audio_rms_topic = new_mqtt_audio_rms_topic;
+    state.mqtt_rms_window_seconds = new_mqtt_rms_window_seconds > 0 ? new_mqtt_rms_window_seconds : 10;
   }
 
   state.discovery_announcement_json = build_discovery_announcement_json(state, kHttpPort);
@@ -2040,7 +2163,11 @@ HttpDispatchResult dispatch_request(const String& method,
              ",\"mdns_enabled\":" + String(state.mdns_enabled ? "true" : "false") +
              ",\"mdns_hostname\":\"" + state.mdns_hostname +
              "\",\"mdns_fqdn\":\"" + (state.mdns_hostname.length() > 0 ? state.mdns_hostname + ".local" : String("")) +
-             "\",\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 +
+             "\",\"mqtt_configured\":" + String(state.mqtt_broker_url.length() > 0 ? "true" : "false") +
+             ",\"mqtt_broker_url\":" + json_quote(state.mqtt_broker_url) +
+             ",\"mqtt_audio_rms_topic\":" + json_quote(state.mqtt_audio_rms_topic) +
+             ",\"mqtt_rms_window_seconds\":" + String(state.mqtt_rms_window_seconds > 0 ? state.mqtt_rms_window_seconds : 10) +
+             ",\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 +
              "\",\"device_sign_fingerprint_hex\":\"" + state.device_sign_fingerprint_hex +
              "\",\"device_chip_id_hex\":\"" + state.device_chip_id_hex +
              "\",\"last_reset_reason\":\"" + state.last_reset_reason +

@@ -144,6 +144,11 @@ static bool ensure_device_keypair(AppState& state) {
   state.time_servers_csv = "";
   state.mdns_enabled = false;
   state.mdns_hostname = "";
+  state.mqtt_broker_url = "";
+  state.mqtt_username = "";
+  state.mqtt_password = "";
+  state.mqtt_audio_rms_topic = "";
+  state.mqtt_rms_window_seconds = 10;
   state.device_certificate_serial = "";
   state.device_certificate_json = "";
   state.discovery_announcement_json = "";
@@ -232,6 +237,12 @@ void load_config_state(AppState& state) {
   state.time_servers_csv = kv_get_string(g_prefs, "time_srv", "");
   state.mdns_enabled = g_prefs.getBool("mdns_en", false);
   state.mdns_hostname = kv_get_string(g_prefs, "mdns_host", "");
+  state.mqtt_broker_url = kv_get_string(g_prefs, "mqtt_url", "");
+  state.mqtt_username = kv_get_string(g_prefs, "mqtt_user", "");
+  state.mqtt_password = kv_get_string(g_prefs, "mqtt_pass", "");
+  state.mqtt_audio_rms_topic = kv_get_string(g_prefs, "mqtt_topic", "");
+  state.mqtt_rms_window_seconds = static_cast<uint16_t>(g_prefs.getUShort("mqtt_rms_s", 10));
+  if (state.mqtt_rms_window_seconds == 0) state.mqtt_rms_window_seconds = 10;
   state.stream_header_auto_record = g_prefs.getBool("hdr_auto_rec", true);
   state.stream_header_auto_decode = g_prefs.getBool("hdr_auto_dec", true);
   state.device_certificate_serial = kv_get_string(g_prefs, "dev_cert_sn", "");
@@ -454,6 +465,11 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   kv_remove_key(g_prefs, "time_srv");
   kv_remove_key(g_prefs, "mdns_en");
   kv_remove_key(g_prefs, "mdns_host");
+  kv_remove_key(g_prefs, "mqtt_url");
+  kv_remove_key(g_prefs, "mqtt_user");
+  kv_remove_key(g_prefs, "mqtt_pass");
+  kv_remove_key(g_prefs, "mqtt_topic");
+  kv_remove_key(g_prefs, "mqtt_rms_s");
   kv_remove_key(g_prefs, "hdr_auto_rec");
   kv_remove_key(g_prefs, "hdr_auto_dec");
   kv_remove_key(g_prefs, "device_cert");
@@ -489,6 +505,11 @@ bool reset_managed_config_preserve_device_keys(AppState& state) {
   state.time_servers_csv = "";
   state.mdns_enabled = false;
   state.mdns_hostname = "";
+  state.mqtt_broker_url = "";
+  state.mqtt_username = "";
+  state.mqtt_password = "";
+  state.mqtt_audio_rms_topic = "";
+  state.mqtt_rms_window_seconds = 10;
   state.device_certificate_serial = "";
   state.device_certificate_json = "";
   state.discovery_announcement_json = "";

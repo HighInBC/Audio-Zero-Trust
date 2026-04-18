@@ -82,6 +82,13 @@ struct AppState {
   uint32_t audio_sample_rate_hz = constants::audio::kDefaultSampleRateHz;
   uint8_t audio_channels = constants::audio::kDefaultChannels;
   uint8_t audio_sample_width_bytes = constants::audio::kDefaultSampleWidthBytes;
+
+  // Optional MQTT audio telemetry (disabled when broker URL is empty).
+  String mqtt_broker_url;
+  String mqtt_username;
+  String mqtt_password;
+  String mqtt_audio_rms_topic;
+  uint16_t mqtt_rms_window_seconds = 10;
 };
 
 }  // namespace azt

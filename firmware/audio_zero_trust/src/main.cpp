@@ -11,6 +11,7 @@
 #include "azt_http_api.h"
 #include "azt_serial_control.h"
 #include "azt_https_server.h"
+#include "azt_mqtt.h"
 
 namespace {
 
@@ -21,6 +22,7 @@ WiFiServer g_stream_server(azt::constants::runtime::kStreamPort);
 SemaphoreHandle_t g_state_mu = nullptr;
 TaskHandle_t g_stream_task = nullptr;
 bool g_http_servers_enabled = false;
+String g_last_mqtt_sig;
 
 azt::SerialControlState g_serial_state;
 
@@ -73,6 +75,8 @@ void setup() {
   g_state.discovery_announcement_json = azt::build_discovery_announcement_json(g_state, azt::kHttpPort);
   azt::setup_wifi(g_state);
   azt::setup_time_sync(g_state);
+  azt::mqtt_apply_config(g_state);
+  g_last_mqtt_sig = g_state.mqtt_broker_url + "|" + g_state.mqtt_username + "|" + g_state.mqtt_password + "|" + g_state.mqtt_audio_rms_topic + "|" + String(g_state.mqtt_rms_window_seconds);
   xSemaphoreGive(g_state_mu);
 
   azt::setup_audio_input(g_state);
@@ -110,6 +114,11 @@ void loop() {
       azt::maybe_maintain_wifi(g_state);
       azt::maybe_refresh_time_sync(g_state);
       azt::maybe_broadcast_discovery_announcement(g_state);
+    }
+    String mqtt_sig = g_state.mqtt_broker_url + "|" + g_state.mqtt_username + "|" + g_state.mqtt_password + "|" + g_state.mqtt_audio_rms_topic + "|" + String(g_state.mqtt_rms_window_seconds);
+    if (mqtt_sig != g_last_mqtt_sig) {
+      azt::mqtt_apply_config(g_state);
+      g_last_mqtt_sig = mqtt_sig;
     }
     xSemaphoreGive(g_state_mu);
   }

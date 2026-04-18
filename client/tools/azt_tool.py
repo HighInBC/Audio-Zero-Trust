@@ -268,6 +268,28 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
             pa["adc_gain"] = int(audio_adc)
         patch_obj["audio"] = pa
 
+    mqtt_broker_url = (getattr(args, "mqtt_broker_url", "") or "").strip()
+    mqtt_username = (getattr(args, "mqtt_username", "") or "").strip()
+    mqtt_password = (getattr(args, "mqtt_password", "") or "").strip()
+    mqtt_audio_rms_topic = (getattr(args, "mqtt_audio_rms_topic", "") or "").strip()
+    mqtt_rms_window_seconds = getattr(args, "mqtt_audio_rms_window_seconds", None)
+    if mqtt_rms_window_seconds is not None and (int(mqtt_rms_window_seconds) < 1 or int(mqtt_rms_window_seconds) > 3600):
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "--mqtt-audio-rms-window-seconds must be 1..3600"}, as_json=bool(getattr(args, "as_json", False)))
+        return 1
+    if mqtt_broker_url or mqtt_username or mqtt_password or mqtt_audio_rms_topic or mqtt_rms_window_seconds is not None:
+        pm = patch_obj.get("mqtt") if isinstance(patch_obj.get("mqtt"), dict) else {}
+        if mqtt_broker_url:
+            pm["broker_url"] = mqtt_broker_url
+        if mqtt_username:
+            pm["username"] = mqtt_username
+        if mqtt_password:
+            pm["password"] = mqtt_password
+        if mqtt_audio_rms_topic:
+            pm["audio_rms_topic"] = mqtt_audio_rms_topic
+        if mqtt_rms_window_seconds is not None:
+            pm["rms_window_seconds"] = int(mqtt_rms_window_seconds)
+        patch_obj["mqtt"] = pm
+
     if not patch_obj:
         emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "provide --patch or patch flags (device/wifi/authorized listeners/time/mdns/stream-header-flags/listener-key/recorder-auth-key)"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
