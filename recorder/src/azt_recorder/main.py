@@ -11,7 +11,12 @@ from cryptography.hazmat.primitives import serialization
 from .config import load_config
 from .discovery import listen_discovery
 from .supervisor import Supervisor
-from .recorder import find_untimestamped_azt_files, timestamp_recording
+from .recorder import (
+    find_timestamp_tars_needing_ots,
+    find_untimestamped_azt_files,
+    process_timestamp_tar_ots,
+    timestamp_recording,
+)
 from .trust import evaluate_discovery_ad
 
 
@@ -49,6 +54,25 @@ async def run(config_path: str) -> None:
             health_file.write_text(msg + "\n")
             await asyncio.sleep(30)
 
+    async def ots_backfill_task() -> None:
+        while True:
+            await asyncio.sleep(max(10, int(cfg.recording.ots_process_interval_seconds)))
+            if not cfg.recording.auto_ots_on_timestamp:
+                continue
+
+            out_root = Path(cfg.recording.output_dir)
+            candidates = await asyncio.to_thread(find_timestamp_tars_needing_ots, out_root, older_than_seconds=30)
+            for tar_path in candidates:
+                try:
+                    status = await asyncio.to_thread(
+                        process_timestamp_tar_ots,
+                        tar_path,
+                        ots_client_cmd=cfg.recording.ots_client_cmd,
+                    )
+                    print(f"[ots-backfill] tar={tar_path} status={status}")
+                except Exception as e:
+                    print(f"[ots-backfill] ERROR tar={tar_path} err={e}")
+
     async def timestamp_backfill_task() -> None:
         while True:
             await asyncio.sleep(10)
@@ -65,6 +89,7 @@ async def run(config_path: str) -> None:
 
     hb = asyncio.create_task(heartbeat_task(), name="heartbeat")
     backfill = asyncio.create_task(timestamp_backfill_task(), name="timestamp-backfill")
+    ots_backfill = asyncio.create_task(ots_backfill_task(), name="ots-backfill")
 
     try:
         async for ad in listen_discovery(cfg.discovery.udp_port):
@@ -96,6 +121,7 @@ async def run(config_path: str) -> None:
     finally:
         hb.cancel()
         backfill.cancel()
+        ots_backfill.cancel()
         await sup.shutdown()
 
 

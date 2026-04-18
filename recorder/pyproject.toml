@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
   "PyYAML>=6.0",
   "cryptography>=42.0.0",
+  "opentimestamps-client>=0.7.2",
 ]
 
 [project.scripts]

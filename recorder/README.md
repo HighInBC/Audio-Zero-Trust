@@ -16,6 +16,8 @@ Discovery + trust-decision + recording daemon for Audio-Zero-Trust devices.
 - If device has `recorder_auth_key` configured, signs stream start with recorder Ed25519 key
 - Writes `.azt` files under configured output path
 - Auto-timestamps completed recordings via TSA (`.timestamp.tar`)
+- Writes `manifest.json` inside each `.timestamp.tar` (JSON hashes for all archive members)
+- Supports OTS sidecar workflow for both recording + TSA response (`.azt.ots` and `.azt.tsr.ots`) and embeds both upgraded proofs into `.timestamp.tar`
 
 ## Run (dev)
 
@@ -29,4 +31,7 @@ azt-recorder --config config/recorder.yaml
 
 - `recording.output_dir`: recording destination inside container/runtime
 - `recording.recorder_auth_private_key_path`: optional Ed25519 private key used for stream-start auth signatures
+- `recording.auto_ots_on_timestamp`: enable OTS sidecar/upgrade/embed backfill for `.timestamp.tar`
+- `recording.ots_client_cmd`: OpenTimestamps CLI command (default: `ots`)
+- `recording.ots_process_interval_seconds`: OTS backfill loop interval (default: 3600)
 - Keep runtime config/secrets outside git in deployment environments.
