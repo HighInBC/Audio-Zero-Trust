@@ -78,7 +78,7 @@ def run(args: argparse.Namespace) -> int:
         ip_alias = (getattr(args, "ip", "") or "").strip()
         target_host = host or ip_alias or None
 
-        enable_mqtt = bool(getattr(args, "enable_mqtt", False))
+        enable_mqtt = bool(getattr(args, "mqtt_enabled", False))
         mqtt_broker_url = (getattr(args, "mqtt_broker_url", "") or "").strip()
         mqtt_username = (getattr(args, "mqtt_username", "") or "").strip()
         mqtt_password = (getattr(args, "mqtt_password", "") or "").strip()
@@ -96,7 +96,7 @@ def run(args: argparse.Namespace) -> int:
             if not mqtt_audio_rms_topic:
                 missing_mqtt.append("--mqtt-audio-rms-topic (or mqtt_audio_rms_topic default)")
             if missing_mqtt:
-                emit_envelope(command="configure-device", ok=False, error="CONFIGURE_DEVICE_ARGS", payload={"detail": f"missing required mqtt options with --enable-mqtt: {', '.join(missing_mqtt)}"}, as_json=bool(getattr(args, "as_json", False)))
+                emit_envelope(command="configure-device", ok=False, error="CONFIGURE_DEVICE_ARGS", payload={"detail": f"missing required mqtt options with --mqtt-enabled: {', '.join(missing_mqtt)}"}, as_json=bool(getattr(args, "as_json", False)))
                 return 1
 
         code, ok, err, payload = configure_device(

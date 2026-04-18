@@ -161,8 +161,8 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
             if ck in conf_defaults:
                 _set_if_unset(args, an, conf_defaults[ck])
 
-        # Explicit opt-in: only lift mqtt_* defaults when caller passes --enable-mqtt.
-        if bool(getattr(args, "enable_mqtt", False)):
+        # Explicit opt-in: only lift mqtt_* defaults when caller passes --mqtt-enabled.
+        if bool(getattr(args, "mqtt_enabled", False)):
             for ck, an in [
                 ("mqtt_broker_url", "mqtt_broker_url"),
                 ("mqtt_username", "mqtt_username"),
@@ -195,15 +195,17 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command == "config-patch":
         # For config-patch, do not implicitly set recorder_auth_key_path from defaults.
         # recorder_auth_key should be opt-in only via explicit --recorder-auth-key.
-        for ck, an in [
-            ("mqtt_broker_url", "mqtt_broker_url"),
-            ("mqtt_username", "mqtt_username"),
-            ("mqtt_password", "mqtt_password"),
-            ("mqtt_audio_rms_topic", "mqtt_audio_rms_topic"),
-            ("mqtt_audio_rms_window_seconds", "mqtt_audio_rms_window_seconds"),
-        ]:
-            if ck in conf_defaults:
-                _set_if_unset(args, an, conf_defaults[ck])
+        # mqtt_* defaults are opt-in via --mqtt-enabled.
+        if bool(getattr(args, "mqtt_enabled", False)):
+            for ck, an in [
+                ("mqtt_broker_url", "mqtt_broker_url"),
+                ("mqtt_username", "mqtt_username"),
+                ("mqtt_password", "mqtt_password"),
+                ("mqtt_audio_rms_topic", "mqtt_audio_rms_topic"),
+                ("mqtt_audio_rms_window_seconds", "mqtt_audio_rms_window_seconds"),
+            ]:
+                if ck in conf_defaults:
+                    _set_if_unset(args, an, conf_defaults[ck])
 
     if command == "ota-bundle-create":
         for ck, an in [
