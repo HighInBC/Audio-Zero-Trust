@@ -43,6 +43,7 @@ defaults:
   #   - pool.ntp.org
   # audio_preamp_gain: 4              # 1..8
   # audio_adc_gain: 32                # 0..255
+  # Note: configure-device only applies mqtt_* when --enable-mqtt is passed.
   # mqtt_broker_url: "mqtt://192.168.1.10:1883"
   # mqtt_username: ""
   # mqtt_password: ""

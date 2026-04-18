@@ -161,6 +161,18 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
             if ck in conf_defaults:
                 _set_if_unset(args, an, conf_defaults[ck])
 
+        # Explicit opt-in: only lift mqtt_* defaults when caller passes --enable-mqtt.
+        if bool(getattr(args, "enable_mqtt", False)):
+            for ck, an in [
+                ("mqtt_broker_url", "mqtt_broker_url"),
+                ("mqtt_username", "mqtt_username"),
+                ("mqtt_password", "mqtt_password"),
+                ("mqtt_audio_rms_topic", "mqtt_audio_rms_topic"),
+                ("mqtt_audio_rms_window_seconds", "mqtt_audio_rms_window_seconds"),
+            ]:
+                if ck in conf_defaults:
+                    _set_if_unset(args, an, conf_defaults[ck])
+
         if "tls_valid_days" in conf_defaults:
             _set_if_matches(args, "tls_valid_days", int(conf_defaults["tls_valid_days"]), {180})
         if "tls_reboot_wait_seconds" in conf_defaults:

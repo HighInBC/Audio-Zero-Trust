@@ -83,6 +83,12 @@ def configure_device(
     mdns_hostname: str,
     audio_preamp_gain: int | None,
     audio_adc_gain: int | None,
+    enable_mqtt: bool,
+    mqtt_broker_url: str,
+    mqtt_username: str,
+    mqtt_password: str,
+    mqtt_audio_rms_topic: str,
+    mqtt_audio_rms_window_seconds: int | None,
     tls_bootstrap: bool,
     tls_valid_days: int,
 ) -> tuple[int, bool, str | None, dict]:
@@ -184,6 +190,18 @@ def configure_device(
             "rule": "must match ^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
         }
 
+    mqtt_broker_url = (mqtt_broker_url or "").strip()
+    mqtt_username = (mqtt_username or "").strip()
+    mqtt_password = (mqtt_password or "").strip()
+    mqtt_audio_rms_topic = (mqtt_audio_rms_topic or "").strip()
+    if mqtt_audio_rms_window_seconds is not None and not (1 <= int(mqtt_audio_rms_window_seconds) <= 3600):
+        return 22, False, "INVALID_MQTT_RMS_WINDOW_SECONDS", {"detail": int(mqtt_audio_rms_window_seconds)}
+    if enable_mqtt:
+        if not mqtt_broker_url:
+            return 23, False, "INVALID_MQTT_BROKER_URL", {"detail": "mqtt_broker_url required when enable_mqtt=true"}
+        if not mqtt_audio_rms_topic:
+            return 24, False, "INVALID_MQTT_AUDIO_RMS_TOPIC", {"detail": "mqtt_audio_rms_topic required when enable_mqtt=true"}
+
     for listener_ip in authorized_listener_ips:
         try:
             ipaddress.IPv4Address(listener_ip)
@@ -241,6 +259,15 @@ def configure_device(
         unsigned_cfg["mdns"] = {
             "enabled": bool(mdns_enabled),
             "hostname": mdns_hostname,
+        }
+
+    if enable_mqtt:
+        unsigned_cfg["mqtt"] = {
+            "broker_url": mqtt_broker_url,
+            "username": mqtt_username,
+            "password": mqtt_password,
+            "audio_rms_topic": mqtt_audio_rms_topic,
+            "rms_window_seconds": int(mqtt_audio_rms_window_seconds) if mqtt_audio_rms_window_seconds is not None else 10,
         }
 
     tls_material = None
@@ -338,6 +365,10 @@ def configure_device(
         "mdns_hostname": mdns_hostname,
         "audio_preamp_gain": (int(audio_preamp_gain) if audio_preamp_gain is not None else None),
         "audio_adc_gain": (int(audio_adc_gain) if audio_adc_gain is not None else None),
+        "enable_mqtt": bool(enable_mqtt),
+        "mqtt_broker_url": (mqtt_broker_url if enable_mqtt else ""),
+        "mqtt_audio_rms_topic": (mqtt_audio_rms_topic if enable_mqtt else ""),
+        "mqtt_audio_rms_window_seconds": (int(mqtt_audio_rms_window_seconds) if (enable_mqtt and mqtt_audio_rms_window_seconds is not None) else (10 if enable_mqtt else None)),
         "tls_bootstrap_requested": bool(tls_bootstrap),
         "tls_deferred_until_ip": bool(tls_deferred_until_ip),
         "if_version": int(current_revision),

@@ -78,6 +78,27 @@ def run(args: argparse.Namespace) -> int:
         ip_alias = (getattr(args, "ip", "") or "").strip()
         target_host = host or ip_alias or None
 
+        enable_mqtt = bool(getattr(args, "enable_mqtt", False))
+        mqtt_broker_url = (getattr(args, "mqtt_broker_url", "") or "").strip()
+        mqtt_username = (getattr(args, "mqtt_username", "") or "").strip()
+        mqtt_password = (getattr(args, "mqtt_password", "") or "").strip()
+        mqtt_audio_rms_topic = (getattr(args, "mqtt_audio_rms_topic", "") or "").strip()
+        mqtt_audio_rms_window_seconds = getattr(args, "mqtt_audio_rms_window_seconds", None)
+
+        if mqtt_audio_rms_window_seconds is not None and not (1 <= int(mqtt_audio_rms_window_seconds) <= 3600):
+            emit_envelope(command="configure-device", ok=False, error="INVALID_MQTT_RMS_WINDOW_SECONDS", payload={"detail": "--mqtt-audio-rms-window-seconds must be 1..3600"}, as_json=bool(getattr(args, "as_json", False)))
+            return 1
+
+        if enable_mqtt:
+            missing_mqtt: list[str] = []
+            if not mqtt_broker_url:
+                missing_mqtt.append("--mqtt-broker-url (or mqtt_broker_url default)")
+            if not mqtt_audio_rms_topic:
+                missing_mqtt.append("--mqtt-audio-rms-topic (or mqtt_audio_rms_topic default)")
+            if missing_mqtt:
+                emit_envelope(command="configure-device", ok=False, error="CONFIGURE_DEVICE_ARGS", payload={"detail": f"missing required mqtt options with --enable-mqtt: {', '.join(missing_mqtt)}"}, as_json=bool(getattr(args, "as_json", False)))
+                return 1
+
         code, ok, err, payload = configure_device(
             admin_creds_dir=admin_dir,
             listener_creds_dir=listener_dir,
@@ -106,6 +127,12 @@ def run(args: argparse.Namespace) -> int:
             mdns_hostname=(getattr(args, "mdns_hostname", "") or ""),
             audio_preamp_gain=(int(audio_preamp_gain) if audio_preamp_gain is not None else None),
             audio_adc_gain=(int(audio_adc_gain) if audio_adc_gain is not None else None),
+            enable_mqtt=enable_mqtt,
+            mqtt_broker_url=mqtt_broker_url,
+            mqtt_username=mqtt_username,
+            mqtt_password=mqtt_password,
+            mqtt_audio_rms_topic=mqtt_audio_rms_topic,
+            mqtt_audio_rms_window_seconds=(int(mqtt_audio_rms_window_seconds) if mqtt_audio_rms_window_seconds is not None else None),
             tls_bootstrap=bool(getattr(args, "tls_bootstrap", True)),
             tls_valid_days=int(getattr(args, "tls_valid_days", 180)),
         )

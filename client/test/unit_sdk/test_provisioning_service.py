@@ -47,6 +47,12 @@ def _base_kwargs(tmp_path: Path) -> dict:
         mdns_hostname="",
         audio_preamp_gain=None,
         audio_adc_gain=None,
+        enable_mqtt=False,
+        mqtt_broker_url="",
+        mqtt_username="",
+        mqtt_password="",
+        mqtt_audio_rms_topic="",
+        mqtt_audio_rms_window_seconds=None,
         tls_bootstrap=False,
         tls_valid_days=30,
     )
@@ -99,3 +105,20 @@ def test_configure_device_serial_warning_message_shape(monkeypatch, tmp_path):
     assert code == 0 and ok is True and err is None
     assert isinstance(payload.get("messages"), list)
     assert payload["messages"][0]["level"] == "caution"
+
+def test_configure_device_enable_mqtt_requires_broker_and_topic(monkeypatch, tmp_path):
+    _patch_common(monkeypatch)
+    kwargs = _base_kwargs(tmp_path)
+    kwargs["enable_mqtt"] = True
+    code, ok, err, payload = provisioning_service.configure_device(**kwargs)
+    assert ok is False
+    assert err == "INVALID_MQTT_BROKER_URL"
+
+
+def test_configure_device_invalid_mqtt_window(monkeypatch, tmp_path):
+    _patch_common(monkeypatch)
+    kwargs = _base_kwargs(tmp_path)
+    kwargs["mqtt_audio_rms_window_seconds"] = 0
+    code, ok, err, payload = provisioning_service.configure_device(**kwargs)
+    assert ok is False
+    assert err == "INVALID_MQTT_RMS_WINDOW_SECONDS"
