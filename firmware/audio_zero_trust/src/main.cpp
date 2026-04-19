@@ -80,7 +80,6 @@ void setup() {
   xSemaphoreGive(g_state_mu);
 
   azt::setup_audio_input(g_state);
-  azt::reapply_audio_input_registers(g_state);
 
   bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, azt::constants::runtime::kApiTlsPort);
 
