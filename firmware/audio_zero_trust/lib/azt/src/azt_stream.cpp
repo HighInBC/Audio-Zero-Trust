@@ -33,7 +33,7 @@ static constexpr uint32_t kTelemetryIntervalBlocks = 50;
 static constexpr uint32_t kMaxContiguousDropMs = 10000;
 static constexpr float kAudioDegradedLowDbfs = -95.0f;
 static constexpr float kAudioDegradedHighDbfs = -3.0f;
-static constexpr uint8_t kAudioDegradedConsecutiveWindows = 3;
+static constexpr uint8_t kAudioDegradedConsecutiveWindows = 1;
 static volatile bool g_stream_shutdown_requested = false;
 
 void request_stream_shutdown() { g_stream_shutdown_requested = true; }
