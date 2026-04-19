@@ -416,6 +416,9 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   uint64_t mqtt_rms_window_start_us = static_cast<uint64_t>(esp_timer_get_time());
   double mqtt_rms_sum_sq = 0.0;
   uint64_t mqtt_rms_sample_count = 0;
+  float mqtt_rms_dbfs_min = 0.0f;
+  float mqtt_rms_dbfs_max = 0.0f;
+  bool mqtt_rms_have_frame_stats = false;
   int drop_test_remaining = drop_test_frames;
   uint32_t sig_interval = kSigCheckpointMinInterval;
   uint32_t last_sig_ref_seq = 0;
@@ -464,21 +467,41 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     if (mqtt_rms_enabled && sample_width_bytes == 2 && frame.len >= 2) {
       const int16_t* s = reinterpret_cast<const int16_t*>(frame.data.data());
       size_t n = static_cast<size_t>(frame.len / 2);
+      double frame_sum_sq = 0.0;
       for (size_t i = 0; i < n; i++) {
         double v = static_cast<double>(s[i]) / 32768.0;
-        mqtt_rms_sum_sq += (v * v);
+        double vv = (v * v);
+        frame_sum_sq += vv;
+        mqtt_rms_sum_sq += vv;
       }
       mqtt_rms_sample_count += n;
+
+      double frame_rms = n > 0 ? sqrt(frame_sum_sq / static_cast<double>(n)) : 0.0;
+      if (frame_rms < 1e-6) frame_rms = 1e-6;
+      float frame_dbfs = static_cast<float>(20.0 * log10(frame_rms));
+      if (frame_dbfs < -96.0f) frame_dbfs = -96.0f;
+      if (!mqtt_rms_have_frame_stats) {
+        mqtt_rms_dbfs_min = frame_dbfs;
+        mqtt_rms_dbfs_max = frame_dbfs;
+        mqtt_rms_have_frame_stats = true;
+      } else {
+        if (frame_dbfs < mqtt_rms_dbfs_min) mqtt_rms_dbfs_min = frame_dbfs;
+        if (frame_dbfs > mqtt_rms_dbfs_max) mqtt_rms_dbfs_max = frame_dbfs;
+      }
+
       uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
       if (now_us - mqtt_rms_window_start_us >= static_cast<uint64_t>(mqtt_rms_window_seconds) * 1000000ULL) {
         double rms = mqtt_rms_sample_count > 0 ? sqrt(mqtt_rms_sum_sq / static_cast<double>(mqtt_rms_sample_count)) : 0.0;
         if (rms < 1e-6) rms = 1e-6;
         float dbfs = static_cast<float>(20.0 * log10(rms));
         if (dbfs < -96.0f) dbfs = -96.0f;
-        mqtt_publish_audio_rms(dbfs, mqtt_rms_window_seconds, sample_rate_hz);
+        float dbfs_min = mqtt_rms_have_frame_stats ? mqtt_rms_dbfs_min : dbfs;
+        float dbfs_max = mqtt_rms_have_frame_stats ? mqtt_rms_dbfs_max : dbfs;
+        mqtt_publish_audio_rms(dbfs, dbfs_min, dbfs_max, mqtt_rms_window_seconds, sample_rate_hz);
         mqtt_rms_window_start_us = now_us;
         mqtt_rms_sum_sq = 0.0;
         mqtt_rms_sample_count = 0;
+        mqtt_rms_have_frame_stats = false;
       }
     }
 

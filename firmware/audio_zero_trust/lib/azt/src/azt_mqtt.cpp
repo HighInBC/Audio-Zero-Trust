@@ -95,12 +95,14 @@ bool mqtt_is_enabled() {
   return g_client != nullptr && g_topic.length() > 0;
 }
 
-void mqtt_publish_audio_rms(float rms_dbfs, uint16_t window_seconds, uint32_t sample_rate_hz) {
+void mqtt_publish_audio_rms(float rms_dbfs, float rms_dbfs_min, float rms_dbfs_max, uint16_t window_seconds, uint32_t sample_rate_hz) {
   if (!g_client || !g_connected || g_topic.length() == 0) return;
 
   JsonDocument doc;
   doc["schema"] = "azt.audio_rms.v1";
   doc["rms_dbfs"] = rms_dbfs;
+  doc["rms_dbfs_min"] = rms_dbfs_min;
+  doc["rms_dbfs_max"] = rms_dbfs_max;
   doc["window_seconds"] = static_cast<uint32_t>(window_seconds > 0 ? window_seconds : 10);
   doc["sample_rate_hz"] = sample_rate_hz;
   doc["device_label"] = g_device_label;
