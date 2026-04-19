@@ -255,10 +255,6 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
         return False, "ERR_STREAM_HEADER_JSON"
 
     cert_doc = plain.get("device_certificate")
-    if not isinstance(cert_doc, dict):
-        return False, "ERR_STREAM_CERT_REQUIRED"
-    if not isinstance(cert_doc.get("certificate_payload_b64"), str) or not cert_doc.get("certificate_payload_b64"):
-        return False, "ERR_STREAM_CERT_REQUIRED"
 
     signer_b64 = plain.get("this_header_signing_key_b64")
     if not isinstance(signer_b64, str) or not signer_b64:
@@ -270,6 +266,11 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
         pub.verify(sig, plain_line)
     except Exception:
         return False, "ERR_STREAM_HEADER_SIG_VERIFY"
+
+    # Backward compatibility: allow stream headers without embedded certificate.
+    # In this mode, we verify self-signed header integrity only (no admin trust binding).
+    if not isinstance(cert_doc, dict) or not isinstance(cert_doc.get("certificate_payload_b64"), str) or not cert_doc.get("certificate_payload_b64"):
+        return True, ""
 
     try:
         cert_payload_raw = base64.b64decode(cert_doc["certificate_payload_b64"], validate=True)
