@@ -269,6 +269,11 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
         patch_obj["audio"] = pa
 
     mqtt_enabled = bool(getattr(args, "mqtt_enabled", False))
+    mqtt_disabled = bool(getattr(args, "mqtt_disabled", False))
+    if mqtt_enabled and mqtt_disabled:
+        emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "cannot set both --mqtt-enabled and --mqtt-disabled"}, as_json=bool(getattr(args, "as_json", False)))
+        return 1
+
     mqtt_broker_url = (getattr(args, "mqtt_broker_url", "") or "").strip()
     mqtt_username = (getattr(args, "mqtt_username", "") or "").strip()
     mqtt_password = (getattr(args, "mqtt_password", "") or "").strip()
@@ -277,7 +282,16 @@ def cmd_config_patch(args: argparse.Namespace) -> int:
     if mqtt_rms_window_seconds is not None and (int(mqtt_rms_window_seconds) < 1 or int(mqtt_rms_window_seconds) > 3600):
         emit_envelope(command="config-patch", ok=False, error="CONFIG_PATCH_ARGS", payload={"detail": "--mqtt-audio-rms-window-seconds must be 1..3600"}, as_json=bool(getattr(args, "as_json", False)))
         return 1
-    if mqtt_enabled:
+
+    if mqtt_disabled:
+        patch_obj["mqtt"] = {
+            "broker_url": "",
+            "username": "",
+            "password": "",
+            "audio_rms_topic": "",
+            "rms_window_seconds": 10,
+        }
+    elif mqtt_enabled:
         pm = patch_obj.get("mqtt") if isinstance(patch_obj.get("mqtt"), dict) else {}
         if mqtt_broker_url:
             pm["broker_url"] = mqtt_broker_url

@@ -60,6 +60,7 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     spatch.add_argument("--audio-preamp-gain", type=int, default=None, help="Set patch.audio.preamp_gain (1..8)")
     spatch.add_argument("--audio-adc-gain", type=int, default=None, help="Set patch.audio.adc_gain (0..255)")
     spatch.add_argument("--mqtt-enabled", action="store_true", help="Enable mqtt patch values (including mqtt_* defaults from config)")
+    spatch.add_argument("--mqtt-disabled", action="store_true", help="Disable MQTT telemetry (clears patch.mqtt credentials/topic and broker_url)")
     spatch.add_argument("--mqtt-broker-url", default="", help="Set patch.mqtt.broker_url")
     spatch.add_argument("--mqtt-username", default="", help="Set patch.mqtt.username")
     spatch.add_argument("--mqtt-password", default="", help="Set patch.mqtt.password")

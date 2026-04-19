@@ -203,8 +203,8 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command == "config-patch":
         # For config-patch, do not implicitly set recorder_auth_key_path from defaults.
         # recorder_auth_key should be opt-in only via explicit --recorder-auth-key.
-        # mqtt_* defaults are opt-in via --mqtt-enabled.
-        if bool(getattr(args, "mqtt_enabled", False)):
+        # mqtt_* defaults are opt-in via --mqtt-enabled (ignored when --mqtt-disabled).
+        if bool(getattr(args, "mqtt_enabled", False)) and not bool(getattr(args, "mqtt_disabled", False)):
             for ck, an in [
                 ("mqtt_broker_url", "mqtt_broker_url"),
                 ("mqtt_username", "mqtt_username"),
