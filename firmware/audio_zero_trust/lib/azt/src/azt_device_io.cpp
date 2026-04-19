@@ -165,6 +165,12 @@ static void setup_i2s_internal_pdm() {
   i2s_zero_dma_buffer(kI2SPort);
 }
 
+static void es8311_apply_runtime_gains(const AppState& state) {
+  const uint8_t a = constants::audio::kEs8311I2cAddress;
+  i2c_write_reg(a, constants::audio::kEs8311RegPreampGain, state.audio_preamp_gain);
+  i2c_write_reg(a, constants::audio::kEs8311RegAdcGain, state.audio_adc_gain);
+}
+
 static void es8311_init_for_echo_base(const AppState& state) {
   const uint8_t a = constants::audio::kEs8311I2cAddress;
   i2c_write_reg(a, 0x00, 0x1F);
@@ -182,8 +188,7 @@ static void es8311_init_for_echo_base(const AppState& state) {
   i2c_write_reg(a, 0x09, 0x10);
   i2c_write_reg(a, 0x0A, 0x10);
   i2c_write_reg(a, 0x14, 0x1A);
-  i2c_write_reg(a, constants::audio::kEs8311RegPreampGain, state.audio_preamp_gain);
-  i2c_write_reg(a, constants::audio::kEs8311RegAdcGain, state.audio_adc_gain);
+  es8311_apply_runtime_gains(state);
   i2c_write_reg(a, 0x0D, 0x01);
   i2c_write_reg(a, 0x0E, 0x02);
   i2c_write_reg(a, 0x12, 0x00);
@@ -230,6 +235,15 @@ void setup_audio_input(AppState& state) {
 void setup_i2s_pdm_mic() {
   // Backward-compatible wrapper.
   setup_i2s_internal_pdm();
+}
+
+void reapply_audio_input_registers(const AppState& state) {
+  if (state.audio_input_source != "echo_base") return;
+  if (!i2c_ping_addr(constants::audio::kEs8311I2cAddress)) return;
+  es8311_apply_runtime_gains(state);
+  Serial.printf("AZT_AUDIO_GAIN_REAPPLY source=echo_base preamp=%u adc=%u\n",
+                static_cast<unsigned>(state.audio_preamp_gain),
+                static_cast<unsigned>(state.audio_adc_gain));
 }
 
 static String sanitize_mdns_hostname(const String& in) {

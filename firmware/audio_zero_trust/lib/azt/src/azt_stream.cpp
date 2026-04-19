@@ -271,6 +271,9 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     return;
   }
 
+  // Defensive re-apply before each stream start to recover codec gain register drift.
+  reapply_audio_input_registers(state);
+
   unsigned char sign_sk[crypto_sign_ed25519_SECRETKEYBYTES] = {0};
   bool signbench_enabled = false;
 
