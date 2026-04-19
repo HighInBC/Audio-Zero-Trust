@@ -100,6 +100,13 @@ void maybe_broadcast_discovery_announcement(const AppState& state) {
   if (WiFi.status() != WL_CONNECTED) return;
   if (state.discovery_announcement_json.length() == 0) return;
 
+  // Gate discovery until stream/TLS are fully ready to avoid premature recorder dial attempts.
+  const bool stream_ready = state.signed_config_ready &&
+                            state.admin_pubkey_pem.length() > 0 && state.admin_fingerprint_hex.length() == 64 &&
+                            state.listener_pubkey_pem.length() > 0 && state.listener_fingerprint_hex.length() == 64;
+  const bool tls_ready = state.tls_server_cert_configured && state.tls_server_key_configured;
+  if (!stream_ready || !tls_ready) return;
+
   uint32_t now = millis();
   if ((now - last_ms) < 10000UL) return;
   last_ms = now;
