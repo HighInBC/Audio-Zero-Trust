@@ -18,6 +18,7 @@ enum class WifiMaintainDecision {
 
 void setup_i2s_pdm_mic();
 void setup_audio_input(AppState& state);
+void reinitialize_audio_input(const AppState& state);
 
 // Testable helpers.
 bool has_wifi_credentials(const AppState& state);

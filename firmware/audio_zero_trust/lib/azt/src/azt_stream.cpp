@@ -31,6 +31,9 @@ static constexpr uint32_t kSigCheckpointMinInterval = 10;
 static constexpr uint32_t kSigCheckpointMaxInterval = 160;
 static constexpr uint32_t kTelemetryIntervalBlocks = 50;
 static constexpr uint32_t kMaxContiguousDropMs = 10000;
+static constexpr float kAudioDegradedLowDbfs = -95.0f;
+static constexpr float kAudioDegradedHighDbfs = -3.0f;
+static constexpr uint8_t kAudioDegradedConsecutiveWindows = 3;
 static volatile bool g_stream_shutdown_requested = false;
 
 void request_stream_shutdown() { g_stream_shutdown_requested = true; }
@@ -419,6 +422,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   float mqtt_rms_dbfs_min = 0.0f;
   float mqtt_rms_dbfs_max = 0.0f;
   bool mqtt_rms_have_frame_stats = false;
+  uint8_t degraded_windows = 0;
+  bool trigger_audio_reinit = false;
   int drop_test_remaining = drop_test_frames;
   uint32_t sig_interval = kSigCheckpointMinInterval;
   uint32_t last_sig_ref_seq = 0;
@@ -498,6 +503,23 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         float dbfs_min = mqtt_rms_have_frame_stats ? mqtt_rms_dbfs_min : dbfs;
         float dbfs_max = mqtt_rms_have_frame_stats ? mqtt_rms_dbfs_max : dbfs;
         mqtt_publish_audio_rms(dbfs, dbfs_min, dbfs_max, mqtt_rms_window_seconds, sample_rate_hz);
+
+        const bool degraded_now = (dbfs <= kAudioDegradedLowDbfs) || (dbfs >= kAudioDegradedHighDbfs);
+        if (degraded_now) {
+          if (degraded_windows < 255) degraded_windows++;
+        } else {
+          degraded_windows = 0;
+        }
+        if (degraded_windows >= kAudioDegradedConsecutiveWindows) {
+          trigger_audio_reinit = true;
+          Serial.printf("AZT_AUDIO_DEGRADED dbfs=%.2f min=%.2f max=%.2f windows=%u action=reinit\n",
+                        dbfs,
+                        dbfs_min,
+                        dbfs_max,
+                        static_cast<unsigned>(degraded_windows));
+          break;
+        }
+
         mqtt_rms_window_start_us = now_us;
         mqtt_rms_sum_sq = 0.0;
         mqtt_rms_sample_count = 0;
@@ -661,6 +683,10 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         static_cast<unsigned long long>(ingress.i2s_fail),
         static_cast<unsigned long long>(ingress.i2s_empty),
         static_cast<unsigned>(mic_ring->high_water));
+  }
+
+  if (trigger_audio_reinit) {
+    reinitialize_audio_input(state);
   }
 
   delete mic_ring;

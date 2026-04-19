@@ -232,6 +232,17 @@ void setup_i2s_pdm_mic() {
   setup_i2s_internal_pdm();
 }
 
+void reinitialize_audio_input(const AppState& state) {
+  // Best-effort hard reset of I2S + codec path.
+  i2s_stop(kI2SPort);
+  i2s_driver_uninstall(kI2SPort);
+  delay(50);
+
+  // Re-run audio input setup using current settings.
+  AppState tmp = state;
+  setup_audio_input(tmp);
+}
+
 static String sanitize_mdns_hostname(const String& in) {
   String out;
   out.reserve(in.length());
