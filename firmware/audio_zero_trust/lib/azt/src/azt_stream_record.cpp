@@ -155,4 +155,48 @@ bool encrypt_telemetry_snapshot_block_and_chain(StreamCtx& sc,
                                    nullptr);
 }
 
+bool encrypt_message_block_and_chain(StreamCtx& sc,
+                                     uint8_t reason_code,
+                                     const uint8_t* message,
+                                     size_t message_len,
+                                     std::vector<uint8_t>& rec_out) {
+  if (!message && message_len > 0) return false;
+  if (message_len > 65535) message_len = 65535;
+
+  std::vector<uint8_t> payload;
+  payload.reserve(1 + 1 + 2 + message_len);
+  payload.push_back(1);  // message schema version
+  payload.push_back(reason_code);
+  append_u16_be(payload, static_cast<uint16_t>(message_len));
+  if (message_len > 0) payload.insert(payload.end(), message, message + message_len);
+
+  return encrypt_payload_and_chain(sc,
+                                   kBlockTypeMessage,
+                                   payload.data(),
+                                   payload.size(),
+                                   false,
+                                   rec_out,
+                                   nullptr);
+}
+
+bool encrypt_finalize_block_and_chain(StreamCtx& sc,
+                                      uint32_t ref_seq,
+                                      const uint8_t sig64[64],
+                                      std::vector<uint8_t>& rec_out) {
+  uint8_t payload[4 + 64];
+  payload[0] = static_cast<uint8_t>((ref_seq >> 24) & 0xFF);
+  payload[1] = static_cast<uint8_t>((ref_seq >> 16) & 0xFF);
+  payload[2] = static_cast<uint8_t>((ref_seq >> 8) & 0xFF);
+  payload[3] = static_cast<uint8_t>(ref_seq & 0xFF);
+  memcpy(payload + 4, sig64, 64);
+
+  return encrypt_payload_and_chain(sc,
+                                   kBlockTypeFinalize,
+                                   payload,
+                                   sizeof(payload),
+                                   false,
+                                   rec_out,
+                                   nullptr);
+}
+
 }  // namespace azt

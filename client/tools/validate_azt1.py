@@ -117,7 +117,7 @@ def main() -> int:
 
         enc_types = plain.get("encrypted_block_types")
         pt_types = plain.get("plaintext_block_types")
-        if enc_types != [0, 3] or pt_types != [1, 2]:
+        if enc_types != [0, 3] or pt_types != [1, 2, 126, 127]:
             fail("ERR_HEADER_FIELD", "block type encryption classes mismatch")
 
         # this-header signature line
@@ -223,7 +223,7 @@ def main() -> int:
                 fail("ERR_HEADER_FIELD", "device_certificate_serial mismatch")
         if reqs(dec, "chunk_record_format") != "seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32":
             fail("ERR_ENC_HEADER_JSON", "chunk_record_format mismatch")
-        if dec.get("encrypted_block_types") != [0, 3] or dec.get("plaintext_block_types") != [1, 2]:
+        if dec.get("encrypted_block_types") != [0, 3] or dec.get("plaintext_block_types") != [1, 2, 126, 127]:
             fail("ERR_ENC_HEADER_JSON", "encrypted/plaintext block type sets mismatch")
 
         audio_key = b64d(reqs(dec, "audio_key_b64"), "audio_key_b64")
@@ -244,6 +244,7 @@ def main() -> int:
         dropped_frames_total = 0
         sig_blocks = 0
         sig_verified = 0
+        finalize_seen = False
         telemetry_blocks = 0
         pcm_bytes = 0
         consumed = off
@@ -270,6 +271,8 @@ def main() -> int:
                 trailing_partial_bytes = len(data) - (consumed - 10)
                 consumed = len(data)
                 break
+            if finalize_seen:
+                fail("ERR_PACKETIZATION", "finalize block must be last")
 
             body = data[consumed:consumed+body_len]
             consumed += body_len
@@ -310,7 +313,7 @@ def main() -> int:
                     pcm_bytes += len(pt)
                 else:
                     telemetry_blocks += 1
-            elif block_type in (1, 2):
+            elif block_type in (1, 2, 126, 127):
                 if tag_len != 0:
                     fail("ERR_PACKETIZATION", f"plaintext block_type={block_type} must have tag_len=0")
                 if block_type == 1:
@@ -333,11 +336,30 @@ def main() -> int:
                     except Exception as e:
                         fail("ERR_SIGNATURE", f"checkpoint signature verify failed at seq={seq}: {e}")
                     sig_verified += 1
-                else:
+                elif block_type == 2:
                     dropped_notice_blocks += 1
                     if len(body) != 2:
                         fail("ERR_PACKETIZATION", f"dropped block len must be 2, got {len(body)}")
                     dropped_frames_total += struct.unpack(">H", body)[0]
+                elif block_type == 126:
+                    if len(body) < 4:
+                        fail("ERR_PACKETIZATION", f"message block len must be >=4, got {len(body)}")
+                elif block_type == 127:
+                    finalize_seen = True
+                    if len(body) != 68:
+                        fail("ERR_PACKETIZATION", f"finalize block len must be 68, got {len(body)}")
+                    ref_seq = struct.unpack(">I", body[:4])[0]
+                    if ref_seq == 0:
+                        fail("ERR_PACKETIZATION", "finalize ref_seq must be >0")
+                    ref_v = seq_to_chain_v.get(ref_seq)
+                    if ref_v is None:
+                        fail("ERR_PACKETIZATION", f"finalize ref_seq={ref_seq} not seen yet")
+                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + ref_v
+                    try:
+                        device_sign_pub.verify(body[4:], msg)
+                    except Exception as e:
+                        fail("ERR_SIGNATURE", f"finalize signature verify failed at seq={seq}: {e}")
+                    sig_verified += 1
             else:
                 fail("ERR_PACKETIZATION", f"unknown block_type={block_type}")
 

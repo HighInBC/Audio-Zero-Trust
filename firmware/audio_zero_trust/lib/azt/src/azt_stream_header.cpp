@@ -52,9 +52,9 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"recommended_decode_gain\":" + String(recommended_decode_gain, 3) + ",";
   dec_header += "\"audio_frame_duration_ms\":" + String(audio_frame_duration_ms, 3) + ",";
   dec_header += "\"packetization\":\"none\",";
-  dec_header += "\"payload_block_types\":{\"0\":\"pcm_audio\",\"1\":\"ed25519_checkpoint_signature\",\"2\":\"dropped_frames_notice\",\"3\":\"telemetry_snapshot\"},";
+  dec_header += "\"payload_block_types\":{\"0\":\"pcm_audio\",\"1\":\"ed25519_checkpoint_signature\",\"2\":\"dropped_frames_notice\",\"3\":\"telemetry_snapshot\",\"126\":\"message\",\"127\":\"finalize_signature\"},";
   dec_header += "\"encrypted_block_types\":[0,3],";
-  dec_header += "\"plaintext_block_types\":[1,2],";
+  dec_header += "\"plaintext_block_types\":[1,2,126,127],";
   dec_header += "\"signature_checkpoint_alg\":\"ed25519\",";
   dec_header += "\"signature_checkpoint_domain\":\"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)\",";
   dec_header += "\"chain_genesis_secret_b64\":\"" + b64(sc.chain_genesis_secret, sizeof(sc.chain_genesis_secret)) + "\",";
@@ -69,6 +69,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"chain_root_mode\":\"genesis-signature-block\",";
   dec_header += "\"chunk_record_format\":\"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32\",";
   dec_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
+  dec_header += "\"finalize_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
+  dec_header += "\"message_block_body_format\":\"ver_u8|reason_code_u8|text_len_u16be|utf8_text\",";
   dec_header += "\"dropped_frames_block_body_format\":\"missed_frames_u16be\",";
   dec_header += "\"telemetry_block_body_format\":\"ver_u8|window_blocks_u16be|rb_level_min_u16be|rb_level_max_u16be|rb_level_avg_q8_u16be|rb_level_last_u16be\",";
   dec_header += "\"telemetry_interval_blocks\":50,";
@@ -78,7 +80,7 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"If seq==1: V_calc = HMAC_SHA256(chain_key, \\\"AZT1-CHAIN-V2\\\"||CORE).\",";
   dec_header += "\"If seq>1: V_calc = HMAC_SHA256(chain_key, \\\"AZT1-CHAIN-V2\\\"||V_prev||CORE).\",";
   dec_header += "\"Require V_calc == chain_v32; then set V_prev = chain_v32.\",";
-  dec_header += "\"For block_type in [0,3], derive nonce as audio_nonce_prefix_b64 (4 bytes) || seq_u32be || 0x00000000 and AES-GCM decrypt body||tag with aad=none. For block_type in [1,2], body is plaintext and tag_len must be 0.\"";
+  dec_header += "\"For block_type in [0,3], derive nonce as audio_nonce_prefix_b64 (4 bytes) || seq_u32be || 0x00000000 and AES-GCM decrypt body||tag with aad=none. For block_type in [1,2,126,127], body is plaintext and tag_len must be 0.\"";
   dec_header += "],";
   dec_header += "\"chain_notes\":[";
   dec_header += "\"If verification fails at chunk N, trust only chunks before N.\",";
@@ -98,6 +100,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"A valid checkpoint signature means all records up to ref_seq are authenticated by device signing key; chain verification still applies to all records.\",";
   dec_header += "\"block_type 0x02 is dropped frame notice; block_body is missed_frames_u16be and means that many PCM frames were intentionally skipped due to network backpressure.\",";
   dec_header += "\"block_type 0x03 is telemetry snapshot; use telemetry_block_body_format to parse ring-buffer occupancy stats.\",";
+  dec_header += "\"block_type 0x7E is message; use message_block_body_format for close reason metadata.\",";
+  dec_header += "\"block_type 0x7F is finalize signature; body format matches signature_block_body_format and MUST be the last record.\",";
   dec_header += "\"Untrusted listeners estimate frames as COUNT(block_type=0) + SUM_DROPPED(block_type=2), then multiply by audio_frame_duration_ms.\"";
   dec_header += "]";
   dec_header += "}";
@@ -186,9 +190,11 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"For seq>1: chain_v32 = HMAC_SHA256(chain_key, chain_domain_bytes || prev_chain_v32 || record_bytes).\"";
   plain_header += "],";
   plain_header += "\"encrypted_block_types\":[0,3],";
-  plain_header += "\"plaintext_block_types\":[1,2],";
-  plain_header += "\"block_type_map\":{\"0\":\"pcm_audio\",\"1\":\"ed25519_checkpoint_signature\",\"2\":\"dropped_frames_notice\",\"3\":\"telemetry_snapshot\"},";
+  plain_header += "\"plaintext_block_types\":[1,2,126,127],";
+  plain_header += "\"block_type_map\":{\"0\":\"pcm_audio\",\"1\":\"ed25519_checkpoint_signature\",\"2\":\"dropped_frames_notice\",\"3\":\"telemetry_snapshot\",\"126\":\"message\",\"127\":\"finalize_signature\"},";
   plain_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
+  plain_header += "\"finalize_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
+  plain_header += "\"message_block_body_format\":\"ver_u8|reason_code_u8|text_len_u16be|utf8_text\",";
   plain_header += "\"dropped_frames_block_body_format\":\"missed_frames_u16be\",";
   plain_header += "\"signature_checkpoint_alg\":\"ed25519\",";
   plain_header += "\"signature_checkpoint_domain\":\"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)\",";
@@ -233,7 +239,8 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"Use RSA private key to recover/decrypt encrypted header metadata when N != 0xFFFF.\",";
   plain_header += "\"Remaining bytes are chunk records: seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32.\",";
   plain_header += "\"Silently discard trailing partial/incomplete chunk records at end-of-file.\",";
-  plain_header += "\"If unsigned tail blocks exist after the last verified checkpoint, warn the user that end-of-audio content is unsigned and may be tampered.\"";
+  plain_header += "\"If unsigned tail blocks exist after the last verified checkpoint, warn the user that end-of-audio content is unsigned and may be tampered.\",";
+  plain_header += "\"If block_type=127 (finalize) is present, require it to be the final record and verify its signature against AZT1SIG1||ref_seq_u32be||chain_v32(ref_seq).\"";
   plain_header += "]";
   plain_header += "}";
 

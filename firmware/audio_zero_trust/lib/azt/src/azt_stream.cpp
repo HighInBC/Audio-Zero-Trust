@@ -36,8 +36,48 @@ static constexpr float kAudioDegradedHighDbfs = -3.0f;
 static constexpr uint8_t kAudioDegradedConsecutiveWindows = 1;
 static volatile bool g_stream_shutdown_requested = false;
 
+static constexpr uint8_t kCloseReasonNormalEnd = 0x00;
+static constexpr uint8_t kCloseReasonAudioDegradedReinit = 0x01;
+static constexpr uint8_t kCloseReasonRequestedShutdown = 0x02;
+
 void request_stream_shutdown() { g_stream_shutdown_requested = true; }
 void clear_stream_shutdown_request() { g_stream_shutdown_requested = false; }
+
+static bool emit_stream_close_and_finalize(WiFiClient& client,
+                                           StreamCtx& sc,
+                                           const unsigned char sign_sk[crypto_sign_ed25519_SECRETKEYBYTES],
+                                           uint8_t reason_code,
+                                           const char* reason_text,
+                                           std::vector<uint8_t>& rec) {
+  const char* txt = reason_text ? reason_text : "";
+  if (!encrypt_message_block_and_chain(sc,
+                                       reason_code,
+                                       reinterpret_cast<const uint8_t*>(txt),
+                                       strlen(txt),
+                                       rec) ||
+      !send_chunked(client, rec.data(), rec.size())) {
+    return false;
+  }
+
+  const uint32_t ref_seq = sc.seq;
+  unsigned char sig[crypto_sign_ed25519_BYTES] = {0};
+  unsigned long long sig_len = 0;
+  uint8_t msg[8 + 4 + 32];
+  memcpy(msg, "AZT1SIG1", 8);
+  msg[8] = static_cast<uint8_t>((ref_seq >> 24) & 0xFF);
+  msg[9] = static_cast<uint8_t>((ref_seq >> 16) & 0xFF);
+  msg[10] = static_cast<uint8_t>((ref_seq >> 8) & 0xFF);
+  msg[11] = static_cast<uint8_t>(ref_seq & 0xFF);
+  memcpy(msg + 12, sc.v_prev, 32);
+
+  if (crypto_sign_ed25519_detached(sig, &sig_len, msg, sizeof(msg), sign_sk) != 0 ||
+      sig_len != crypto_sign_ed25519_BYTES) {
+    return false;
+  }
+
+  return encrypt_finalize_block_and_chain(sc, ref_seq, sig, rec) &&
+         send_chunked(client, rec.data(), rec.size());
+}
 
 int parse_seconds_from_path(const String& path) {
   int q = path.indexOf('?');
@@ -424,6 +464,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   bool mqtt_rms_have_frame_stats = false;
   uint8_t degraded_windows = 0;
   bool trigger_audio_reinit = false;
+  uint8_t close_reason_code = kCloseReasonNormalEnd;
+  const char* close_reason_text = "normal_end";
   int drop_test_remaining = drop_test_frames;
   uint32_t sig_interval = kSigCheckpointMinInterval;
   uint32_t last_sig_ref_seq = 0;
@@ -512,6 +554,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         }
         if (degraded_windows >= kAudioDegradedConsecutiveWindows) {
           trigger_audio_reinit = true;
+          close_reason_code = kCloseReasonAudioDegradedReinit;
+          close_reason_text = "audio_degraded_reinit";
           Serial.printf("AZT_AUDIO_DEGRADED dbfs=%.2f min=%.2f max=%.2f windows=%u action=reinit\n",
                         dbfs,
                         dbfs_min,
@@ -629,6 +673,11 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     process_us += (t2 - t1);
   }
 
+  if (g_stream_shutdown_requested && !trigger_audio_reinit) {
+    close_reason_code = kCloseReasonRequestedShutdown;
+    close_reason_text = "requested_shutdown";
+  }
+
   mic_ring->stop = true;
   vTaskDelay(pdMS_TO_TICKS(constants::runtime::kMicReaderShutdownDelayMs));
 
@@ -638,6 +687,12 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     if (!send_chunked(client, rec.data(), rec.size())) break;
     pending_dropped_frames -= emit;
     dropped_notice_blocks++;
+  }
+
+  if (client.connected()) {
+    if (!emit_stream_close_and_finalize(client, sc, sign_sk, close_reason_code, close_reason_text, rec)) {
+      Serial.printf("AZT_STREAM_FINALIZE_FAIL reason=%u\n", static_cast<unsigned>(close_reason_code));
+    }
   }
 
   client.print("0\r\n\r\n");

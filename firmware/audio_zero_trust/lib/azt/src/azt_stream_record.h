@@ -12,6 +12,8 @@ constexpr uint8_t kBlockTypePcmAudio = 0x00;
 constexpr uint8_t kBlockTypeSignature = 0x01;
 constexpr uint8_t kBlockTypeDroppedFrames = 0x02;
 constexpr uint8_t kBlockTypeTelemetrySnapshot = 0x03;
+constexpr uint8_t kBlockTypeMessage = 0x7E;
+constexpr uint8_t kBlockTypeFinalize = 0x7F;
 
 struct TelemetrySnapshotV1 {
   uint16_t window_blocks = 0;
@@ -43,5 +45,16 @@ bool encrypt_dropped_frames_block_and_chain(StreamCtx& sc,
 bool encrypt_telemetry_snapshot_block_and_chain(StreamCtx& sc,
                                                 const TelemetrySnapshotV1& t,
                                                 std::vector<uint8_t>& rec_out);
+
+bool encrypt_message_block_and_chain(StreamCtx& sc,
+                                     uint8_t reason_code,
+                                     const uint8_t* message,
+                                     size_t message_len,
+                                     std::vector<uint8_t>& rec_out);
+
+bool encrypt_finalize_block_and_chain(StreamCtx& sc,
+                                      uint32_t ref_seq,
+                                      const uint8_t sig64[64],
+                                      std::vector<uint8_t>& rec_out);
 
 }  // namespace azt
