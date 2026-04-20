@@ -309,9 +309,9 @@ def _stream_gate_detail(error_code: str, preface: bytes) -> str:
         "ERR_STREAM_HEADER_SIG_VERIFY": "stream header signature verification failed",
         "ERR_STREAM_CERT_SCHEMA": "device certificate in stream header is malformed",
         "ERR_STREAM_CERT_SIG": "device certificate is missing signature",
-        "ERR_STREAM_CERT_SIG_VERIFY": "device certificate signature verification failed against admin key",
-        "ERR_STREAM_CERT_BINDING": "certificate signing key does not match stream header signing key",
-        "ERR_STREAM_CERT_SERIAL": "certificate serial does not match stream header serial",
+        "ERR_STREAM_CERT_SIG_VERIFY": "device certificate signature failed verification with the provided --key (wrong admin key for this certificate, or certificate was signed by a different admin key)",
+        "ERR_STREAM_CERT_BINDING": "device certificate signing key does not match the stream header signing key (certificate/header binding mismatch)",
+        "ERR_STREAM_CERT_SERIAL": "device certificate serial in header does not match embedded certificate payload",
         "ERR_STREAM_HEADER_TOO_LARGE": "stream header exceeded maximum preface size before signature line",
     }
     msg = details.get(error_code, "stream rejected before write")
@@ -324,6 +324,9 @@ def _stream_gate_detail(error_code: str, preface: bytes) -> str:
         snippet = ""
     if snippet and not preface.startswith(b"AZT1\n"):
         msg += f"; first bytes: {snippet}"
+
+    if error_code in {"ERR_STREAM_CERT_SIG_VERIFY", "ERR_STREAM_CERT_BINDING", "ERR_STREAM_CERT_SERIAL"}:
+        msg += "; note: this is certificate/key validation, not auto-record authorization policy"
 
     return msg
 
