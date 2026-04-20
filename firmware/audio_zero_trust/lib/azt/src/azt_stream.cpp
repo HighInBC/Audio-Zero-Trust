@@ -47,6 +47,13 @@ static constexpr uint8_t kCloseReasonNormalEnd = 0x00;
 static constexpr uint8_t kCloseReasonAudioDegradedReinit = 0x01;
 static constexpr uint8_t kCloseReasonRequestedShutdown = 0x02;
 
+static String make_close_reason_json(const char* cause) {
+  String out = "{\"cause\":\"";
+  out += String(cause ? cause : "unknown");
+  out += "\"}";
+  return out;
+}
+
 void request_stream_shutdown() { g_stream_shutdown_requested = true; }
 void clear_stream_shutdown_request() { g_stream_shutdown_requested = false; }
 
@@ -529,6 +536,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     const uint64_t t1 = static_cast<uint64_t>(esp_timer_get_time());
 
     if (started_with_certificate && !is_active_certificate_serial(started_certificate_serial)) {
+      close_reason_code = kCloseReasonRequestedShutdown;
+      close_reason_text = make_close_reason_json("certificate_revoked_or_rotated");
       break;
     }
 
@@ -539,9 +548,13 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       String current_recorder_auth_fp;
       if (get_active_recorder_auth_state(current_with_recorder_auth, current_recorder_auth_fp)) {
         if (current_with_recorder_auth != started_with_recorder_auth) {
+          close_reason_code = kCloseReasonRequestedShutdown;
+          close_reason_text = make_close_reason_json("recorder_auth_posture_changed");
           break;
         }
         if (started_with_recorder_auth && current_recorder_auth_fp != started_recorder_auth_fp) {
+          close_reason_code = kCloseReasonRequestedShutdown;
+          close_reason_text = make_close_reason_json("recorder_auth_key_rotated");
           break;
         }
       }
@@ -564,6 +577,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       StreamLoopDecision d = evaluate_stream_loop_branch(true, false, false, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
+        close_reason_code = kCloseReasonRequestedShutdown;
+        close_reason_text = make_close_reason_json("ingress_drop_stall");
         break;
       }
     }
@@ -619,7 +634,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         if (degraded_windows >= kAudioDegradedConsecutiveWindows) {
           trigger_audio_reinit = true;
           close_reason_code = kCloseReasonAudioDegradedReinit;
-          close_reason_text = "audio_degraded_reinit";
+          close_reason_text = make_close_reason_json("audio_degraded_reinit");
           Serial.printf("AZT_AUDIO_DEGRADED dbfs=%.2f min=%.2f max=%.2f windows=%u action=reinit\n",
                         dbfs,
                         dbfs_min,
@@ -641,6 +656,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       StreamLoopDecision d = evaluate_stream_loop_branch(false, true, false, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
+        close_reason_code = kCloseReasonRequestedShutdown;
+        close_reason_text = make_close_reason_json("drop_test_stall");
         break;
       }
       if (d.skip_audio_send) continue;
@@ -662,13 +679,19 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       StreamLoopDecision d = evaluate_stream_loop_branch(false, false, true, false, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
+        close_reason_code = kCloseReasonRequestedShutdown;
+        close_reason_text = make_close_reason_json("low_write_capacity_stall");
         break;
       }
       if (d.skip_audio_send) continue;
     }
 
     uint8_t v_new[32];
-    if (!encrypt_audio_chunk_and_chain(sc, frame.data.data(), frame.len, rec, v_new)) break;
+    if (!encrypt_audio_chunk_and_chain(sc, frame.data.data(), frame.len, rec, v_new)) {
+      close_reason_code = kCloseReasonRequestedShutdown;
+      close_reason_text = make_close_reason_json("encrypt_audio_chunk_failed");
+      break;
+    }
 
     if (signbench_enabled) {
       unsigned char sig[crypto_sign_ed25519_BYTES] = {0};
@@ -676,6 +699,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       const uint64_t ts0 = static_cast<uint64_t>(esp_timer_get_time());
       if (crypto_sign_ed25519_detached(sig, &sig_len, rec.data(), rec.size(), sign_sk) != 0 ||
           sig_len != crypto_sign_ed25519_BYTES) {
+        close_reason_code = kCloseReasonRequestedShutdown;
+        close_reason_text = make_close_reason_json("chunk_signature_failed");
         break;
       }
       const uint64_t ts1 = static_cast<uint64_t>(esp_timer_get_time());
@@ -699,6 +724,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       StreamLoopDecision d = evaluate_stream_loop_branch(false, false, false, true, contiguous_drop_frames, frame_samples, kMaxContiguousDropMs, sample_rate_hz);
       if (stalled || d.disconnect_for_stall) {
         disconnected_for_stall = true;
+        close_reason_code = kCloseReasonRequestedShutdown;
+        close_reason_text = make_close_reason_json("send_chunk_stall_or_disconnect");
         break;
       }
       if (d.skip_audio_send) continue;
@@ -739,7 +766,12 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
 
   if (g_stream_shutdown_requested && !trigger_audio_reinit) {
     close_reason_code = kCloseReasonRequestedShutdown;
-    close_reason_text = "requested_shutdown";
+    close_reason_text = make_close_reason_json("requested_shutdown");
+  } else if (finite_stream && close_reason_code == kCloseReasonNormalEnd) {
+    close_reason_text = make_close_reason_json("planned_duration_elapsed");
+  } else if (!client.connected() && close_reason_code == kCloseReasonNormalEnd) {
+    close_reason_code = kCloseReasonRequestedShutdown;
+    close_reason_text = make_close_reason_json("client_disconnected");
   }
 
   mic_ring->stop = true;
