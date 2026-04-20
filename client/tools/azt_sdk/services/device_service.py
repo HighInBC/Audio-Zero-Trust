@@ -3,6 +3,7 @@ from __future__ import annotations
 from urllib.parse import quote, urlencode
 
 import base64
+import hashlib
 import json
 import urllib.error
 from pathlib import Path
