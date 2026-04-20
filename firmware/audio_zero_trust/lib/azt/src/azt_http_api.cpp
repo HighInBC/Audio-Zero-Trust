@@ -1463,6 +1463,110 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
+  if (method == "POST" && path == "/api/v0/device/stream/terminate") {
+    JsonDocument doc;
+    DeserializationError jerr = deserializeJson(doc, body);
+    if (jerr) {
+      r.code = 400;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_TERMINATE_SCHEMA\",\"detail\":\"invalid json\"}";
+      return r;
+    }
+
+    String session_nonce = String((const char*)(doc["stream_auth_nonce"] | ""));
+    String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
+    String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
+    String signer_fp = String((const char*)(doc["signer_fingerprint_hex"] | ""));
+    int reason_code_i = int(doc["reason_code"] | 2);
+    if (reason_code_i < 0) reason_code_i = 0;
+    if (reason_code_i > 255) reason_code_i = 255;
+    uint8_t reason_code = static_cast<uint8_t>(reason_code_i);
+
+    String user_message_json = "{}";
+    if (doc["message_json"].is<JsonVariantConst>()) {
+      serializeJson(doc["message_json"], user_message_json);
+    } else {
+      String message_text = String((const char*)(doc["message_text"] | ""));
+      JsonDocument fallback;
+      fallback["message_text"] = message_text;
+      user_message_json = "";
+      serializeJson(fallback, user_message_json);
+    }
+
+    uint8_t user_msg_hash[32] = {0};
+    if (!sha256_bytes(reinterpret_cast<const uint8_t*>(user_message_json.c_str()), user_message_json.length(), user_msg_hash)) {
+      r.code = 500;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_TERMINATE_INTERNAL\",\"detail\":\"message hash failed\"}";
+      return r;
+    }
+    String user_msg_hash_hex = hex_lower(user_msg_hash, sizeof(user_msg_hash));
+
+    String signer_role = "";
+    String signer_pubkey = "";
+    if (signer_fp == state.recorder_auth_fingerprint_hex &&
+        state.recorder_auth_pubkey_b64.length() > 0 &&
+        state.recorder_auth_fingerprint_hex.length() == 64) {
+      signer_role = "recorder_auth";
+      signer_pubkey = state.recorder_auth_pubkey_b64;
+    } else if (signer_fp == state.admin_fingerprint_hex &&
+               state.admin_pubkey_pem.length() > 0 &&
+               state.admin_fingerprint_hex.length() == 64) {
+      signer_role = "admin";
+      signer_pubkey = state.admin_pubkey_pem;
+    }
+
+    if (session_nonce.length() == 0 || sig_alg != "ed25519" || sig_b64.length() == 0 || signer_role.length() == 0) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_TERMINATE_AUTH\"}";
+      return r;
+    }
+
+    String signed_msg = String("stream_terminate:") + session_nonce + ":" + state.device_sign_fingerprint_hex + ":" + String(static_cast<unsigned>(reason_code)) + ":" + user_msg_hash_hex;
+    std::vector<uint8_t> msg_raw;
+    msg_raw.reserve(signed_msg.length());
+    for (size_t i = 0; i < signed_msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(signed_msg[i]));
+
+    if (!verify_ed25519_signature_b64(signer_pubkey, msg_raw, sig_b64)) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_TERMINATE_AUTH_VERIFY\"}";
+      return r;
+    }
+
+    JsonDocument emit_msg;
+    emit_msg["event"] = "terminate";
+    emit_msg["stream_auth_nonce"] = session_nonce;
+    emit_msg["reason_code"] = static_cast<unsigned>(reason_code);
+    emit_msg["signed_by_fingerprint_hex"] = signer_fp;
+    emit_msg["signed_by_role"] = signer_role;
+    emit_msg["user_message_sha256_hex"] = user_msg_hash_hex;
+
+    JsonDocument user_doc;
+    if (deserializeJson(user_doc, user_message_json) == DeserializationError::Ok) {
+      emit_msg["user_message_json"] = user_doc.as<JsonVariantConst>();
+    } else {
+      emit_msg["user_message_json_raw"] = user_message_json;
+    }
+
+    String reason_text;
+    serializeJson(emit_msg, reason_text);
+
+    if (!request_stream_termination_by_nonce(session_nonce, reason_code, reason_text)) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_SESSION_NOT_ACTIVE\"}";
+      return r;
+    }
+
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"queued\":true,\"stream_auth_nonce\":" + json_quote(session_nonce) +
+             ",\"reason_code\":" + String(static_cast<unsigned>(reason_code)) + "}";
+    return r;
+  }
+
   if (method == "POST" && path == "/api/v0/config") {
     return handle_config_post_json(state, body, false);
   }

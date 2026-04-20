@@ -3,7 +3,9 @@ from __future__ import annotations
 from urllib.parse import quote, urlencode
 
 import base64
+import hashlib
 import json
+import math
 import urllib.error
 from pathlib import Path
 from urllib.request import Request
@@ -298,10 +300,39 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
     return True, ""
 
 
+def _stream_gate_detail(error_code: str, preface: bytes) -> str:
+    details = {
+        "ERR_STREAM_MAGIC": "stream did not start with AZT1 header; endpoint likely returned non-stream data",
+        "ERR_STREAM_HEADER_JSON": "stream header JSON was not parseable",
+        "ERR_STREAM_HEADER_SIG_LINE": "stream header signature line missing",
+        "ERR_STREAM_HEADER_SIGNER_KEY": "stream header missing this_header_signing_key_b64",
+        "ERR_STREAM_HEADER_SIG_VERIFY": "stream header signature verification failed",
+        "ERR_STREAM_CERT_SCHEMA": "device certificate in stream header is malformed",
+        "ERR_STREAM_CERT_SIG": "device certificate is missing signature",
+        "ERR_STREAM_CERT_SIG_VERIFY": "device certificate signature verification failed against admin key",
+        "ERR_STREAM_CERT_BINDING": "certificate signing key does not match stream header signing key",
+        "ERR_STREAM_CERT_SERIAL": "certificate serial does not match stream header serial",
+        "ERR_STREAM_HEADER_TOO_LARGE": "stream header exceeded maximum preface size before signature line",
+    }
+    msg = details.get(error_code, "stream rejected before write")
+
+    # Helpful hint when the endpoint returned plain text/HTML/JSON instead of AZT1 bytes.
+    snippet = ""
+    try:
+        snippet = preface[:180].decode("utf-8", errors="replace").replace("\r", " ").replace("\n", " ").strip()
+    except Exception:
+        snippet = ""
+    if snippet and not preface.startswith(b"AZT1\n"):
+        msg += f"; first bytes: {snippet}"
+
+    return msg
+
+
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
     api_b = base_url(host=host, port=port, scheme=_api_scheme())
     stream_b = base_url(host=host, port=8081, scheme="http")
     total = 0
+    nonce = ""
     import time
     from pathlib import Path
 
@@ -321,6 +352,11 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
             }
 
     params: dict[str, str] = {}
+    planned_duration_stop = bool((seconds is not None) and (seconds > 0) and (not probe))
+    if planned_duration_stop:
+        # Tell device to own stream shutdown so it can finalize on-frame/signature boundaries.
+        params["seconds"] = str(max(1, int(math.ceil(float(seconds)))))
+
     # Probe mode remains backwards-compatible with plain stream reads.
     if not probe:
         # Stream freshness challenge (required by firmware).
@@ -362,7 +398,9 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
     resolved_out = ""
     preface_buf = bytearray()
     preface_checked = bool(probe)
-    preface_required_bytes = 4096
+    # Header preface can exceed 4 KiB when certificate blobs are present.
+    # Keep buffering until we have both header lines, with a hard cap to avoid unbounded memory.
+    preface_required_bytes = 65536
     if not probe and out_path:
       p = Path(out_path)
       p.parent.mkdir(parents=True, exist_ok=True)
@@ -399,12 +437,12 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                     if len(preface_buf) >= 12:
                         first_nl = preface_buf.find(b"\n", 5)
                         second_nl = preface_buf.find(b"\n", first_nl + 1) if first_nl >= 0 else -1
-                        if second_nl >= 0 or len(preface_buf) >= preface_required_bytes:
+                        if second_nl >= 0:
                             ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
                             if not ok_hdr:
                                 return False, {
                                     "error": err_hdr,
-                                    "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                                    "detail": _stream_gate_detail(err_hdr, bytes(preface_buf)),
                                     "bytes": total,
                                     "out": resolved_out,
                                     "url": url,
@@ -413,12 +451,26 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                             if out_file is not None and len(preface_buf) > 0:
                                 out_file.write(preface_buf)
                             preface_buf.clear()
+                        elif len(preface_buf) >= preface_required_bytes:
+                            return False, {
+                                "error": "ERR_STREAM_HEADER_TOO_LARGE",
+                                "detail": f"stream header preface exceeded {preface_required_bytes} bytes before signature line terminator",
+                                "bytes": total,
+                                "out": resolved_out,
+                                "url": url,
+                            }
                     continue
 
                 if out_file is not None:
                     out_file.write(chunk)
-            if seconds is not None and (time.time() - start >= seconds):
-                break
+            if seconds is not None:
+                elapsed = (time.time() - start)
+                if not planned_duration_stop and elapsed >= seconds:
+                    break
+                # In planned-duration mode the device should close gracefully.
+                # Keep a bounded local failsafe in case firmware/network never closes.
+                if planned_duration_stop and elapsed >= (float(seconds) + 8.0):
+                    break
     except (requests.RequestException, OSError, ValueError) as e:
         return False, {
             "error": "STREAM_READ_ITERATION_FAILED",
@@ -442,7 +494,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
         if not ok_hdr:
             return False, {
                 "error": err_hdr,
-                "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                "detail": _stream_gate_detail(err_hdr, bytes(preface_buf)),
                 "bytes": total,
                 "out": resolved_out,
                 "url": url,
@@ -452,6 +504,8 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 
     elapsed = time.time() - start
     payload = {"bytes": total, "seconds": elapsed, "requested_seconds": seconds, "url": url}
+    if nonce:
+        payload["stream_auth_nonce"] = nonce
     if resolved_out:
         payload["out"] = resolved_out
     return total > 0, payload
@@ -460,6 +514,65 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -> tuple[bool, dict]:
     # Back-compat wrapper for older callers.
     return stream_read(host=host, port=port, seconds=seconds, timeout=timeout, out_path=None, probe=True)
+
+
+def stream_terminate(*, host: str, port: int, timeout: int, key_path: str, stream_auth_nonce: str, reason_code: int = 2, message_json: dict | None = None) -> tuple[bool, dict]:
+    api_b = base_url(host=host, port=port, scheme=_api_scheme())
+    url = f"{api_b}/api/v0/device/stream/terminate"
+
+    try:
+        priv = load_private_key_auto(Path(str(key_path)), purpose=str(key_path))
+        if not isinstance(priv, ed25519.Ed25519PrivateKey):
+            return False, {"error": "STREAM_TERMINATE_KEY", "detail": "key must be Ed25519 private key"}
+    except Exception as e:
+        return False, {
+            "error": "STREAM_TERMINATE_KEY",
+            "detail": _error_detail(where="device_service.stream_terminate.key", exc=e),
+        }
+
+    try:
+        st = state_get(host=host, port=port, timeout=timeout)
+        if not st.get("ok"):
+            return False, {"error": "STREAM_TERMINATE_STATE", "detail": st}
+        device_fp = str(st.get("device_sign_fingerprint_hex") or "").strip().lower()
+        if not device_fp:
+            return False, {"error": "STREAM_TERMINATE_STATE", "detail": "missing device_sign_fingerprint_hex in state"}
+    except Exception as e:
+        return False, {
+            "error": "STREAM_TERMINATE_STATE",
+            "detail": _error_detail(where="device_service.stream_terminate.state", exc=e),
+        }
+
+    user_msg = message_json if isinstance(message_json, dict) else {}
+    user_json_str = json.dumps(user_msg, separators=(",", ":"), sort_keys=True)
+    user_hash_hex = hashlib.sha256(user_json_str.encode("utf-8")).hexdigest()
+
+    signer_fp = ed25519_fp_hex_from_private_key(Path(str(key_path)))
+    signed_msg = f"stream_terminate:{stream_auth_nonce}:{device_fp}:{int(reason_code)}:{user_hash_hex}".encode("utf-8")
+    sig_b64 = base64.b64encode(priv.sign(signed_msg)).decode("ascii")
+
+    payload = {
+        "stream_auth_nonce": stream_auth_nonce,
+        "reason_code": int(reason_code),
+        "message_json": user_msg,
+        "signature_algorithm": "ed25519",
+        "signature_b64": sig_b64,
+        "signer_fingerprint_hex": signer_fp,
+    }
+
+    try:
+        res = http_json("POST", url, payload, timeout=timeout)
+        return bool(res.get("ok")), res
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+        return False, {
+            "error": "STREAM_TERMINATE_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_terminate.post", exc=e, url=url),
+        }
+    except Exception as e:
+        return False, {
+            "error": "STREAM_TERMINATE_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_terminate.post", exc=e, url=url),
+        }
 
 
 def mdns_fqdn_get(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:

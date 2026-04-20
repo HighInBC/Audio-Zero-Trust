@@ -201,6 +201,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     dropped_notice_blocks = dropped_frames_total = telemetry_blocks = 0
     seq_to_chain_v: dict[int, bytes] = {}
     max_verified_ref_seq = 0
+    finalize_seen = False
 
     record_types: list[int] = []
     record_seqs: list[int] = []
@@ -217,6 +218,9 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         off += 1
         if off + body_len + tag_len + 32 > len(data):
             break
+        if finalize_seen:
+            raise ValueError("ERR_FINALIZE_NOT_LAST")
+
         body = data[off : off + body_len]
         off += body_len
         tag = data[off : off + tag_len]
@@ -270,7 +274,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
                 block_body = AESGCM(audio_key).decrypt(nonce, body + tag, None)
             else:
                 block_body = b""
-        elif block_type in (0x01, 0x02):
+        elif block_type in (0x01, 0x02, 0x7E, 0x7F):
             if tag_len != 0:
                 raise ValueError("ERR_TAG_LEN")
             block_body = body
@@ -310,6 +314,22 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
                 dropped_frames_total += struct.unpack(">H", block_body[:2])[0]
         elif block_type == 0x03:
             telemetry_blocks += 1
+        elif block_type == 0x7E:
+            pass
+        elif block_type == 0x7F:
+            finalize_seen = True
+            if len(block_body) < 68:
+                raise ValueError("ERR_FINALIZE_FORMAT")
+            ref_seq = struct.unpack(">I", block_body[:4])[0]
+            sig = block_body[4:68]
+            if ref_seq == 0 or ref_seq not in seq_to_chain_v:
+                raise ValueError("ERR_FINALIZE_REF")
+            if device_sign_pub is not None:
+                msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                device_sign_pub.verify(sig, msg)
+                sig_verified += 1
+                if ref_seq > max_verified_ref_seq:
+                    max_verified_ref_seq = ref_seq
         frames += 1
 
     frame_duration_ms = float((dec or plain).get("audio_frame_duration_ms", 0.0))
@@ -577,9 +597,12 @@ def decode_azt1_stream_to_wav(
 
     frames = pcm_bytes = pcm_blocks = sig_blocks = sig_verified = 0
     dropped_notice_blocks = dropped_frames_total = telemetry_blocks = 0
+    close_message_text = ""
+    close_message = None
     seq_to_chain_v: dict[int, bytes] = {}
     record_seqs: list[int] = []
     max_verified_ref_seq = 0
+    finalize_seen = False
     pcm_chunks: list[tuple[int, bytes]] = []
 
     while off < len(data):
@@ -595,6 +618,8 @@ def decode_azt1_stream_to_wav(
         off += 1
         if off + body_len + tag_len + 32 > len(data):
             break
+        if finalize_seen:
+            raise ValueError("ERR_FINALIZE_NOT_LAST")
         body = data[off : off + body_len]
         off += body_len
         tag = data[off : off + tag_len]
@@ -644,7 +669,7 @@ def decode_azt1_stream_to_wav(
                 raise ValueError("ERR_TAG_LEN")
             nonce = nonce_prefix + struct.pack(">I", seq) + b"\x00\x00\x00\x00"
             block_body = AESGCM(audio_key).decrypt(nonce, body + tag, None)
-        elif block_type in (0x01, 0x02):
+        elif block_type in (0x01, 0x02, 0x7E, 0x7F):
             if tag_len != 0:
                 raise ValueError("ERR_TAG_LEN")
             block_body = body
@@ -697,6 +722,32 @@ def decode_azt1_stream_to_wav(
                 dropped_frames_total += struct.unpack(">H", block_body[:2])[0]
         elif block_type == 0x03:
             telemetry_blocks += 1
+        elif block_type == 0x7E:
+            try:
+                close_message_text = block_body.decode("utf-8", errors="replace").strip()
+            except Exception:
+                close_message_text = ""
+            if close_message_text:
+                try:
+                    parsed_close = json.loads(close_message_text)
+                    if isinstance(parsed_close, dict):
+                        close_message = parsed_close
+                except Exception:
+                    close_message = None
+        elif block_type == 0x7F:
+            finalize_seen = True
+            if len(block_body) < 68:
+                raise ValueError("ERR_FINALIZE_FORMAT")
+            ref_seq = struct.unpack(">I", block_body[:4])[0]
+            sig = block_body[4:68]
+            if ref_seq == 0 or ref_seq not in seq_to_chain_v:
+                raise ValueError("ERR_FINALIZE_REF")
+            if device_sign_pub is not None:
+                msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                device_sign_pub.verify(sig, msg)
+                sig_verified += 1
+                if ref_seq > max_verified_ref_seq:
+                    max_verified_ref_seq = ref_seq
         frames += 1
 
     unsigned_tail_start_seq = (max_verified_ref_seq + 1) if max_verified_ref_seq > 0 else 1
@@ -783,6 +834,10 @@ def decode_azt1_stream_to_wav(
                 )
 
     messages = [{"level": "caution", "code": "UNSIGNED_AUDIO_TAIL", "text": w} for w in warnings]
+    if close_message_text:
+        close_cause = close_message.get("cause") if isinstance(close_message, dict) else ""
+        msg_text = f"Stream close reason: {close_cause}" if isinstance(close_cause, str) and close_cause else f"Stream close message: {close_message_text}"
+        messages.append({"level": "info", "code": "STREAM_CLOSE_REASON", "text": msg_text})
 
     return {
         "ok": True,
@@ -816,6 +871,9 @@ def decode_azt1_stream_to_wav(
         "unsigned_tail_bytes": unsigned_tail_bytes,
         "unsigned_tail_trimmed": unsigned_tail_trimmed and (unsigned_tail_frames > 0),
         "unsigned_tail_preserved": preserve_tail and (unsigned_tail_frames > 0),
+        "close_message_text": close_message_text,
+        "close_message": close_message,
+        "close_reason_cause": (close_message.get("cause") if isinstance(close_message, dict) else None),
         "messages": messages,
         **auto_grants,
     }

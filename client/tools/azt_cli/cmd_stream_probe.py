@@ -1,9 +1,47 @@
 from __future__ import annotations
 
 import argparse
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 
 from tools.azt_cli.output import emit_envelope, exception_detail
 from tools.azt_sdk.services.device_service import stream_read
+
+
+def _active_streams_path() -> Path:
+    return Path.home() / ".config" / "azt" / "active-streams.json"
+
+
+def _load_active_streams() -> dict:
+    p = _active_streams_path()
+    if not p.exists():
+        return {"streams": {}}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("streams"), dict):
+            return data
+    except Exception:
+        pass
+    return {"streams": {}}
+
+
+def _save_active_stream(host: str, payload: dict, key_path: str) -> None:
+    nonce = str(payload.get("stream_auth_nonce") or "").strip()
+    if not nonce:
+        return
+    p = _active_streams_path()
+    doc = _load_active_streams()
+    streams = doc.setdefault("streams", {})
+    streams[str(host).strip()] = {
+        "stream_auth_nonce": nonce,
+        "host": str(host).strip(),
+        "port": 8080,
+        "key_path": key_path,
+        "started_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -52,6 +90,9 @@ def run(args: argparse.Namespace) -> int:
             probe=probe,
             key_path=(key_path or None),
         )
+        if ok and not probe and isinstance(payload, dict):
+            _save_active_stream(args.host, payload, key_path)
+
         emit_envelope(
             command=command_name,
             ok=ok,
