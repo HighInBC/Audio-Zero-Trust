@@ -101,7 +101,7 @@ def main() -> int:
 
         if reqs(plain, "chain_alg") != "sha256-link":
             fail("ERR_HEADER_FIELD", "public_chain_alg must be sha256-link")
-        if reqs(plain, "chain_domain") != "AZT1-CHAIN-V1":
+        if reqs(plain, "chain_domain") != "AZT1-CHAIN-V1-NONCE":
             fail("ERR_HEADER_FIELD", "public_chain_domain mismatch")
         if reqs(plain, "chain_root_mode") != "genesis-signature-block":
             fail("ERR_HEADER_FIELD", "public_chain_root_mode mismatch")
@@ -189,8 +189,8 @@ def main() -> int:
         # encrypted-header expectations
         if reqs(dec, "chain_alg") != "sha256-link":
             fail("ERR_ENC_HEADER_JSON", "chain_alg must be sha256-link")
-        if reqs(dec, "chain_domain") != "AZT1-CHAIN-V1":
-            fail("ERR_ENC_HEADER_JSON", "chain_domain must be AZT1-CHAIN-V1")
+        if reqs(dec, "chain_domain") != "AZT1-CHAIN-V1-NONCE":
+            fail("ERR_ENC_HEADER_JSON", "chain_domain must be AZT1-CHAIN-V1-NONCE")
 
         # Optional device certificate included in plaintext header for portable provenance.
         cert_doc = plain.get("device_certificate")
@@ -235,6 +235,9 @@ def main() -> int:
         device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
         # verify outer header signature over raw plain header json bytes
         device_sign_pub.verify(outer_sig, plain_line)
+
+        stream_auth_nonce = str(plain.get("stream_auth_nonce") or "")
+        nonce_hash = hashlib.sha256(stream_auth_nonce.encode("utf-8")).digest()
 
         frames = 0
         pcm_blocks = 0
@@ -282,11 +285,11 @@ def main() -> int:
             # verify chain
             core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
             if seq == 1:
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
+                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + core).digest()
             else:
                 if v_prev is None:
                     fail("ERR_CHAIN", "missing prior chain value for seq>1")
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
+                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + v_prev + core).digest()
             if v_calc != v_cur:
                 fail("ERR_CHAIN", f"chain mismatch at seq={seq}")
             v_prev = v_cur

@@ -63,9 +63,10 @@ static bool encrypt_payload_and_chain(StreamCtx& sc,
   if (tag_len > 0) core.insert(core.end(), tag, tag + tag_len);
 
   std::vector<uint8_t> chain_input;
-  static const uint8_t kDomain[] = {'A','Z','T','1','-','C','H','A','I','N','-','V','1'};
-  chain_input.reserve(sizeof(kDomain) + (sc.seq > 1 ? 32 : 0) + core.size());
+  static const uint8_t kDomain[] = {'A','Z','T','1','-','C','H','A','I','N','-','V','1','-','N','O','N','C','E'};
+  chain_input.reserve(sizeof(kDomain) + 32 + (sc.seq > 1 ? 32 : 0) + core.size());
   chain_input.insert(chain_input.end(), kDomain, kDomain + sizeof(kDomain));
+  chain_input.insert(chain_input.end(), sc.chain_nonce_hash, sc.chain_nonce_hash + 32);
   if (sc.seq > 1) chain_input.insert(chain_input.end(), sc.v_prev, sc.v_prev + 32);
   chain_input.insert(chain_input.end(), core.begin(), core.end());
 

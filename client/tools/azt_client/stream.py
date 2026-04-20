@@ -151,6 +151,8 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
 
     # Chain verification is over framed record bytes; can run without decrypt key.
     chain_alg = str((dec or plain).get("chain_alg", "sha256-link"))
+    chain_domain = str((dec or plain).get("chain_domain", "AZT1-CHAIN-V1"))
+    nonce_hash = hashlib.sha256(str(plain.get("stream_auth_nonce") or "").encode("utf-8")).digest()
     v_prev = None
     chain_key = _b64d(dec["chain_key_b64"]) if (dec is not None and "chain_key_b64" in dec) else None
     chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None
@@ -236,12 +238,20 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
 
         if chain_alg == "sha256-link":
             core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
-            if seq == 1:
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
+            if chain_domain == "AZT1-CHAIN-V1-NONCE":
+                if seq == 1:
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + core).digest()
+                else:
+                    if v_prev is None:
+                        raise ValueError("ERR_CHAIN_STATE")
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + v_prev + core).digest()
             else:
-                if v_prev is None:
-                    raise ValueError("ERR_CHAIN_STATE")
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
+                if seq == 1:
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
+                else:
+                    if v_prev is None:
+                        raise ValueError("ERR_CHAIN_STATE")
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
             if v_calc != v_cur:
                 raise ValueError("ERR_CHAIN")
         elif chain_alg == "hmac-sha256-link":
@@ -536,6 +546,8 @@ def decode_azt1_stream_to_wav(
             header_plaintext_hash_verified = True
 
     chain_alg = str((dec or plain).get("chain_alg", "sha256-link"))
+    chain_domain = str((dec or plain).get("chain_domain", "AZT1-CHAIN-V1"))
+    nonce_hash = hashlib.sha256(str(plain.get("stream_auth_nonce") or "").encode("utf-8")).digest()
     v_prev = None
     chain_key = _b64d(dec["chain_key_b64"]) if (dec is not None and "chain_key_b64" in dec) else None
     chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None
@@ -634,12 +646,20 @@ def decode_azt1_stream_to_wav(
 
         if chain_alg == "sha256-link":
             core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
-            if seq == 1:
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
+            if chain_domain == "AZT1-CHAIN-V1-NONCE":
+                if seq == 1:
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + core).digest()
+                else:
+                    if v_prev is None:
+                        raise ValueError("ERR_CHAIN_STATE")
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + v_prev + core).digest()
             else:
-                if v_prev is None:
-                    raise ValueError("ERR_CHAIN_STATE")
-                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
+                if seq == 1:
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
+                else:
+                    if v_prev is None:
+                        raise ValueError("ERR_CHAIN_STATE")
+                    v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
             if v_calc != v_cur:
                 raise ValueError("ERR_CHAIN")
         elif chain_alg == "hmac-sha256-link":
