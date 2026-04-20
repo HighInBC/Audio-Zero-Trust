@@ -71,6 +71,7 @@ def run(args: argparse.Namespace) -> int:
             return 1
 
         key_path = (getattr(args, "key_path", "") or "").strip()
+        auth_key_path = (getattr(args, "auth_key_path", "") or "").strip()
         if out_path and not key_path:
             emit_envelope(
                 command=command_name,
@@ -89,9 +90,10 @@ def run(args: argparse.Namespace) -> int:
             out_path=(out_path or None),
             probe=probe,
             key_path=(key_path or None),
+            auth_key_path=(auth_key_path or None),
         )
         if ok and not probe and isinstance(payload, dict):
-            _save_active_stream(args.host, payload, key_path)
+            _save_active_stream(args.host, payload, auth_key_path or key_path)
 
         emit_envelope(
             command=command_name,

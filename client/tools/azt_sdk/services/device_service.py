@@ -331,7 +331,7 @@ def _stream_gate_detail(error_code: str, preface: bytes) -> str:
     return msg
 
 
-def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
+def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None, auth_key_path: str | None = None) -> tuple[bool, dict]:
     api_b = base_url(host=host, port=port, scheme=_api_scheme())
     stream_b = base_url(host=host, port=8081, scheme="http")
     total = 0
@@ -376,13 +376,14 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 
         params["nonce"] = nonce
         if bool((challenge or {}).get("recorder_auth_required")):
-            if not key_path:
-                return False, {"error": "STREAM_AUTH_KEY_REQUIRED", "detail": "device requires recorder auth signature"}
+            signing_key_path = (str(auth_key_path).strip() if auth_key_path else "") or (str(key_path).strip() if key_path else "")
+            if not signing_key_path:
+                return False, {"error": "STREAM_AUTH_KEY_REQUIRED", "detail": "device requires recorder auth signature; provide --auth-key (or --key if shared)"}
             try:
-                priv = load_private_key_auto(Path(str(key_path)), purpose=str(key_path))
+                priv = load_private_key_auto(Path(signing_key_path), purpose=signing_key_path)
                 if not isinstance(priv, ed25519.Ed25519PrivateKey):
                     return False, {"error": "STREAM_AUTH_KEY", "detail": "recorder auth key must be Ed25519 private key"}
-                signer_fp = ed25519_fp_hex_from_private_key(Path(str(key_path)))
+                signer_fp = ed25519_fp_hex_from_private_key(Path(signing_key_path))
                 device_fp = str((challenge or {}).get("device_sign_fingerprint_hex") or "").strip().lower()
                 msg = f"stream:{nonce}:{device_fp}".encode("utf-8")
                 sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
@@ -390,7 +391,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
             except Exception as e:
                 return False, {
                     "error": "STREAM_AUTH_KEY",
-                    "detail": _error_detail(where="device_service.stream_read.auth", exc=e),
+                    "detail": _error_detail(where="device_service.stream_read.auth", exc=e, context={"auth_key_path": signing_key_path}),
                 }
 
     url = f"{stream_b}/stream"
