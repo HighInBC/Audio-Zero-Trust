@@ -299,6 +299,33 @@ def _verify_stream_header_cert_gate(preface: bytes, admin_pub: ed25519.Ed25519Pu
     return True, ""
 
 
+def _stream_gate_detail(error_code: str, preface: bytes) -> str:
+    details = {
+        "ERR_STREAM_MAGIC": "stream did not start with AZT1 header; endpoint likely returned non-stream data",
+        "ERR_STREAM_HEADER_JSON": "stream header JSON was not parseable",
+        "ERR_STREAM_HEADER_SIG_LINE": "stream header signature line missing",
+        "ERR_STREAM_HEADER_SIGNER_KEY": "stream header missing this_header_signing_key_b64",
+        "ERR_STREAM_HEADER_SIG_VERIFY": "stream header signature verification failed",
+        "ERR_STREAM_CERT_SCHEMA": "device certificate in stream header is malformed",
+        "ERR_STREAM_CERT_SIG": "device certificate is missing signature",
+        "ERR_STREAM_CERT_SIG_VERIFY": "device certificate signature verification failed against admin key",
+        "ERR_STREAM_CERT_BINDING": "certificate signing key does not match stream header signing key",
+        "ERR_STREAM_CERT_SERIAL": "certificate serial does not match stream header serial",
+    }
+    msg = details.get(error_code, "stream rejected before write")
+
+    # Helpful hint when the endpoint returned plain text/HTML/JSON instead of AZT1 bytes.
+    snippet = ""
+    try:
+        snippet = preface[:180].decode("utf-8", errors="replace").replace("\r", " ").replace("\n", " ").strip()
+    except Exception:
+        snippet = ""
+    if snippet and not preface.startswith(b"AZT1\n"):
+        msg += f"; first bytes: {snippet}"
+
+    return msg
+
+
 def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, out_path: str | None, probe: bool, key_path: str | None = None) -> tuple[bool, dict]:
     api_b = base_url(host=host, port=port, scheme=_api_scheme())
     stream_b = base_url(host=host, port=8081, scheme="http")
@@ -406,7 +433,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                             if not ok_hdr:
                                 return False, {
                                     "error": err_hdr,
-                                    "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                                    "detail": _stream_gate_detail(err_hdr, bytes(preface_buf)),
                                     "bytes": total,
                                     "out": resolved_out,
                                     "url": url,
@@ -444,7 +471,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
         if not ok_hdr:
             return False, {
                 "error": err_hdr,
-                "detail": "stream rejected before write: missing/invalid certificate or header signature",
+                "detail": _stream_gate_detail(err_hdr, bytes(preface_buf)),
                 "bytes": total,
                 "out": resolved_out,
                 "url": url,
