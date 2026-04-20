@@ -425,6 +425,17 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sprobe.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sprobe.set_defaults(func=handlers.cmd_stream_probe, command_name="stream-read")
 
+    sterm = sub.add_parser("stream-terminate", help="Gracefully terminate active stream by stored or explicit stream nonce")
+    sterm.add_argument("--host", required=False, default="", help="Device host/IP")
+    sterm.add_argument("--port", type=int, default=8080, help="Device API port")
+    sterm.add_argument("--key", dest="key_path", required=False, default="", help="Admin/recorder-auth Ed25519 private key PEM")
+    sterm.add_argument("--stream-auth-nonce", default="", help="Optional explicit stream nonce (defaults to stored active session for host)")
+    sterm.add_argument("--reason-code", type=int, default=2, help="Termination reason code")
+    sterm.add_argument("--message-json", default="", help="Optional JSON object string for user message payload")
+    sterm.add_argument("--timeout", type=int, default=10, help="HTTP timeout seconds")
+    sterm.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    sterm.set_defaults(func=handlers.cmd_stream_terminate, command_name="stream-terminate")
+
     stls_init = sub.add_parser("tls-ca-init", help="Initialize local TLS CA (auto-generates if missing)")
     stls_init.add_argument("--common-name", default="Audio-Zero-Trust Local CA", help="CA certificate common name")
     stls_init.add_argument("--force", action="store_true", help="Regenerate CA even if one already exists")

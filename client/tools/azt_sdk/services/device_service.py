@@ -302,6 +302,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
     api_b = base_url(host=host, port=port, scheme=_api_scheme())
     stream_b = base_url(host=host, port=8081, scheme="http")
     total = 0
+    nonce = ""
     import time
     from pathlib import Path
 
@@ -452,6 +453,8 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 
     elapsed = time.time() - start
     payload = {"bytes": total, "seconds": elapsed, "requested_seconds": seconds, "url": url}
+    if nonce:
+        payload["stream_auth_nonce"] = nonce
     if resolved_out:
         payload["out"] = resolved_out
     return total > 0, payload
@@ -460,6 +463,65 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -> tuple[bool, dict]:
     # Back-compat wrapper for older callers.
     return stream_read(host=host, port=port, seconds=seconds, timeout=timeout, out_path=None, probe=True)
+
+
+def stream_terminate(*, host: str, port: int, timeout: int, key_path: str, stream_auth_nonce: str, reason_code: int = 2, message_json: dict | None = None) -> tuple[bool, dict]:
+    api_b = base_url(host=host, port=port, scheme=_api_scheme())
+    url = f"{api_b}/api/v0/device/stream/terminate"
+
+    try:
+        priv = load_private_key_auto(Path(str(key_path)), purpose=str(key_path))
+        if not isinstance(priv, ed25519.Ed25519PrivateKey):
+            return False, {"error": "STREAM_TERMINATE_KEY", "detail": "key must be Ed25519 private key"}
+    except Exception as e:
+        return False, {
+            "error": "STREAM_TERMINATE_KEY",
+            "detail": _error_detail(where="device_service.stream_terminate.key", exc=e),
+        }
+
+    try:
+        st = state_get(host=host, port=port, timeout=timeout)
+        if not st.get("ok"):
+            return False, {"error": "STREAM_TERMINATE_STATE", "detail": st}
+        device_fp = str(st.get("device_sign_fingerprint_hex") or "").strip().lower()
+        if not device_fp:
+            return False, {"error": "STREAM_TERMINATE_STATE", "detail": "missing device_sign_fingerprint_hex in state"}
+    except Exception as e:
+        return False, {
+            "error": "STREAM_TERMINATE_STATE",
+            "detail": _error_detail(where="device_service.stream_terminate.state", exc=e),
+        }
+
+    user_msg = message_json if isinstance(message_json, dict) else {}
+    user_json_str = json.dumps(user_msg, separators=(",", ":"), sort_keys=True)
+    user_hash_hex = hashlib.sha256(user_json_str.encode("utf-8")).hexdigest()
+
+    signer_fp = ed25519_fp_hex_from_private_key(Path(str(key_path)))
+    signed_msg = f"stream_terminate:{stream_auth_nonce}:{device_fp}:{int(reason_code)}:{user_hash_hex}".encode("utf-8")
+    sig_b64 = base64.b64encode(priv.sign(signed_msg)).decode("ascii")
+
+    payload = {
+        "stream_auth_nonce": stream_auth_nonce,
+        "reason_code": int(reason_code),
+        "message_json": user_msg,
+        "signature_algorithm": "ed25519",
+        "signature_b64": sig_b64,
+        "signer_fingerprint_hex": signer_fp,
+    }
+
+    try:
+        res = http_json("POST", url, payload, timeout=timeout)
+        return bool(res.get("ok")), res
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as e:
+        return False, {
+            "error": "STREAM_TERMINATE_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_terminate.post", exc=e, url=url),
+        }
+    except Exception as e:
+        return False, {
+            "error": "STREAM_TERMINATE_REQUEST_FAILED",
+            "detail": _error_detail(where="device_service.stream_terminate.post", exc=e, url=url),
+        }
 
 
 def mdns_fqdn_get(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:

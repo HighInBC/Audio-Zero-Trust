@@ -91,6 +91,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         "attestation-verify",
         "stream-redirect-check",
         "stream-read",
+        "stream-terminate",
         "tls-cert-issue",
         "tls-status",
         "tls-bootstrap",
@@ -112,10 +113,10 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command == "stream-redirect-check" and "stream_port" in conf_defaults:
         _set_if_unset(args, "stream_port", int(conf_defaults["stream_port"]))
 
-    if command in {"apply-config", "config-patch", "certificate-issue", "certificate-revoke", "key-match-check", "reboot-device", "tls-cert-issue", "tls-bootstrap", "stream-read"}:
-        # stream-read signs stream challenge with recorder-auth key when configured;
-        # prefer recorder_key_path defaults there, then fall back to admin key.
-        if command == "stream-read":
+    if command in {"apply-config", "config-patch", "certificate-issue", "certificate-revoke", "key-match-check", "reboot-device", "tls-cert-issue", "tls-bootstrap", "stream-read", "stream-terminate"}:
+        # stream-read/stream-terminate use recorder-auth/admin Ed25519 signatures.
+        # Prefer recorder key defaults when configured, then fall back to admin key.
+        if command in {"stream-read", "stream-terminate"}:
             if "recorder_key_path" in conf_defaults:
                 _set_if_unset(args, "key_path", str(conf_defaults["recorder_key_path"]))
             elif "recorder_auth_creds_dir" in conf_defaults and _is_unset(args, "key_path"):
