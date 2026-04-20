@@ -36,6 +36,13 @@ static constexpr float kAudioDegradedHighDbfs = -3.0f;
 static constexpr uint8_t kAudioDegradedConsecutiveWindows = 1;
 static volatile bool g_stream_shutdown_requested = false;
 
+// Active stream session + optional terminate request keyed by initiating nonce.
+static String g_active_stream_nonce = "";
+static String g_pending_terminate_nonce = "";
+static String g_pending_terminate_text = "";
+static uint8_t g_pending_terminate_reason_code = 0;
+static volatile bool g_pending_terminate = false;
+
 static constexpr uint8_t kCloseReasonNormalEnd = 0x00;
 static constexpr uint8_t kCloseReasonAudioDegradedReinit = 0x01;
 static constexpr uint8_t kCloseReasonRequestedShutdown = 0x02;
@@ -43,13 +50,57 @@ static constexpr uint8_t kCloseReasonRequestedShutdown = 0x02;
 void request_stream_shutdown() { g_stream_shutdown_requested = true; }
 void clear_stream_shutdown_request() { g_stream_shutdown_requested = false; }
 
+void set_active_stream_session_nonce(const String& nonce) {
+  g_active_stream_nonce = nonce;
+}
+
+void clear_active_stream_session_nonce(const String& nonce) {
+  if (nonce.length() == 0 || g_active_stream_nonce == nonce) {
+    g_active_stream_nonce = "";
+  }
+  if (g_pending_terminate && (nonce.length() == 0 || g_pending_terminate_nonce == nonce)) {
+    g_pending_terminate = false;
+    g_pending_terminate_nonce = "";
+    g_pending_terminate_text = "";
+    g_pending_terminate_reason_code = 0;
+  }
+}
+
+bool request_stream_termination_by_nonce(const String& nonce,
+                                         uint8_t reason_code,
+                                         const String& reason_text) {
+  if (nonce.length() == 0 || g_active_stream_nonce.length() == 0 || nonce != g_active_stream_nonce) {
+    return false;
+  }
+  g_pending_terminate_nonce = nonce;
+  g_pending_terminate_reason_code = reason_code;
+  g_pending_terminate_text = reason_text;
+  g_pending_terminate = true;
+  return true;
+}
+
+bool consume_stream_termination_for_nonce(const String& nonce,
+                                          uint8_t& out_reason_code,
+                                          String& out_reason_text) {
+  if (!g_pending_terminate || nonce.length() == 0 || nonce != g_pending_terminate_nonce) {
+    return false;
+  }
+  out_reason_code = g_pending_terminate_reason_code;
+  out_reason_text = g_pending_terminate_text;
+  g_pending_terminate = false;
+  g_pending_terminate_nonce = "";
+  g_pending_terminate_text = "";
+  g_pending_terminate_reason_code = 0;
+  return true;
+}
+
 static bool emit_stream_close_and_finalize(WiFiClient& client,
                                            StreamCtx& sc,
                                            const unsigned char sign_sk[crypto_sign_ed25519_SECRETKEYBYTES],
                                            uint8_t reason_code,
-                                           const char* reason_text,
+                                           const String& reason_text,
                                            std::vector<uint8_t>& rec) {
-  const char* txt = reason_text ? reason_text : "";
+  const char* txt = reason_text.c_str();
   if (!encrypt_message_block_and_chain(sc,
                                        reason_code,
                                        reinterpret_cast<const uint8_t*>(txt),
@@ -430,6 +481,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     }
   }
 
+  set_active_stream_session_nonce(stream_auth_nonce);
+
   const bool finite_stream = seconds > 0;
   const uint64_t stream_start_us = static_cast<uint64_t>(esp_timer_get_time());
   const uint64_t deadline = finite_stream
@@ -465,7 +518,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   uint8_t degraded_windows = 0;
   bool trigger_audio_reinit = false;
   uint8_t close_reason_code = kCloseReasonNormalEnd;
-  const char* close_reason_text = "normal_end";
+  String close_reason_text = "normal_end";
   int drop_test_remaining = drop_test_frames;
   uint32_t sig_interval = kSigCheckpointMinInterval;
   uint32_t last_sig_ref_seq = 0;
@@ -491,6 +544,17 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         if (started_with_recorder_auth && current_recorder_auth_fp != started_recorder_auth_fp) {
           break;
         }
+      }
+    }
+
+    // Recorder/admin can request graceful termination using the initiating stream nonce.
+    {
+      uint8_t req_reason = 0;
+      String req_text;
+      if (consume_stream_termination_for_nonce(stream_auth_nonce, req_reason, req_text)) {
+        close_reason_code = req_reason;
+        close_reason_text = req_text.length() > 0 ? req_text : String("requested_termination");
+        break;
       }
     }
 
@@ -739,6 +803,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         static_cast<unsigned long long>(ingress.i2s_empty),
         static_cast<unsigned>(mic_ring->high_water));
   }
+
+  clear_active_stream_session_nonce(stream_auth_nonce);
 
   if (trigger_audio_reinit) {
     reinitialize_audio_input(state);

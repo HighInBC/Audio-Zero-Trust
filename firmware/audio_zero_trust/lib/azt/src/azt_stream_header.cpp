@@ -71,6 +71,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   dec_header += "\"finalize_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   dec_header += "\"message_block_body_format\":\"ver_u8|reason_code_u8|text_len_u16be|utf8_text\",";
+  dec_header += "\"message_reason_code_map\":{\"0\":\"normal_end\",\"1\":\"audio_degraded_reinit\",\"2\":\"requested_shutdown_or_termination\"},";
+  dec_header += "\"stream_termination_api\":\"POST /api/v0/device/stream/terminate with stream_auth_nonce + signed reason\",";
   dec_header += "\"dropped_frames_block_body_format\":\"missed_frames_u16be\",";
   dec_header += "\"telemetry_block_body_format\":\"ver_u8|window_blocks_u16be|rb_level_min_u16be|rb_level_max_u16be|rb_level_avg_q8_u16be|rb_level_last_u16be\",";
   dec_header += "\"telemetry_interval_blocks\":50,";
@@ -195,6 +197,8 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   plain_header += "\"finalize_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   plain_header += "\"message_block_body_format\":\"ver_u8|reason_code_u8|text_len_u16be|utf8_text\",";
+  plain_header += "\"message_reason_code_map\":{\"0\":\"normal_end\",\"1\":\"audio_degraded_reinit\",\"2\":\"requested_shutdown_or_termination\"},";
+  plain_header += "\"stream_termination_api\":\"POST /api/v0/device/stream/terminate with stream_auth_nonce + signed reason\",";
   plain_header += "\"dropped_frames_block_body_format\":\"missed_frames_u16be\",";
   plain_header += "\"signature_checkpoint_alg\":\"ed25519\",";
   plain_header += "\"signature_checkpoint_domain\":\"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)\",";

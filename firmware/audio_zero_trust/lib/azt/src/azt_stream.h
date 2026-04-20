@@ -84,6 +84,15 @@ void telemetry_reset(TelemetryAccumulator& acc);
 void send_json(WiFiClient& client, int code, const String& body);
 void request_stream_shutdown();
 void clear_stream_shutdown_request();
+
+void set_active_stream_session_nonce(const String& nonce);
+void clear_active_stream_session_nonce(const String& nonce);
+bool request_stream_termination_by_nonce(const String& nonce,
+                                         uint8_t reason_code,
+                                         const String& reason_text);
+bool consume_stream_termination_for_nonce(const String& nonce,
+                                          uint8_t& out_reason_code,
+                                          String& out_reason_text);
 void handle_stream(WiFiClient& client,
                    int seconds,
                    const AppState& state,

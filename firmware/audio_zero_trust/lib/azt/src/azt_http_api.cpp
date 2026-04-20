@@ -1463,6 +1463,72 @@ HttpDispatchResult dispatch_request(const String& method,
     return r;
   }
 
+  if (method == "POST" && path == "/api/v0/device/stream/terminate") {
+    JsonDocument doc;
+    DeserializationError jerr = deserializeJson(doc, body);
+    if (jerr) {
+      r.code = 400;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_TERMINATE_SCHEMA\",\"detail\":\"invalid json\"}";
+      return r;
+    }
+
+    String session_nonce = String((const char*)(doc["stream_auth_nonce"] | ""));
+    String sig_alg = String((const char*)(doc["signature_algorithm"] | ""));
+    String sig_b64 = String((const char*)(doc["signature_b64"] | ""));
+    String signer_fp = String((const char*)(doc["signer_fingerprint_hex"] | ""));
+    int reason_code_i = int(doc["reason_code"] | 2);
+    if (reason_code_i < 0) reason_code_i = 0;
+    if (reason_code_i > 255) reason_code_i = 255;
+    uint8_t reason_code = static_cast<uint8_t>(reason_code_i);
+
+    String reason_text;
+    if (doc["message_json"].is<JsonVariantConst>()) {
+      serializeJson(doc["message_json"], reason_text);
+    } else {
+      reason_text = String((const char*)(doc["message_text"] | ""));
+    }
+
+    String auth_pubkey_b64 = state.recorder_auth_pubkey_b64;
+    String auth_fp = state.recorder_auth_fingerprint_hex;
+    if (!(auth_pubkey_b64.length() > 0 && auth_fp.length() == 64)) {
+      auth_pubkey_b64 = state.admin_pubkey_pem;
+      auth_fp = state.admin_fingerprint_hex;
+    }
+
+    if (session_nonce.length() == 0 || sig_alg != "ed25519" || sig_b64.length() == 0 || signer_fp != auth_fp) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_TERMINATE_AUTH\"}";
+      return r;
+    }
+
+    String signed_msg = String("stream_terminate:") + session_nonce + ":" + state.device_sign_fingerprint_hex + ":" + String(static_cast<unsigned>(reason_code));
+    std::vector<uint8_t> msg_raw;
+    msg_raw.reserve(signed_msg.length());
+    for (size_t i = 0; i < signed_msg.length(); ++i) msg_raw.push_back(static_cast<uint8_t>(signed_msg[i]));
+
+    if (!verify_ed25519_signature_b64(auth_pubkey_b64, msg_raw, sig_b64)) {
+      r.code = 401;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_TERMINATE_AUTH_VERIFY\"}";
+      return r;
+    }
+
+    if (!request_stream_termination_by_nonce(session_nonce, reason_code, reason_text)) {
+      r.code = 409;
+      r.content_type = "application/json";
+      r.body = "{\"ok\":false,\"error\":\"ERR_STREAM_SESSION_NOT_ACTIVE\"}";
+      return r;
+    }
+
+    r.code = 200;
+    r.content_type = "application/json";
+    r.body = "{\"ok\":true,\"queued\":true,\"stream_auth_nonce\":" + json_quote(session_nonce) +
+             ",\"reason_code\":" + String(static_cast<unsigned>(reason_code)) + "}";
+    return r;
+  }
+
   if (method == "POST" && path == "/api/v0/config") {
     return handle_config_post_json(state, body, false);
   }
