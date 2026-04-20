@@ -5,6 +5,7 @@ from urllib.parse import quote, urlencode
 import base64
 import hashlib
 import json
+import math
 import urllib.error
 from pathlib import Path
 from urllib.request import Request
@@ -351,6 +352,11 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
             }
 
     params: dict[str, str] = {}
+    planned_duration_stop = bool((seconds is not None) and (seconds > 0) and (not probe))
+    if planned_duration_stop:
+        # Tell device to own stream shutdown so it can finalize on-frame/signature boundaries.
+        params["seconds"] = str(max(1, int(math.ceil(float(seconds)))))
+
     # Probe mode remains backwards-compatible with plain stream reads.
     if not probe:
         # Stream freshness challenge (required by firmware).
@@ -457,8 +463,14 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 
                 if out_file is not None:
                     out_file.write(chunk)
-            if seconds is not None and (time.time() - start >= seconds):
-                break
+            if seconds is not None:
+                elapsed = (time.time() - start)
+                if not planned_duration_stop and elapsed >= seconds:
+                    break
+                # In planned-duration mode the device should close gracefully.
+                # Keep a bounded local failsafe in case firmware/network never closes.
+                if planned_duration_stop and elapsed >= (float(seconds) + 8.0):
+                    break
     except (requests.RequestException, OSError, ValueError) as e:
         return False, {
             "error": "STREAM_READ_ITERATION_FAILED",
