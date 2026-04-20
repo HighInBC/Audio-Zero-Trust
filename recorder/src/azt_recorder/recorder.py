@@ -616,7 +616,7 @@ class RecordingSession:
     ad: DiscoveryAd
     cfg: RecordingConfig
 
-    def _build_stream_request(self) -> tuple[urllib.request.Request, str]:
+    def _build_stream_request(self, planned_seconds: int) -> tuple[urllib.request.Request, str]:
         challenge_url = f"{self.ad.api_https_url}/api/v0/device/stream/challenge"
         # Device TLS is private PKI today; recorder performs application-layer auth checks
         # and uses an unverified TLS context for API bootstrap/challenge fetch.
@@ -629,7 +629,7 @@ class RecordingSession:
         if not nonce:
             raise AuthorizationError("stream_challenge_missing_nonce")
 
-        params = {"nonce": nonce}
+        params = {"nonce": nonce, "seconds": max(1, int(planned_seconds))}
         require_auth = bool(ch.get("recorder_auth_required"))
         key_path = str(self.cfg.recorder_auth_private_key_path or "").strip()
         if require_auth:
@@ -684,9 +684,10 @@ class RecordingSession:
 
         # Hourly rollover by wall-clock hour; if disabled, use 24h chunk.
         max_seconds = 3600 if self.cfg.hourly_rollover else 86400
-        deadline = time.monotonic() + max_seconds
+        # Planned duration is device-owned; local loop enforces a +5s safety timeout.
+        deadline = time.monotonic() + max_seconds + 5
 
-        req, expected_nonce = self._build_stream_request()
+        req, expected_nonce = self._build_stream_request(max_seconds)
 
         stream_err: Exception | None = None
         try:
