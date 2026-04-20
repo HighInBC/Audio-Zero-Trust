@@ -70,11 +70,11 @@ Required keys used by current validators/generator:
 - `device_certificate` (JSON object, optional; full signed certificate document as returned by `/api/v0/device/certificate`)
 - `stream_auth_nonce` (string; single-use stream challenge nonce bound to stream-start authorization)
 - `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
-- `chain_alg` = `"hmac-sha256-link"`
-- `chain_domain` = `"AZT1-CHAIN-V2"`
+- `chain_alg` = `"sha256-link"`
+- `chain_domain` = `"AZT1-CHAIN-V1-NONCE"`
 - `chain_root_mode` = `"genesis-signature-block"`
 - `encrypted_block_types` = `[0,3]`
-- `plaintext_block_types` = `[1,2]`
+- `plaintext_block_types` = `[1,2,126,127]`
 - `signature_checkpoint_alg` = `"ed25519"`
 - `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)"`
 - `block1_must_be_signature_ref_seq0` = `true`
@@ -114,14 +114,13 @@ Current profile expects:
 - `packetization` = `"none"`
 - `payload_block_types` map including ids `0..3`
 - `encrypted_block_types` = `[0,3]`
-- `plaintext_block_types` = `[1,2]`
+- `plaintext_block_types` = `[1,2,126,127]`
 - `signature_checkpoint_alg` = `"ed25519"`
 - `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)"`
 - `device_sign_public_key_b64` (base64 Ed25519 pubkey, 32 bytes)
 - `device_sign_fingerprint_hex`
-- `chain_alg` = `"hmac-sha256-link"`
-- `chain_domain` = `"AZT1-CHAIN-V2"`
-- `chain_key_b64` (base64, 32 bytes)
+- `chain_alg` = `"sha256-link"`
+- `chain_domain` = `"AZT1-CHAIN-V1-NONCE"`
 - `chain_genesis_secret_b64` (base64, 32 bytes)
 - `block1_must_be_signature_ref_seq0` = `true`
 - `chain_root_mode` = `"genesis-signature-block"`
@@ -146,12 +145,13 @@ Each chunk record:
 - `tag_len_u8`
 - `body` (`body_len` bytes)
 - `tag` (`tag_len` bytes)
-- `chain_v32` (32-byte HMAC-SHA256 link)
+- `chain_v32` (32-byte SHA-256 link)
 
-Chain rule (`hmac-sha256-link`):
+Chain rule (`sha256-link` with nonce domain binding):
 
-- `seq == 1`: `V = HMAC_SHA256(chain_key, "AZT1-CHAIN-V2" || record_bytes)`
-- `seq > 1`: `V = HMAC_SHA256(chain_key, "AZT1-CHAIN-V2" || prev_V || record_bytes)`
+- `nonce_hash = SHA256(stream_auth_nonce_utf8)`
+- `seq == 1`: `V = SHA256("AZT1-CHAIN-V1-NONCE" || nonce_hash || record_bytes)`
+- `seq > 1`: `V = SHA256("AZT1-CHAIN-V1-NONCE" || nonce_hash || prev_V || record_bytes)`
 - `record_bytes = seq_u32be || block_type_u8 || body_len_u32be || tag_len_u8 || body || tag`
 
 `block_type` classes:
@@ -188,7 +188,7 @@ Mandatory genesis anchor rule:
 6. If `N != 0xFFFF`, verify ciphertext length/hash commitments from outer header.
 7. If private key provided, unwrap/decrypt next header and verify plaintext hash commitment.
 8. Parse chunk records to EOF (allow trailing partial bytes).
-9. Verify chain link per record (`hmac-sha256-link`, domain `AZT1-CHAIN-V2`).
+9. Verify chain link per record (`sha256-link`, domain `AZT1-CHAIN-V1-NONCE`, nonce-bound).
 10. Enforce genesis-anchor rule: first record must be signature block with `ref_seq=0`.
 11. For encrypted block types `(0,3)`, enforce `tag_len=16` and decrypt when audio key is available.
 12. For plaintext block types `(1,2)`, enforce `tag_len=0`.
