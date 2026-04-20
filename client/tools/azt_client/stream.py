@@ -597,6 +597,8 @@ def decode_azt1_stream_to_wav(
 
     frames = pcm_bytes = pcm_blocks = sig_blocks = sig_verified = 0
     dropped_notice_blocks = dropped_frames_total = telemetry_blocks = 0
+    close_message_text = ""
+    close_message = None
     seq_to_chain_v: dict[int, bytes] = {}
     record_seqs: list[int] = []
     max_verified_ref_seq = 0
@@ -721,7 +723,17 @@ def decode_azt1_stream_to_wav(
         elif block_type == 0x03:
             telemetry_blocks += 1
         elif block_type == 0x7E:
-            pass
+            try:
+                close_message_text = block_body.decode("utf-8", errors="replace").strip()
+            except Exception:
+                close_message_text = ""
+            if close_message_text:
+                try:
+                    parsed_close = json.loads(close_message_text)
+                    if isinstance(parsed_close, dict):
+                        close_message = parsed_close
+                except Exception:
+                    close_message = None
         elif block_type == 0x7F:
             finalize_seen = True
             if len(block_body) < 68:
@@ -822,6 +834,10 @@ def decode_azt1_stream_to_wav(
                 )
 
     messages = [{"level": "caution", "code": "UNSIGNED_AUDIO_TAIL", "text": w} for w in warnings]
+    if close_message_text:
+        close_cause = close_message.get("cause") if isinstance(close_message, dict) else ""
+        msg_text = f"Stream close reason: {close_cause}" if isinstance(close_cause, str) and close_cause else f"Stream close message: {close_message_text}"
+        messages.append({"level": "info", "code": "STREAM_CLOSE_REASON", "text": msg_text})
 
     return {
         "ok": True,
@@ -855,6 +871,9 @@ def decode_azt1_stream_to_wav(
         "unsigned_tail_bytes": unsigned_tail_bytes,
         "unsigned_tail_trimmed": unsigned_tail_trimmed and (unsigned_tail_frames > 0),
         "unsigned_tail_preserved": preserve_tail and (unsigned_tail_frames > 0),
+        "close_message_text": close_message_text,
+        "close_message": close_message,
+        "close_reason_cause": (close_message.get("cause") if isinstance(close_message, dict) else None),
         "messages": messages,
         **auto_grants,
     }
