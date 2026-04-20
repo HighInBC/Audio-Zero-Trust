@@ -311,6 +311,7 @@ def _stream_gate_detail(error_code: str, preface: bytes) -> str:
         "ERR_STREAM_CERT_SIG_VERIFY": "device certificate signature verification failed against admin key",
         "ERR_STREAM_CERT_BINDING": "certificate signing key does not match stream header signing key",
         "ERR_STREAM_CERT_SERIAL": "certificate serial does not match stream header serial",
+        "ERR_STREAM_HEADER_TOO_LARGE": "stream header exceeded maximum preface size before signature line",
     }
     msg = details.get(error_code, "stream rejected before write")
 
@@ -391,7 +392,9 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
     resolved_out = ""
     preface_buf = bytearray()
     preface_checked = bool(probe)
-    preface_required_bytes = 4096
+    # Header preface can exceed 4 KiB when certificate blobs are present.
+    # Keep buffering until we have both header lines, with a hard cap to avoid unbounded memory.
+    preface_required_bytes = 65536
     if not probe and out_path:
       p = Path(out_path)
       p.parent.mkdir(parents=True, exist_ok=True)
@@ -428,7 +431,7 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                     if len(preface_buf) >= 12:
                         first_nl = preface_buf.find(b"\n", 5)
                         second_nl = preface_buf.find(b"\n", first_nl + 1) if first_nl >= 0 else -1
-                        if second_nl >= 0 or len(preface_buf) >= preface_required_bytes:
+                        if second_nl >= 0:
                             ok_hdr, err_hdr = _verify_stream_header_cert_gate(bytes(preface_buf), admin_pub)
                             if not ok_hdr:
                                 return False, {
@@ -442,6 +445,14 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
                             if out_file is not None and len(preface_buf) > 0:
                                 out_file.write(preface_buf)
                             preface_buf.clear()
+                        elif len(preface_buf) >= preface_required_bytes:
+                            return False, {
+                                "error": "ERR_STREAM_HEADER_TOO_LARGE",
+                                "detail": f"stream header preface exceeded {preface_required_bytes} bytes before signature line terminator",
+                                "bytes": total,
+                                "out": resolved_out,
+                                "url": url,
+                            }
                     continue
 
                 if out_file is not None:
