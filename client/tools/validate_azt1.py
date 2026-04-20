@@ -12,7 +12,6 @@ Focuses on container/format semantics:
 
 from __future__ import annotations
 import argparse, base64, json, struct, sys, hashlib
-from cryptography.hazmat.primitives import hmac
 from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding
@@ -100,9 +99,9 @@ def main() -> int:
         if reqs(plain, "next_header_ciphertext_hash_alg") != "sha256":
             fail("ERR_HEADER_FIELD", "next_header_ciphertext_hash_alg must be sha256")
 
-        if reqs(plain, "chain_alg") != "hmac-sha256-link":
-            fail("ERR_HEADER_FIELD", "public_chain_alg must be hmac-sha256-link")
-        if reqs(plain, "chain_domain") != "AZT1-CHAIN-V2":
+        if reqs(plain, "chain_alg") != "sha256-link":
+            fail("ERR_HEADER_FIELD", "public_chain_alg must be sha256-link")
+        if reqs(plain, "chain_domain") != "AZT1-CHAIN-V1":
             fail("ERR_HEADER_FIELD", "public_chain_domain mismatch")
         if reqs(plain, "chain_root_mode") != "genesis-signature-block":
             fail("ERR_HEADER_FIELD", "public_chain_root_mode mismatch")
@@ -188,10 +187,10 @@ def main() -> int:
             fail("ERR_ENC_HEADER_LENGTH", "next_header plaintext hash mismatch")
 
         # encrypted-header expectations
-        if reqs(dec, "chain_alg") != "hmac-sha256-link":
-            fail("ERR_ENC_HEADER_JSON", "chain_alg must be hmac-sha256-link")
-        if reqs(dec, "chain_domain") != "AZT1-CHAIN-V2":
-            fail("ERR_ENC_HEADER_JSON", "chain_domain must be AZT1-CHAIN-V2")
+        if reqs(dec, "chain_alg") != "sha256-link":
+            fail("ERR_ENC_HEADER_JSON", "chain_alg must be sha256-link")
+        if reqs(dec, "chain_domain") != "AZT1-CHAIN-V1":
+            fail("ERR_ENC_HEADER_JSON", "chain_domain must be AZT1-CHAIN-V1")
 
         # Optional device certificate included in plaintext header for portable provenance.
         cert_doc = plain.get("device_certificate")
@@ -228,9 +227,8 @@ def main() -> int:
 
         audio_key = b64d(reqs(dec, "audio_key_b64"), "audio_key_b64")
         nonce_prefix = b64d(reqs(dec, "audio_nonce_prefix_b64"), "audio_nonce_prefix_b64")
-        chain_key = b64d(reqs(dec, "chain_key_b64"), "chain_key_b64")
         chain_genesis_secret = b64d(reqs(dec, "chain_genesis_secret_b64"), "chain_genesis_secret_b64")
-        if len(audio_key) != 32 or len(nonce_prefix) != 4 or len(chain_key) != 32 or len(chain_genesis_secret) != 32:
+        if len(audio_key) != 32 or len(nonce_prefix) != 4 or len(chain_genesis_secret) != 32:
             fail("ERR_ENC_HEADER_JSON", "invalid key/nonce/genesis fields")
 
         device_sign_pub_raw = b64d(reqs(dec, "device_sign_public_key_b64"), "device_sign_public_key_b64")
@@ -283,14 +281,12 @@ def main() -> int:
 
             # verify chain
             core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
-            hm = hmac.HMAC(chain_key, hashes.SHA256())
-            hm.update(b"AZT1-CHAIN-V2")
-            if seq > 1:
+            if seq == 1:
+                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + core).digest()
+            else:
                 if v_prev is None:
                     fail("ERR_CHAIN", "missing prior chain value for seq>1")
-                hm.update(v_prev)
-            hm.update(core)
-            v_calc = hm.finalize()
+                v_calc = hashlib.sha256(b"AZT1-CHAIN-V1" + v_prev + core).digest()
             if v_calc != v_cur:
                 fail("ERR_CHAIN", f"chain mismatch at seq={seq}")
             v_prev = v_cur

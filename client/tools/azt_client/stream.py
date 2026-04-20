@@ -150,7 +150,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             header_plaintext_hash_verified = True
 
     # Chain verification is over framed record bytes; can run without decrypt key.
-    chain_alg = str((dec or plain).get("chain_alg", "hmac-sha256-link"))
+    chain_alg = str((dec or plain).get("chain_alg", "sha256-link"))
     v_prev = None
     chain_key = _b64d(dec["chain_key_b64"]) if (dec is not None and "chain_key_b64" in dec) else None
     chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None
@@ -535,7 +535,7 @@ def decode_azt1_stream_to_wav(
                 raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH")
             header_plaintext_hash_verified = True
 
-    chain_alg = str((dec or plain).get("chain_alg", "hmac-sha256-link"))
+    chain_alg = str((dec or plain).get("chain_alg", "sha256-link"))
     v_prev = None
     chain_key = _b64d(dec["chain_key_b64"]) if (dec is not None and "chain_key_b64" in dec) else None
     chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None

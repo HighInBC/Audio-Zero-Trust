@@ -62,15 +62,17 @@ static bool encrypt_payload_and_chain(StreamCtx& sc,
   core.insert(core.end(), body.begin(), body.end());
   if (tag_len > 0) core.insert(core.end(), tag, tag + tag_len);
 
-  crypto_auth_hmacsha256_state hs;
-  crypto_auth_hmacsha256_init(&hs, sc.chain_key, sizeof(sc.chain_key));
-  static const uint8_t kDomain[] = {'A','Z','T','1','-','C','H','A','I','N','-','V','2'};
-  crypto_auth_hmacsha256_update(&hs, kDomain, sizeof(kDomain));
-  if (sc.seq > 1) crypto_auth_hmacsha256_update(&hs, sc.v_prev, 32);
-  crypto_auth_hmacsha256_update(&hs, core.data(), core.size());
+  std::vector<uint8_t> chain_input;
+  static const uint8_t kDomain[] = {'A','Z','T','1','-','C','H','A','I','N','-','V','1'};
+  chain_input.reserve(sizeof(kDomain) + (sc.seq > 1 ? 32 : 0) + core.size());
+  chain_input.insert(chain_input.end(), kDomain, kDomain + sizeof(kDomain));
+  if (sc.seq > 1) chain_input.insert(chain_input.end(), sc.v_prev, sc.v_prev + 32);
+  chain_input.insert(chain_input.end(), core.begin(), core.end());
 
   uint8_t v_new[32];
-  crypto_auth_hmacsha256_final(&hs, v_new);
+  if (!sha256_bytes(chain_input.data(), chain_input.size(), v_new)) {
+    return false;
+  }
 
   rec_out.reserve(core.size() + tag_len + 32);
   rec_out.insert(rec_out.end(), core.begin(), core.end());

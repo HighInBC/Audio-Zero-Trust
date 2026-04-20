@@ -21,18 +21,10 @@ bool build_header_prefix(StreamCtx& sc,
   out_prefix.clear();
   esp_fill_random(sc.audio_key, sizeof(sc.audio_key));
   esp_fill_random(sc.nonce_prefix, sizeof(sc.nonce_prefix));
-  esp_fill_random(sc.chain_key, sizeof(sc.chain_key));
-  memset(sc.chain_genesis_secret, 0, sizeof(sc.chain_genesis_secret));
+  memset(sc.chain_key, 0, sizeof(sc.chain_key));
+  esp_fill_random(sc.chain_genesis_secret, sizeof(sc.chain_genesis_secret));
   memset(sc.v_prev, 0, sizeof(sc.v_prev));
   sc.seq = 0;
-
-  {
-    crypto_auth_hmacsha256_state gs;
-    crypto_auth_hmacsha256_init(&gs, sc.chain_key, sizeof(sc.chain_key));
-    static const uint8_t kGenesisDomain[] = {'A','Z','T','1','-','G','E','N','E','S','I','S','-','V','1'};
-    crypto_auth_hmacsha256_update(&gs, kGenesisDomain, sizeof(kGenesisDomain));
-    crypto_auth_hmacsha256_final(&gs, sc.chain_genesis_secret);
-  }
 
   String dec_header = "{";
   dec_header += "\"audio_cipher\":\"aes-256-gcm-mixed-blocks-sha256-chain\",";
@@ -63,9 +55,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"device_sign_public_key_b64\":\"" + state.device_sign_public_key_b64 + "\",";
   dec_header += "\"device_sign_fingerprint_hex\":\"" + state.device_sign_fingerprint_hex + "\",";
   dec_header += "\"device_chip_id_hex\":\"" + state.device_chip_id_hex + "\",";
-  dec_header += "\"chain_alg\":\"hmac-sha256-link\",";
-  dec_header += "\"chain_domain\":\"AZT1-CHAIN-V2\",";
-  dec_header += "\"chain_key_b64\":\"" + b64(sc.chain_key, sizeof(sc.chain_key)) + "\",";
+  dec_header += "\"chain_alg\":\"sha256-link\",";
+  dec_header += "\"chain_domain\":\"AZT1-CHAIN-V1\",";
   dec_header += "\"chain_root_mode\":\"genesis-signature-block\",";
   dec_header += "\"chunk_record_format\":\"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32\",";
   dec_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
@@ -81,8 +72,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"chain_verify_procedure\":[";
   dec_header += "\"For each chunk record read seq_u32be, block_type_u8, body_len_u32be, tag_len_u8, body, tag, chain_v32.\",";
   dec_header += "\"Let CORE = seq_u32be||block_type_u8||body_len_u32be||tag_len_u8||body||tag.\",";
-  dec_header += "\"If seq==1: V_calc = HMAC_SHA256(chain_key, \\\"AZT1-CHAIN-V2\\\"||CORE).\",";
-  dec_header += "\"If seq>1: V_calc = HMAC_SHA256(chain_key, \\\"AZT1-CHAIN-V2\\\"||V_prev||CORE).\",";
+  dec_header += "\"If seq==1: V_calc = SHA256(\\\"AZT1-CHAIN-V1\\\"||CORE).\",";
+  dec_header += "\"If seq>1: V_calc = SHA256(\\\"AZT1-CHAIN-V1\\\"||V_prev||CORE).\",";
   dec_header += "\"Require V_calc == chain_v32; then set V_prev = chain_v32.\",";
   dec_header += "\"For block_type in [0,3], derive nonce as audio_nonce_prefix_b64 (4 bytes) || seq_u32be || 0x00000000 and AES-GCM decrypt body||tag with aad=none. For block_type in [1,2,126,127], body is plaintext and tag_len must be 0.\"";
   dec_header += "],";
@@ -184,14 +175,14 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"next_header_ciphertext_sha256_b64\":\"" + b64(enc_header_sha256, sizeof(enc_header_sha256)) + "\",";
   plain_header += "\"next_header_ciphertext_len\":" + String(static_cast<unsigned>(header_ct.size())) + ",";
   plain_header += "\"chunk_record_format\":\"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32\",";
-  plain_header += "\"chain_alg\":\"hmac-sha256-link\",";
-  plain_header += "\"chain_domain\":\"AZT1-CHAIN-V2\",";
+  plain_header += "\"chain_alg\":\"sha256-link\",";
+  plain_header += "\"chain_domain\":\"AZT1-CHAIN-V1\",";
   plain_header += "\"chain_root_mode\":\"genesis-signature-block\",";
   plain_header += "\"chain_record_bytes_format\":\"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag\",";
   plain_header += "\"chain_excludes_field\":\"chain_v32\",";
   plain_header += "\"chain_link_formula\":[";
-  plain_header += "\"For seq==1: chain_v32 = HMAC_SHA256(chain_key, chain_domain_bytes || record_bytes).\",";
-  plain_header += "\"For seq>1: chain_v32 = HMAC_SHA256(chain_key, chain_domain_bytes || prev_chain_v32 || record_bytes).\"";
+  plain_header += "\"For seq==1: chain_v32 = SHA256(chain_domain_bytes || record_bytes).\",";
+  plain_header += "\"For seq>1: chain_v32 = SHA256(chain_domain_bytes || prev_chain_v32 || record_bytes).\"";
   plain_header += "],";
   plain_header += "\"encrypted_block_types\":[0,3],";
   plain_header += "\"plaintext_block_types\":[1,2,126,127],";
