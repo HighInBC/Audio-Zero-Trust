@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "azt_app_state.h"
+
 namespace azt {
 
 constexpr size_t kMicFrameBytes = 1024;
@@ -32,6 +34,17 @@ struct MicRing {
   MicIngressStats stats{};
   volatile bool stop = false;
   portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+
+  // Always-on MQTT RMS state (updated by mic reader task).
+  bool mqtt_rms_enabled = false;
+  uint16_t mqtt_rms_window_seconds = 10;
+  uint32_t sample_rate_hz = 16000;
+  uint64_t mqtt_rms_window_start_us = 0;
+  double mqtt_rms_sum_sq = 0.0;
+  uint64_t mqtt_rms_sample_count = 0;
+  float mqtt_rms_dbfs_min = 0.0f;
+  float mqtt_rms_dbfs_max = 0.0f;
+  bool mqtt_rms_have_frame_stats = false;
 };
 
 bool mic_ring_push_drop_newest(MicRing& rb, const uint8_t* data, size_t len);
@@ -41,5 +54,9 @@ MicIngressStats mic_ring_snapshot_stats(MicRing& rb);
 uint64_t mic_ring_take_dropped_newest(MicRing& rb);
 
 void mic_reader_task_entry(void* arg);
+
+void mic_ring_apply_mqtt_config(MicRing& rb, const AppState& state);
+void set_shared_mic_ring(MicRing* rb);
+MicRing* get_shared_mic_ring();
 
 }  // namespace azt

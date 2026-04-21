@@ -15,7 +15,6 @@
 #include "azt_crypto.h"
 #include "azt_device_io.h"
 #include "azt_kv_store.h"
-#include "azt_mqtt.h"
 #include "azt_stream_header.h"
 #include "azt_stream_record.h"
 #include "azt_stream_signer.h"
@@ -31,9 +30,6 @@ static constexpr uint32_t kSigCheckpointMinInterval = 10;
 static constexpr uint32_t kSigCheckpointMaxInterval = 160;
 static constexpr uint32_t kTelemetryIntervalBlocks = 50;
 static constexpr uint32_t kMaxContiguousDropMs = 10000;
-static constexpr float kAudioDegradedLowDbfs = -95.0f;
-static constexpr float kAudioDegradedHighDbfs = -3.0f;
-static constexpr uint8_t kAudioDegradedConsecutiveWindows = 1;
 static volatile bool g_stream_shutdown_requested = false;
 
 // Active stream session + optional terminate request keyed by initiating nonce.
@@ -442,26 +438,11 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     return;
   }
 
-  MicRing* mic_ring = new MicRing();
+  MicRing* mic_ring = get_shared_mic_ring();
   if (!mic_ring) {
     signer.stop();
     send_json(client, 500,
-              "{\"ok\":false,\"error\":\"ERR_RUNTIME\",\"detail\":\"failed to allocate mic ring\"}");
-    return;
-  }
-
-  TaskHandle_t mic_reader_task = nullptr;
-  if (xTaskCreatePinnedToCore(mic_reader_task_entry,
-                              "azt_mic_reader",
-                              constants::runtime::kTaskStackMicReader,
-                              mic_ring,
-                              static_cast<UBaseType_t>(constants::runtime::kTaskPriorityMicReader),
-                              &mic_reader_task,
-                              kStreamPipelineCore) != pdPASS) {
-    signer.stop();
-    delete mic_ring;
-    send_json(client, 500,
-              "{\"ok\":false,\"error\":\"ERR_RUNTIME\",\"detail\":\"failed to start mic reader task\"}");
+              "{\"ok\":false,\"error\":\"ERR_RUNTIME\",\"detail\":\"shared mic ring unavailable\"}");
     return;
   }
 
@@ -478,10 +459,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         sig0_len != crypto_sign_ed25519_BYTES ||
         !encrypt_signature_block_and_chain(sc, 0, sig0, rec) ||
         !send_chunked(client, rec.data(), rec.size())) {
-      mic_ring->stop = true;
-      vTaskDelay(pdMS_TO_TICKS(constants::runtime::kMicReaderShutdownDelayMs));
       signer.stop();
-      delete mic_ring;
       client.print("0\r\n\r\n");
       client.flush();
       return;
@@ -514,14 +492,6 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   const String started_recorder_auth_fp = state.recorder_auth_fingerprint_hex;
 
   TelemetryAccumulator telem{};
-  const bool mqtt_rms_enabled = mqtt_is_enabled() && state.mqtt_broker_url.length() > 0 && state.mqtt_audio_rms_topic.length() > 0;
-  const uint16_t mqtt_rms_window_seconds = state.mqtt_rms_window_seconds > 0 ? state.mqtt_rms_window_seconds : 10;
-  uint64_t mqtt_rms_window_start_us = static_cast<uint64_t>(esp_timer_get_time());
-  double mqtt_rms_sum_sq = 0.0;
-  uint64_t mqtt_rms_sample_count = 0;
-  float mqtt_rms_dbfs_min = 0.0f;
-  float mqtt_rms_dbfs_max = 0.0f;
-  bool mqtt_rms_have_frame_stats = false;
   uint8_t degraded_windows = 0;
   bool trigger_audio_reinit = false;
   uint8_t close_reason_code = kCloseReasonNormalEnd;
@@ -590,65 +560,6 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       continue;
     }
 
-    if (mqtt_rms_enabled && sample_width_bytes == 2 && frame.len >= 2) {
-      const int16_t* s = reinterpret_cast<const int16_t*>(frame.data.data());
-      size_t n = static_cast<size_t>(frame.len / 2);
-      double frame_sum_sq = 0.0;
-      for (size_t i = 0; i < n; i++) {
-        double v = static_cast<double>(s[i]) / 32768.0;
-        double vv = (v * v);
-        frame_sum_sq += vv;
-        mqtt_rms_sum_sq += vv;
-      }
-      mqtt_rms_sample_count += n;
-
-      double frame_rms = n > 0 ? sqrt(frame_sum_sq / static_cast<double>(n)) : 0.0;
-      if (frame_rms < 1e-6) frame_rms = 1e-6;
-      float frame_dbfs = static_cast<float>(20.0 * log10(frame_rms));
-      if (frame_dbfs < -96.0f) frame_dbfs = -96.0f;
-      if (!mqtt_rms_have_frame_stats) {
-        mqtt_rms_dbfs_min = frame_dbfs;
-        mqtt_rms_dbfs_max = frame_dbfs;
-        mqtt_rms_have_frame_stats = true;
-      } else {
-        if (frame_dbfs < mqtt_rms_dbfs_min) mqtt_rms_dbfs_min = frame_dbfs;
-        if (frame_dbfs > mqtt_rms_dbfs_max) mqtt_rms_dbfs_max = frame_dbfs;
-      }
-
-      uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
-      if (now_us - mqtt_rms_window_start_us >= static_cast<uint64_t>(mqtt_rms_window_seconds) * 1000000ULL) {
-        double rms = mqtt_rms_sample_count > 0 ? sqrt(mqtt_rms_sum_sq / static_cast<double>(mqtt_rms_sample_count)) : 0.0;
-        if (rms < 1e-6) rms = 1e-6;
-        float dbfs = static_cast<float>(20.0 * log10(rms));
-        if (dbfs < -96.0f) dbfs = -96.0f;
-        float dbfs_min = mqtt_rms_have_frame_stats ? mqtt_rms_dbfs_min : dbfs;
-        float dbfs_max = mqtt_rms_have_frame_stats ? mqtt_rms_dbfs_max : dbfs;
-        mqtt_publish_audio_rms(dbfs, dbfs_min, dbfs_max, mqtt_rms_window_seconds, sample_rate_hz);
-
-        const bool degraded_now = (dbfs <= kAudioDegradedLowDbfs) || (dbfs >= kAudioDegradedHighDbfs);
-        if (degraded_now) {
-          if (degraded_windows < 255) degraded_windows++;
-        } else {
-          degraded_windows = 0;
-        }
-        if (degraded_windows >= kAudioDegradedConsecutiveWindows) {
-          trigger_audio_reinit = true;
-          close_reason_code = kCloseReasonAudioDegradedReinit;
-          close_reason_text = make_close_reason_json("audio_degraded_reinit");
-          Serial.printf("AZT_AUDIO_DEGRADED dbfs=%.2f min=%.2f max=%.2f windows=%u action=reinit\n",
-                        dbfs,
-                        dbfs_min,
-                        dbfs_max,
-                        static_cast<unsigned>(degraded_windows));
-          break;
-        }
-
-        mqtt_rms_window_start_us = now_us;
-        mqtt_rms_sum_sq = 0.0;
-        mqtt_rms_sample_count = 0;
-        mqtt_rms_have_frame_stats = false;
-      }
-    }
 
     if (drop_test_remaining > 0) {
       drop_test_remaining--;
@@ -841,8 +752,6 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   if (trigger_audio_reinit) {
     reinitialize_audio_input(state);
   }
-
-  delete mic_ring;
 }
 
 struct StreamTaskCtx {

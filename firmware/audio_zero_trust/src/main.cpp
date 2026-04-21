@@ -4,6 +4,7 @@
 #include <freertos/semphr.h>
 
 #include "azt_app_state.h"
+#include "azt_audio_ring.h"
 #include "azt_constants.h"
 #include "azt_config.h"
 #include "azt_device_io.h"
@@ -21,8 +22,10 @@ WiFiServer g_api_server(azt::kHttpPort);
 WiFiServer g_stream_server(azt::constants::runtime::kStreamPort);
 SemaphoreHandle_t g_state_mu = nullptr;
 TaskHandle_t g_stream_task = nullptr;
+TaskHandle_t g_mic_reader_task = nullptr;
 bool g_http_servers_enabled = false;
 String g_last_mqtt_sig;
+azt::MicRing g_mic_ring;
 
 azt::SerialControlState g_serial_state;
 
@@ -80,6 +83,17 @@ void setup() {
   xSemaphoreGive(g_state_mu);
 
   azt::setup_audio_input(g_state);
+  azt::mic_ring_apply_mqtt_config(g_mic_ring, g_state);
+  azt::set_shared_mic_ring(&g_mic_ring);
+  if (xTaskCreatePinnedToCore(azt::mic_reader_task_entry,
+                              "azt_mic_reader",
+                              azt::constants::runtime::kTaskStackMicReader,
+                              &g_mic_ring,
+                              static_cast<UBaseType_t>(azt::constants::runtime::kTaskPriorityMicReader),
+                              &g_mic_reader_task,
+                              1) != pdPASS) {
+    Serial.println("AZT_MIC failed_to_start_reader_task");
+  }
 
   bool https_ok = azt::start_https_api_server(&g_state, g_state_mu, azt::constants::runtime::kApiTlsPort);
 
@@ -118,6 +132,7 @@ void loop() {
     String mqtt_sig = g_state.mqtt_broker_url + "|" + g_state.mqtt_username + "|" + g_state.mqtt_password + "|" + g_state.mqtt_audio_rms_topic + "|" + String(g_state.mqtt_rms_window_seconds);
     if (mqtt_sig != g_last_mqtt_sig) {
       azt::mqtt_apply_config(g_state);
+      azt::mic_ring_apply_mqtt_config(g_mic_ring, g_state);
       g_last_mqtt_sig = mqtt_sig;
     }
     xSemaphoreGive(g_state_mu);

@@ -2,10 +2,16 @@
 
 #include <driver/i2s.h>
 #include <esp_timer.h>
+#include <math.h>
 
 #include "azt_device_io.h"
+#include "azt_mqtt.h"
 
 namespace azt {
+
+namespace {
+MicRing* g_shared_mic_ring = nullptr;
+}
 
 bool mic_ring_push_drop_newest(MicRing& rb, const uint8_t* data, size_t len) {
   bool pushed = false;
@@ -91,9 +97,67 @@ void mic_reader_task_entry(void* arg) {
     }
 
     mic_ring_push_drop_newest(*rb, mic_buf, n);
+
+    if (rb->mqtt_rms_enabled && n >= 2) {
+      const int16_t* s = reinterpret_cast<const int16_t*>(mic_buf);
+      size_t sample_n = static_cast<size_t>(n / 2);
+      double frame_sum_sq = 0.0;
+      for (size_t i = 0; i < sample_n; i++) {
+        double v = static_cast<double>(s[i]) / 32768.0;
+        double vv = (v * v);
+        frame_sum_sq += vv;
+        rb->mqtt_rms_sum_sq += vv;
+      }
+      rb->mqtt_rms_sample_count += sample_n;
+
+      double frame_rms = sample_n > 0 ? sqrt(frame_sum_sq / static_cast<double>(sample_n)) : 0.0;
+      if (frame_rms < 1e-6) frame_rms = 1e-6;
+      float frame_dbfs = static_cast<float>(20.0 * log10(frame_rms));
+      if (frame_dbfs < -96.0f) frame_dbfs = -96.0f;
+      if (!rb->mqtt_rms_have_frame_stats) {
+        rb->mqtt_rms_dbfs_min = frame_dbfs;
+        rb->mqtt_rms_dbfs_max = frame_dbfs;
+        rb->mqtt_rms_have_frame_stats = true;
+      } else {
+        if (frame_dbfs < rb->mqtt_rms_dbfs_min) rb->mqtt_rms_dbfs_min = frame_dbfs;
+        if (frame_dbfs > rb->mqtt_rms_dbfs_max) rb->mqtt_rms_dbfs_max = frame_dbfs;
+      }
+
+      uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
+      const uint64_t window_us = static_cast<uint64_t>(rb->mqtt_rms_window_seconds > 0 ? rb->mqtt_rms_window_seconds : 10) * 1000000ULL;
+      if (rb->mqtt_rms_window_start_us == 0) rb->mqtt_rms_window_start_us = now_us;
+      if (now_us - rb->mqtt_rms_window_start_us >= window_us) {
+        double rms = rb->mqtt_rms_sample_count > 0 ? sqrt(rb->mqtt_rms_sum_sq / static_cast<double>(rb->mqtt_rms_sample_count)) : 0.0;
+        if (rms < 1e-6) rms = 1e-6;
+        float dbfs = static_cast<float>(20.0 * log10(rms));
+        if (dbfs < -96.0f) dbfs = -96.0f;
+        float dbfs_min = rb->mqtt_rms_have_frame_stats ? rb->mqtt_rms_dbfs_min : dbfs;
+        float dbfs_max = rb->mqtt_rms_have_frame_stats ? rb->mqtt_rms_dbfs_max : dbfs;
+        mqtt_publish_audio_rms(dbfs, dbfs_min, dbfs_max, rb->mqtt_rms_window_seconds, rb->sample_rate_hz);
+
+        rb->mqtt_rms_window_start_us = now_us;
+        rb->mqtt_rms_sum_sq = 0.0;
+        rb->mqtt_rms_sample_count = 0;
+        rb->mqtt_rms_have_frame_stats = false;
+      }
+    }
   }
 
   vTaskDelete(nullptr);
+}
+
+void mic_ring_apply_mqtt_config(MicRing& rb, const AppState& state) {
+  rb.mqtt_rms_enabled = mqtt_is_enabled() && state.mqtt_broker_url.length() > 0 && state.mqtt_audio_rms_topic.length() > 0;
+  rb.mqtt_rms_window_seconds = state.mqtt_rms_window_seconds > 0 ? state.mqtt_rms_window_seconds : 10;
+  rb.sample_rate_hz = state.audio_sample_rate_hz > 0 ? state.audio_sample_rate_hz : 16000;
+}
+
+void set_shared_mic_ring(MicRing* rb) {
+  g_shared_mic_ring = rb;
+}
+
+MicRing* get_shared_mic_ring() {
+  return g_shared_mic_ring;
 }
 
 }  // namespace azt
