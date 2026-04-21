@@ -96,7 +96,15 @@ bool mqtt_is_enabled() {
 }
 
 void mqtt_publish_audio_rms(float rms_dbfs, float rms_dbfs_min, float rms_dbfs_max, uint16_t window_seconds, uint32_t sample_rate_hz) {
-  if (!g_client || !g_connected || g_topic.length() == 0) return;
+  static uint32_t last_skip_log_ms = 0;
+  if (!g_client || !g_connected || g_topic.length() == 0) {
+    uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
+    if (now_ms - last_skip_log_ms >= 5000U) {
+      last_skip_log_ms = now_ms;
+      ESP_LOGW(kTag, "publish skipped client=%d connected=%d topic_len=%u", g_client ? 1 : 0, g_connected ? 1 : 0, static_cast<unsigned>(g_topic.length()));
+    }
+    return;
+  }
 
   JsonDocument doc;
   doc["schema"] = "azt.audio_rms.v1";
@@ -111,7 +119,8 @@ void mqtt_publish_audio_rms(float rms_dbfs, float rms_dbfs_min, float rms_dbfs_m
 
   String payload;
   serializeJson(doc, payload);
-  esp_mqtt_client_publish(g_client, g_topic.c_str(), payload.c_str(), payload.length(), 0, 0);
+  int msg_id = esp_mqtt_client_publish(g_client, g_topic.c_str(), payload.c_str(), payload.length(), 0, 0);
+  ESP_LOGI(kTag, "published rms topic=%s msg_id=%d dbfs=%.2f min=%.2f max=%.2f", g_topic.c_str(), msg_id, rms_dbfs, rms_dbfs_min, rms_dbfs_max);
 }
 
 }  // namespace azt
