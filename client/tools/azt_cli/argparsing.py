@@ -314,6 +314,12 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     smdns.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     smdns.set_defaults(func=handlers.cmd_mdns_fqdn_get)
 
+    sfind = sub.add_parser("find-devices", help="Listen for discovery advertisements and report detected devices")
+    sfind.add_argument("--seconds", type=float, default=20.0, help="Listen window in seconds (default: 20)")
+    sfind.add_argument("--listen-port", type=int, default=33333, help="UDP listen port for discovery advertisements (default: 33333)")
+    sfind.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    sfind.set_defaults(func=handlers.cmd_find_devices)
+
     sstate = sub.add_parser("state-get", help="Fetch device config/state endpoint")
     sstate.add_argument("--host", required=False, default="", help="Device host/IP")
     sstate.add_argument("--port", type=int, default=8080, help="Device API port")

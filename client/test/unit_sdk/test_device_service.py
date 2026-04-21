@@ -7,6 +7,11 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
 
+import json
+import socket
+import threading
+import time
+
 from tools.azt_sdk.services import device_service
 
 
@@ -134,3 +139,39 @@ def test_signing_key_check_success(monkeypatch):
     ok, payload = device_service.signing_key_check(host="h", port=8080, timeout=1)
     assert ok is True
     assert payload["alias_matches"] is True
+
+
+def test_find_devices_collects_discovery_advertisements():
+    pkt = {
+        "discovery_version": 1,
+        "device_type": "audio-zero-trust-microphone",
+        "device_key_fingerprint_hex": "a" * 64,
+        "admin_key_fingerprint_hex": "b" * 64,
+        "listener_key_fingerprint_hex": "c" * 64,
+        "recorder_auth_fingerprint_hex": "d" * 64,
+        "device_name": "lab-mic",
+        "http_port": 8443,
+        "certificate_serial": "cert-1",
+        "cert_auto_record": True,
+        "cert_auto_decode": False,
+    }
+
+    port = 35333
+
+    def sender():
+        time.sleep(0.05)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.sendto(json.dumps(pkt).encode("utf-8"), ("127.0.0.1", port))
+        finally:
+            s.close()
+
+    t = threading.Thread(target=sender, daemon=True)
+    t.start()
+
+    ok, payload = device_service.find_devices(seconds=0.3, listen_port=port)
+    assert ok is True
+    assert payload["devices_found"] >= 1
+    first = payload["devices"][0]
+    assert first["device_name"] == "lab-mic"
+    assert first["device_key_fingerprint_hex"] == "a" * 64

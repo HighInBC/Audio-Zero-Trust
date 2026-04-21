@@ -6,6 +6,8 @@ import base64
 import hashlib
 import json
 import math
+import socket
+import time
 import urllib.error
 from pathlib import Path
 from urllib.request import Request
@@ -605,3 +607,109 @@ def mdns_fqdn_get(*, host: str, port: int, timeout: int) -> tuple[bool, dict]:
 def ip_detect(*, port: str, baud: int, timeout: int) -> tuple[bool, dict]:
     ip = detect_device_ip_from_serial(port=port, baud=baud, timeout_s=timeout)
     return bool(ip), {"ip": ip, "port": port, "baud": baud, "timeout": timeout}
+
+
+def _normalize_discovery_packet(raw: bytes, addr: tuple[str, int], received_at: float) -> dict | None:
+    try:
+        text = raw.decode("utf-8", errors="strict")
+        obj = json.loads(text)
+    except Exception:
+        return None
+
+    if not isinstance(obj, dict):
+        return None
+
+    key = str(obj.get("device_key_fingerprint_hex") or "").strip().lower()
+    fallback = str(obj.get("device_name") or "").strip().lower()
+    if not key and not fallback:
+        return None
+
+    return {
+        "id": key or fallback,
+        "advertised_at": received_at,
+        "source_ip": str(addr[0] or ""),
+        "source_port": int(addr[1]) if isinstance(addr[1], int) else 0,
+        "discovery_version": obj.get("discovery_version"),
+        "device_type": obj.get("device_type"),
+        "device_name": obj.get("device_name"),
+        "device_key_fingerprint_hex": obj.get("device_key_fingerprint_hex"),
+        "admin_key_fingerprint_hex": obj.get("admin_key_fingerprint_hex"),
+        "listener_key_fingerprint_hex": obj.get("listener_key_fingerprint_hex"),
+        "recorder_auth_fingerprint_hex": obj.get("recorder_auth_fingerprint_hex"),
+        "cert_auto_record": bool(obj.get("cert_auto_record") is True),
+        "cert_auto_decode": bool(obj.get("cert_auto_decode") is True),
+        "certificate_serial": obj.get("certificate_serial"),
+        "http_port": obj.get("http_port"),
+        "raw": obj,
+    }
+
+
+def find_devices(*, seconds: float = 20.0, listen_port: int = 33333) -> tuple[bool, dict]:
+    duration = float(seconds)
+    if duration <= 0:
+        return False, {"error": "FIND_DEVICES_ARGS", "detail": "seconds must be > 0"}
+
+    devices: dict[str, dict] = {}
+    packets = 0
+    started_at = time.time()
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("", int(listen_port)))
+        sock.settimeout(0.5)
+
+        deadline = started_at + duration
+        while time.time() < deadline:
+            try:
+                data, addr = sock.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except OSError as e:
+                return False, {
+                    "error": "FIND_DEVICES_SOCKET_READ_FAILED",
+                    "detail": _error_detail(where="device_service.find_devices.recvfrom", exc=e),
+                    "devices": list(devices.values()),
+                }
+
+            packets += 1
+            item = _normalize_discovery_packet(data, addr, time.time())
+            if item is None:
+                continue
+
+            dev_id = str(item.get("id") or "")
+            prev = devices.get(dev_id)
+            if prev is None:
+                devices[dev_id] = item
+            else:
+                merged = dict(prev)
+                merged.update({k: v for k, v in item.items() if v not in (None, "")})
+                merged["seen_count"] = int(prev.get("seen_count", 1)) + 1
+                devices[dev_id] = merged
+            devices[dev_id].setdefault("seen_count", 1)
+            devices[dev_id]["last_seen_at"] = item["advertised_at"]
+
+    except OSError as e:
+        return False, {
+            "error": "FIND_DEVICES_SOCKET_BIND_FAILED",
+            "detail": _error_detail(where="device_service.find_devices.bind", exc=e, context={"listen_port": int(listen_port)}),
+        }
+    finally:
+        sock.close()
+
+    ordered = sorted(
+        devices.values(),
+        key=lambda d: (
+            str(d.get("device_name") or ""),
+            str(d.get("device_key_fingerprint_hex") or d.get("id") or ""),
+        ),
+    )
+    return True, {
+        "listen_port": int(listen_port),
+        "seconds": duration,
+        "started_at": started_at,
+        "finished_at": time.time(),
+        "packets_seen": packets,
+        "devices_found": len(ordered),
+        "devices": ordered,
+    }
