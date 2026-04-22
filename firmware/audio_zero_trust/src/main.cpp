@@ -157,10 +157,14 @@ void loop() {
       g_last_mqtt_sig = mqtt_sig;
     }
     if (azt::mic_ring_take_reinit_request(g_mic_ring)) {
-      Serial.println("AZT_AUDIO_DEGRADED action=reinit");
-      azt::mic_ring_set_capture_enabled(g_mic_ring, false);
-      azt::reinitialize_audio_input(g_state);
-      azt::mic_ring_set_capture_enabled(g_mic_ring, g_state.audio_input_source != "none");
+      if (g_state.audio_input_source != "none") {
+        Serial.println("AZT_AUDIO_DEGRADED action=reinit");
+        azt::mic_ring_set_capture_enabled(g_mic_ring, false);
+        azt::reinitialize_audio_input(g_state);
+        azt::mic_ring_set_capture_enabled(g_mic_ring, g_state.audio_input_source != "none");
+      } else {
+        Serial.println("AZT_AUDIO_DEGRADED action=skip_reinit_audio_none");
+      }
     }
     xSemaphoreGive(g_state_mu);
   }
