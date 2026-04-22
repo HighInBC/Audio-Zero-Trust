@@ -196,6 +196,7 @@ static void es8311_init_for_echo_base(const AppState& state) {
 static bool setup_audio_input_with_probe_policy(AppState& state,
                                                uint16_t attempts,
                                                uint32_t retry_delay_ms,
+                                               bool emit_success_log,
                                                bool emit_failure_log) {
   // Probe Echo Base (ES8311 on Atom host I2C pins).
   Wire.begin(constants::pins::kEchoBaseI2cSda, constants::pins::kEchoBaseI2cScl, constants::audio::kEchoBaseI2cClockHz);
@@ -227,14 +228,16 @@ static bool setup_audio_input_with_probe_policy(AppState& state,
     state.audio_sample_rate_hz = constants::audio::kDefaultSampleRateHz;
     state.audio_channels = constants::audio::kDefaultChannels;
     state.audio_sample_width_bytes = constants::audio::kDefaultSampleWidthBytes;
-    Serial.printf("AZT_AUDIO source=echo_base probe_success_attempt=%u/%u preamp=%u adc=%u rate=%lu ch=%u sw=%u\n",
-                  static_cast<unsigned>(state.audio_codec_probe_success_attempt),
-                  static_cast<unsigned>(state.audio_codec_probe_attempts),
-                  state.audio_preamp_gain,
-                  state.audio_adc_gain,
-                  static_cast<unsigned long>(state.audio_sample_rate_hz),
-                  static_cast<unsigned>(state.audio_channels),
-                  static_cast<unsigned>(state.audio_sample_width_bytes));
+    if (emit_success_log) {
+      Serial.printf("AZT_AUDIO source=echo_base probe_success_attempt=%u/%u preamp=%u adc=%u rate=%lu ch=%u sw=%u\n",
+                    static_cast<unsigned>(state.audio_codec_probe_success_attempt),
+                    static_cast<unsigned>(state.audio_codec_probe_attempts),
+                    state.audio_preamp_gain,
+                    state.audio_adc_gain,
+                    static_cast<unsigned long>(state.audio_sample_rate_hz),
+                    static_cast<unsigned>(state.audio_channels),
+                    static_cast<unsigned>(state.audio_sample_width_bytes));
+    }
     return true;
   }
 
@@ -264,11 +267,12 @@ void setup_audio_input(AppState& state) {
   (void)setup_audio_input_with_probe_policy(state,
                                             constants::audio::kEchoBaseProbeAttempts,
                                             constants::audio::kEchoBaseProbeRetryDelayMs,
+                                            true,
                                             true);
 }
 
 bool reprobe_audio_input_once(AppState& state) {
-  return setup_audio_input_with_probe_policy(state, 1, 0, false);
+  return setup_audio_input_with_probe_policy(state, 1, 0, false, false);
 }
 
 void setup_i2s_pdm_mic() {
