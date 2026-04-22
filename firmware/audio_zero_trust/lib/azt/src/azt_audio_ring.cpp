@@ -152,12 +152,6 @@ void mic_ring_apply_mqtt_config(MicRing& rb, const AppState& state) {
   rb.mqtt_rms_enabled = mqtt_is_enabled() && state.mqtt_broker_url.length() > 0 && state.mqtt_audio_rms_topic.length() > 0;
   rb.mqtt_rms_window_seconds = state.mqtt_rms_window_seconds > 0 ? state.mqtt_rms_window_seconds : 10;
   rb.sample_rate_hz = state.audio_sample_rate_hz > 0 ? state.audio_sample_rate_hz : 16000;
-  Serial.printf("AZT_MQTT_RMS cfg enabled=%u broker_len=%u topic_len=%u window_s=%u sample_rate=%lu\n",
-                static_cast<unsigned>(rb.mqtt_rms_enabled ? 1 : 0),
-                static_cast<unsigned>(state.mqtt_broker_url.length()),
-                static_cast<unsigned>(state.mqtt_audio_rms_topic.length()),
-                static_cast<unsigned>(rb.mqtt_rms_window_seconds),
-                static_cast<unsigned long>(rb.sample_rate_hz));
 }
 
 void mic_ring_set_stream_active(MicRing& rb, bool active) {
