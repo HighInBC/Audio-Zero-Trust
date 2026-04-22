@@ -28,6 +28,7 @@ bool g_http_servers_enabled = false;
 String g_last_mqtt_sig;
 azt::MicRing g_mic_ring;
 uint32_t g_last_audio_reprobe_ms = 0;
+uint32_t g_last_audio_recovery_reboot_ms = 0;
 
 azt::SerialControlState g_serial_state;
 
@@ -125,6 +126,9 @@ void setup() {
 }
 
 void loop() {
+  bool request_audio_recovery_reboot = false;
+  uint32_t audio_none_down_ms = 0;
+
   if (xSemaphoreTake(g_state_mu, pdMS_TO_TICKS(azt::constants::runtime::kStateLockWaitMsFast)) == pdTRUE) {
     // During serial config payload ingestion, reduce background serial chatter and work.
     if (!g_serial_state.config_mode) {
@@ -132,8 +136,10 @@ void loop() {
       azt::maybe_refresh_time_sync(g_state);
       azt::maybe_broadcast_discovery_announcement(g_state);
 
+      const uint32_t now_ms = millis();
       if (g_state.audio_input_source == "none") {
-        const uint32_t now_ms = millis();
+        if (g_state.audio_none_since_millis == 0) g_state.audio_none_since_millis = now_ms;
+
         if (g_last_audio_reprobe_ms == 0 || (now_ms - g_last_audio_reprobe_ms) >= azt::constants::runtime::kAudioReprobeIntervalMs) {
           g_last_audio_reprobe_ms = now_ms;
           const String prev_source = g_state.audio_input_source;
@@ -144,8 +150,22 @@ void loop() {
                           g_state.audio_input_source.c_str(),
                           static_cast<unsigned>(g_state.audio_codec_probe_success_attempt),
                           static_cast<unsigned>(g_state.audio_codec_probe_attempts));
+            g_state.audio_none_since_millis = 0;
           }
         }
+
+        if (g_state.audio_none_since_millis > 0) {
+          audio_none_down_ms = now_ms - g_state.audio_none_since_millis;
+          const bool reboot_cooldown_ok = (g_last_audio_recovery_reboot_ms == 0) ||
+                                          ((now_ms - g_last_audio_recovery_reboot_ms) >= azt::constants::runtime::kAudioRecoveryRebootCooldownMs);
+          if (audio_none_down_ms >= azt::constants::runtime::kAudioNoneRecoveryRebootAfterMs && reboot_cooldown_ok) {
+            g_last_audio_recovery_reboot_ms = now_ms;
+            g_state.audio_recovery_reboot_count += 1;
+            request_audio_recovery_reboot = true;
+          }
+        }
+      } else {
+        g_state.audio_none_since_millis = 0;
       }
     }
     azt::mic_ring_set_capture_enabled(g_mic_ring, g_state.audio_input_source != "none");
@@ -167,6 +187,16 @@ void loop() {
       }
     }
     xSemaphoreGive(g_state_mu);
+  }
+
+  if (request_audio_recovery_reboot) {
+    Serial.printf("AZT_AUDIO_RECOVERY_REBOOT reason=audio_none_persisted down_ms=%lu probe_round=%lu reboot_count=%lu\n",
+                  static_cast<unsigned long>(audio_none_down_ms),
+                  static_cast<unsigned long>(g_state.audio_codec_probe_round),
+                  static_cast<unsigned long>(g_state.audio_recovery_reboot_count));
+    delay(200);
+    ESP.restart();
+    return;
   }
 
   azt::handle_serial_control(g_state, g_state_mu, g_serial_state);

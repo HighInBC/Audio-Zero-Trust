@@ -94,6 +94,8 @@ constexpr uint32_t kSignerDeletePollMs = 5;
 
 // When boot-time codec detect fails, periodically reprobe to allow self-heal without reboot.
 constexpr uint32_t kAudioReprobeIntervalMs = 5000;
+constexpr uint32_t kAudioNoneRecoveryRebootAfterMs = 120000;
+constexpr uint32_t kAudioRecoveryRebootCooldownMs = 600000;
 
 namespace ota {
 constexpr size_t kFlashSectorBytes = 4096;

@@ -86,6 +86,8 @@ struct AppState {
   uint16_t audio_codec_probe_success_attempt = 0;
   uint32_t audio_codec_probe_round = 0;
   uint32_t audio_codec_probe_last_millis = 0;
+  uint32_t audio_none_since_millis = 0;
+  uint32_t audio_recovery_reboot_count = 0;
 
   // Optional MQTT audio telemetry (disabled when broker URL is empty).
   String mqtt_broker_url;
