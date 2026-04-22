@@ -750,7 +750,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   clear_active_stream_session_nonce(stream_auth_nonce);
 
   if (trigger_audio_reinit) {
-    reinitialize_audio_input(state);
+    // Reinit is coordinated from main loop (shared state + capture gating).
+    // Avoid direct reinit from stream worker snapshot context.
   }
 }
 
