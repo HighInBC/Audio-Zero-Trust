@@ -135,6 +135,10 @@ void loop() {
       azt::mic_ring_apply_mqtt_config(g_mic_ring, g_state);
       g_last_mqtt_sig = mqtt_sig;
     }
+    if (azt::mic_ring_take_reinit_request(g_mic_ring)) {
+      Serial.println("AZT_AUDIO_DEGRADED action=reinit");
+      azt::reinitialize_audio_input(g_state);
+    }
     xSemaphoreGive(g_state_mu);
   }
 

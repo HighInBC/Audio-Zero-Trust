@@ -45,6 +45,9 @@ struct MicRing {
   float mqtt_rms_dbfs_min = 0.0f;
   float mqtt_rms_dbfs_max = 0.0f;
   bool mqtt_rms_have_frame_stats = false;
+  uint8_t degraded_windows = 0;
+  uint64_t last_reinit_request_us = 0;
+  volatile bool reinit_requested = false;
 
   // Stream-stall accounting should only include drops while stream is active.
   bool stream_active = false;
@@ -61,6 +64,7 @@ void mic_reader_task_entry(void* arg);
 void mic_ring_apply_mqtt_config(MicRing& rb, const AppState& state);
 void mic_ring_set_stream_active(MicRing& rb, bool active);
 void mic_ring_reset_dropped_newest(MicRing& rb);
+bool mic_ring_take_reinit_request(MicRing& rb);
 void set_shared_mic_ring(MicRing* rb);
 MicRing* get_shared_mic_ring();
 

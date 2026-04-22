@@ -11,6 +11,10 @@ namespace azt {
 
 namespace {
 MicRing* g_shared_mic_ring = nullptr;
+static constexpr float kAudioDegradedLowDbfs = -95.0f;
+static constexpr float kAudioDegradedHighDbfs = -3.0f;
+static constexpr uint8_t kAudioDegradedConsecutiveWindows = 1;
+static constexpr uint64_t kAudioReinitCooldownUs = 60ULL * 1000000ULL;
 }
 
 bool mic_ring_push_drop_newest(MicRing& rb, const uint8_t* data, size_t len) {
@@ -137,6 +141,19 @@ void mic_reader_task_entry(void* arg) {
         float dbfs_max = rb->mqtt_rms_have_frame_stats ? rb->mqtt_rms_dbfs_max : dbfs;
         mqtt_publish_audio_rms(dbfs, dbfs_min, dbfs_max, rb->mqtt_rms_window_seconds, rb->sample_rate_hz);
 
+        const bool degraded_now = (dbfs <= kAudioDegradedLowDbfs) || (dbfs >= kAudioDegradedHighDbfs);
+        if (degraded_now) {
+          if (rb->degraded_windows < 255) rb->degraded_windows++;
+        } else {
+          rb->degraded_windows = 0;
+        }
+        if (rb->degraded_windows >= kAudioDegradedConsecutiveWindows) {
+          if (rb->last_reinit_request_us == 0 || (now_us - rb->last_reinit_request_us) >= kAudioReinitCooldownUs) {
+            rb->reinit_requested = true;
+            rb->last_reinit_request_us = now_us;
+          }
+        }
+
         rb->mqtt_rms_window_start_us = now_us;
         rb->mqtt_rms_sum_sq = 0.0;
         rb->mqtt_rms_sample_count = 0;
@@ -167,6 +184,15 @@ void mic_ring_reset_dropped_newest(MicRing& rb) {
   portENTER_CRITICAL(&rb.mux);
   rb.stats.dropped_newest = 0;
   portEXIT_CRITICAL(&rb.mux);
+}
+
+bool mic_ring_take_reinit_request(MicRing& rb) {
+  bool requested = false;
+  portENTER_CRITICAL(&rb.mux);
+  requested = rb.reinit_requested;
+  rb.reinit_requested = false;
+  portEXIT_CRITICAL(&rb.mux);
+  return requested;
 }
 
 void set_shared_mic_ring(MicRing* rb) {
