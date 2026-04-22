@@ -18,6 +18,7 @@ enum class WifiMaintainDecision {
 
 void setup_i2s_pdm_mic();
 void setup_audio_input(AppState& state);
+bool reprobe_audio_input_once(AppState& state);
 void reinitialize_audio_input(AppState& state);
 
 // Testable helpers.

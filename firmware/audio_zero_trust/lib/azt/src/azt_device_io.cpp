@@ -193,24 +193,28 @@ static void es8311_init_for_echo_base(const AppState& state) {
   i2c_write_reg(a, 0x37, 0x08);
 }
 
-void setup_audio_input(AppState& state) {
+static bool setup_audio_input_with_probe_policy(AppState& state,
+                                               uint16_t attempts,
+                                               uint32_t retry_delay_ms,
+                                               bool emit_failure_log) {
   // Probe Echo Base (ES8311 on Atom host I2C pins).
   Wire.begin(constants::pins::kEchoBaseI2cSda, constants::pins::kEchoBaseI2cScl, constants::audio::kEchoBaseI2cClockHz);
   delay(constants::audio::kEchoBaseProbeDelayMs);
 
+  if (attempts == 0) attempts = 1;
   bool has_echo = false;
   uint16_t success_attempt = 0;
-  for (uint16_t i = 1; i <= constants::audio::kEchoBaseProbeAttempts; ++i) {
+  for (uint16_t i = 1; i <= attempts; ++i) {
     if (i2c_ping_addr(constants::audio::kEs8311I2cAddress)) {
       has_echo = true;
       success_attempt = i;
       break;
     }
-    if (i < constants::audio::kEchoBaseProbeAttempts) {
-      delay(constants::audio::kEchoBaseProbeRetryDelayMs);
+    if (i < attempts && retry_delay_ms > 0) {
+      delay(retry_delay_ms);
     }
   }
-  state.audio_codec_probe_attempts = constants::audio::kEchoBaseProbeAttempts;
+  state.audio_codec_probe_attempts = attempts;
   state.audio_codec_probe_success_attempt = success_attempt;
   state.audio_echo_base_detected = has_echo;
 
@@ -229,7 +233,7 @@ void setup_audio_input(AppState& state) {
                   static_cast<unsigned long>(state.audio_sample_rate_hz),
                   static_cast<unsigned>(state.audio_channels),
                   static_cast<unsigned>(state.audio_sample_width_bytes));
-    return;
+    return true;
   }
 
 #if CONFIG_IDF_TARGET_ESP32S3
@@ -238,9 +242,11 @@ void setup_audio_input(AppState& state) {
   state.audio_sample_rate_hz = 0;
   state.audio_channels = 0;
   state.audio_sample_width_bytes = 0;
-  Serial.printf("AZT_AUDIO source=none reason=no_codec_detected probe_attempts=%u retry_delay_ms=%lu\n",
-                static_cast<unsigned>(state.audio_codec_probe_attempts),
-                static_cast<unsigned long>(constants::audio::kEchoBaseProbeRetryDelayMs));
+  if (emit_failure_log) {
+    Serial.printf("AZT_AUDIO source=none reason=no_codec_detected probe_attempts=%u retry_delay_ms=%lu\n",
+                  static_cast<unsigned>(state.audio_codec_probe_attempts),
+                  static_cast<unsigned long>(retry_delay_ms));
+  }
 #else
   setup_i2s_internal_pdm();
   state.audio_input_source = "internal_pdm";
@@ -249,6 +255,18 @@ void setup_audio_input(AppState& state) {
   state.audio_sample_width_bytes = constants::audio::kDefaultSampleWidthBytes;
   Serial.printf("AZT_AUDIO source=internal_pdm rate=%lu ch=%u sw=%u\n", static_cast<unsigned long>(state.audio_sample_rate_hz), static_cast<unsigned>(state.audio_channels), static_cast<unsigned>(state.audio_sample_width_bytes));
 #endif
+  return false;
+}
+
+void setup_audio_input(AppState& state) {
+  (void)setup_audio_input_with_probe_policy(state,
+                                            constants::audio::kEchoBaseProbeAttempts,
+                                            constants::audio::kEchoBaseProbeRetryDelayMs,
+                                            true);
+}
+
+bool reprobe_audio_input_once(AppState& state) {
+  return setup_audio_input_with_probe_policy(state, 1, 0, false);
 }
 
 void setup_i2s_pdm_mic() {

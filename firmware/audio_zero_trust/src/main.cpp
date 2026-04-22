@@ -137,9 +137,9 @@ void loop() {
         if (g_last_audio_reprobe_ms == 0 || (now_ms - g_last_audio_reprobe_ms) >= azt::constants::runtime::kAudioReprobeIntervalMs) {
           g_last_audio_reprobe_ms = now_ms;
           const String prev_source = g_state.audio_input_source;
-          azt::setup_audio_input(g_state);
+          const bool recovered = azt::reprobe_audio_input_once(g_state);
           azt::mic_ring_apply_mqtt_config(g_mic_ring, g_state);
-          if (prev_source != g_state.audio_input_source && g_state.audio_input_source != "none") {
+          if (recovered && prev_source != g_state.audio_input_source && g_state.audio_input_source != "none") {
             Serial.printf("AZT_AUDIO_RECOVERED source=%s probe_success_attempt=%u/%u\n",
                           g_state.audio_input_source.c_str(),
                           static_cast<unsigned>(g_state.audio_codec_probe_success_attempt),
