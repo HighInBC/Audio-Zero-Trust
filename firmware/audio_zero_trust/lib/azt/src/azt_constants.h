@@ -27,6 +27,8 @@ constexpr uint32_t kEchoBaseI2cClockHz = 100000U;
 // Timing.
 constexpr uint32_t kCodecResetDelayMs = 20;
 constexpr uint32_t kEchoBaseProbeDelayMs = 10;
+constexpr uint16_t kEchoBaseProbeAttempts = 20;
+constexpr uint32_t kEchoBaseProbeRetryDelayMs = 25;
 
 // Reused validation error details.
 constexpr const char kPreampRangeDetail[] = "audio.preamp_gain must be 1..8";

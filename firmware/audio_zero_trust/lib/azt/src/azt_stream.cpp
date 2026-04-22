@@ -773,6 +773,16 @@ static void stream_task_entry(void* arg) {
 }
 
 void handle_stream(WiFiClient& client, int seconds, const AppState& state, const String& stream_auth_nonce, bool signbench_each_chunk, bool enable_telemetry, int drop_test_frames) {
+  if (state.audio_input_source == "none" || state.audio_sample_rate_hz == 0 || state.audio_channels == 0 || state.audio_sample_width_bytes == 0) {
+    String body = "{\"ok\":false,\"error\":\"ERR_AUDIO_UNAVAILABLE\",\"detail\":\"audio capture backend unavailable; codec probe failed\",\"audio_reason\":\"no_codec_detected\",\"audio_codec_probe_attempts\":" +
+                  String(state.audio_codec_probe_attempts) +
+                  ",\"audio_codec_probe_success_attempt\":" +
+                  String(state.audio_codec_probe_success_attempt) +
+                  ",\"audio_input_source\":\"" + state.audio_input_source + "\"}";
+    send_json(client, 503, body);
+    return;
+  }
+
   StreamTaskCtx ctx{&client, seconds, &state, stream_auth_nonce, signbench_each_chunk, enable_telemetry, drop_test_frames, xTaskGetCurrentTaskHandle()};
   BaseType_t ok = xTaskCreatePinnedToCore(stream_task_entry,
                                           "azt_stream",
