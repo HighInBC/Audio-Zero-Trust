@@ -202,6 +202,8 @@ static bool setup_audio_input_with_probe_policy(AppState& state,
   delay(constants::audio::kEchoBaseProbeDelayMs);
 
   if (attempts == 0) attempts = 1;
+  state.audio_codec_probe_round += 1;
+  state.audio_codec_probe_last_millis = millis();
   bool has_echo = false;
   uint16_t success_attempt = 0;
   for (uint16_t i = 1; i <= attempts; ++i) {

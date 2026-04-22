@@ -84,6 +84,8 @@ struct AppState {
   uint8_t audio_sample_width_bytes = constants::audio::kDefaultSampleWidthBytes;
   uint16_t audio_codec_probe_attempts = 0;
   uint16_t audio_codec_probe_success_attempt = 0;
+  uint32_t audio_codec_probe_round = 0;
+  uint32_t audio_codec_probe_last_millis = 0;
 
   // Optional MQTT audio telemetry (disabled when broker URL is empty).
   String mqtt_broker_url;

@@ -2235,6 +2235,8 @@ HttpDispatchResult dispatch_request(const String& method,
              ",\"audio_adc_gain\":" + String(state.audio_adc_gain) +
              ",\"audio_codec_probe_attempts\":" + String(state.audio_codec_probe_attempts) +
              ",\"audio_codec_probe_success_attempt\":" + String(state.audio_codec_probe_success_attempt) +
+             ",\"audio_codec_probe_round\":" + String(state.audio_codec_probe_round) +
+             ",\"audio_codec_probe_last_millis\":" + String(state.audio_codec_probe_last_millis) +
              ",\"authorized_listener_ips_csv\":\"" + state.authorized_listener_ips_csv +
              "\",\"time_servers_csv\":\"" + state.time_servers_csv +
              "\",\"device_certificate_serial\":\"" + state.device_certificate_serial +
