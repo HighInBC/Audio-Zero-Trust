@@ -467,6 +467,8 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   }
 
   set_active_stream_session_nonce(stream_auth_nonce);
+  mic_ring_set_stream_active(*mic_ring, true);
+  mic_ring_reset_dropped_newest(*mic_ring);
 
   const bool finite_stream = seconds > 0;
   const uint64_t stream_start_us = static_cast<uint64_t>(esp_timer_get_time());
@@ -685,9 +687,6 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     close_reason_text = make_close_reason_json("client_disconnected");
   }
 
-  mic_ring->stop = true;
-  vTaskDelay(pdMS_TO_TICKS(constants::runtime::kMicReaderShutdownDelayMs));
-
   while (client.connected() && pending_dropped_frames > 0) {
     uint16_t emit = static_cast<uint16_t>(std::min<uint32_t>(pending_dropped_frames, 0xFFFF));
     if (!encrypt_dropped_frames_block_and_chain(sc, emit, rec)) break;
@@ -747,6 +746,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
         static_cast<unsigned>(mic_ring->high_water));
   }
 
+  mic_ring_set_stream_active(*mic_ring, false);
   clear_active_stream_session_nonce(stream_auth_nonce);
 
   if (trigger_audio_reinit) {

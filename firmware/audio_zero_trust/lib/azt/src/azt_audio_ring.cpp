@@ -17,7 +17,9 @@ bool mic_ring_push_drop_newest(MicRing& rb, const uint8_t* data, size_t len) {
   bool pushed = false;
   portENTER_CRITICAL(&rb.mux);
   if (rb.count >= kMicRingFrames) {
-    rb.stats.dropped_newest++;
+    if (rb.stream_active) {
+      rb.stats.dropped_newest++;
+    }
   } else {
     MicFrame& slot = rb.slots[rb.head];
     memcpy(slot.data.data(), data, len);
@@ -156,6 +158,21 @@ void mic_ring_apply_mqtt_config(MicRing& rb, const AppState& state) {
                 static_cast<unsigned>(state.mqtt_audio_rms_topic.length()),
                 static_cast<unsigned>(rb.mqtt_rms_window_seconds),
                 static_cast<unsigned long>(rb.sample_rate_hz));
+}
+
+void mic_ring_set_stream_active(MicRing& rb, bool active) {
+  portENTER_CRITICAL(&rb.mux);
+  rb.stream_active = active;
+  if (!active) {
+    rb.stats.dropped_newest = 0;
+  }
+  portEXIT_CRITICAL(&rb.mux);
+}
+
+void mic_ring_reset_dropped_newest(MicRing& rb) {
+  portENTER_CRITICAL(&rb.mux);
+  rb.stats.dropped_newest = 0;
+  portEXIT_CRITICAL(&rb.mux);
 }
 
 void set_shared_mic_ring(MicRing* rb) {
