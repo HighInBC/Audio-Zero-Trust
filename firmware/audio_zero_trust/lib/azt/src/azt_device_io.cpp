@@ -6,6 +6,7 @@
 #include <time.h>
 #include <esp_sntp.h>
 #include <ESPmDNS.h>
+#include <esp_system.h>
 
 #include "azt_constants.h"
 
@@ -405,27 +406,73 @@ void maybe_maintain_wifi(AppState& state) {
   static uint32_t last_check_ms = 0;
   static String last_ssid;
   static String last_pass;
+  static uint32_t wifi_down_since_ms = 0;
+  static uint32_t reconnect_failures = 0;
 
   const uint32_t now = millis();
+  const int current_status = static_cast<int>(WiFi.status());
   WifiMaintainDecision d = decide_wifi_maintain(state,
                                                 last_ssid,
                                                 last_pass,
-                                                static_cast<int>(WiFi.status()),
+                                                current_status,
                                                 now,
                                                 last_check_ms,
-                                                5000UL);
+                                                constants::runtime::kWifiMaintainIntervalMs);
   WifiMaintainPlan plan = make_wifi_maintain_plan(d);
 
-  if (!plan.should_update_cache) return;
+  if (!plan.should_update_cache) {
+    maybe_maintain_mdns(state);
+    return;
+  }
 
   update_wifi_maintain_cache(state, now, last_check_ms, last_ssid, last_pass);
 
+  bool connected_now = (current_status == WL_CONNECTED);
+  if (connected_now) {
+    wifi_down_since_ms = 0;
+    reconnect_failures = 0;
+  }
+
   if (plan.should_connect) {
-    (void)connect_wifi_with_state(state,
-                                  plan.connect_source,
-                                  state.wifi_ssid.c_str(),
-                                  state.wifi_pass.c_str(),
-                                  8000);
+    bool ok = connect_wifi_with_state(state,
+                                      plan.connect_source,
+                                      state.wifi_ssid.c_str(),
+                                      state.wifi_pass.c_str(),
+                                      8000);
+    connected_now = ok;
+    if (ok) {
+      if (wifi_down_since_ms > 0) {
+        Serial.printf("AZT_WIFI_RECOVERY_OK down_ms=%lu reconnect_failures=%lu\n",
+                      static_cast<unsigned long>(now - wifi_down_since_ms),
+                      static_cast<unsigned long>(reconnect_failures));
+      }
+      wifi_down_since_ms = 0;
+      reconnect_failures = 0;
+    } else {
+      if (wifi_down_since_ms == 0) {
+        wifi_down_since_ms = now;
+        reconnect_failures = 1;
+      } else {
+        reconnect_failures += 1;
+      }
+    }
+  } else if (!connected_now && has_wifi_credentials(state)) {
+    // No reconnect attempt this pass (e.g., interval gate), but link is still down.
+    if (wifi_down_since_ms == 0) wifi_down_since_ms = now;
+  }
+
+  if (!connected_now && has_wifi_credentials(state) && wifi_down_since_ms > 0) {
+    const uint32_t down_ms = now - wifi_down_since_ms;
+    if (down_ms >= constants::runtime::kWifiRecoveryRebootAfterMs &&
+        reconnect_failures >= constants::runtime::kWifiRecoveryMinReconnectFailures) {
+      Serial.printf("AZT_WIFI_RECOVERY_REBOOT down_ms=%lu reconnect_failures=%lu threshold_ms=%lu min_failures=%lu\n",
+                    static_cast<unsigned long>(down_ms),
+                    static_cast<unsigned long>(reconnect_failures),
+                    static_cast<unsigned long>(constants::runtime::kWifiRecoveryRebootAfterMs),
+                    static_cast<unsigned long>(constants::runtime::kWifiRecoveryMinReconnectFailures));
+      delay(200);
+      esp_restart();
+    }
   }
 
   maybe_maintain_mdns(state);

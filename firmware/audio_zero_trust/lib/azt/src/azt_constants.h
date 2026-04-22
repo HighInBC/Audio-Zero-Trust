@@ -64,6 +64,12 @@ constexpr uint32_t kStateLockWaitMsFast = 200;
 constexpr uint32_t kStateLockWaitMsSlow = 4000;
 constexpr uint32_t kIdleLoopDelayMs = 2;
 
+// Wi-Fi recovery policy: if STA remains disconnected for long enough despite reconnect
+// attempts, force a reboot to recover stuck radio/network state.
+constexpr uint32_t kWifiMaintainIntervalMs = 5000;
+constexpr uint32_t kWifiRecoveryRebootAfterMs = 180000;  // 3 minutes
+constexpr uint32_t kWifiRecoveryMinReconnectFailures = 8;
+
 constexpr uint16_t kStreamPort = 8081;
 constexpr uint16_t kApiTlsPort = 8443;
 
