@@ -84,6 +84,7 @@ void setup() {
   xSemaphoreGive(g_state_mu);
 
   azt::setup_audio_input(g_state);
+  azt::mic_ring_set_capture_enabled(g_mic_ring, g_state.audio_input_source != "none");
   azt::mic_ring_apply_mqtt_config(g_mic_ring, g_state);
   azt::set_shared_mic_ring(&g_mic_ring);
   if (xTaskCreatePinnedToCore(azt::mic_reader_task_entry,
@@ -130,6 +131,8 @@ void loop() {
       azt::maybe_refresh_time_sync(g_state);
       azt::maybe_broadcast_discovery_announcement(g_state);
     }
+    azt::mic_ring_set_capture_enabled(g_mic_ring, g_state.audio_input_source != "none");
+
     String mqtt_sig = g_state.mqtt_broker_url + "|" + g_state.mqtt_username + "|" + g_state.mqtt_password + "|" + g_state.mqtt_audio_rms_topic + "|" + String(g_state.mqtt_rms_window_seconds);
     if (mqtt_sig != g_last_mqtt_sig) {
       azt::mqtt_apply_config(g_state);
@@ -138,7 +141,9 @@ void loop() {
     }
     if (azt::mic_ring_take_reinit_request(g_mic_ring)) {
       Serial.println("AZT_AUDIO_DEGRADED action=reinit");
+      azt::mic_ring_set_capture_enabled(g_mic_ring, false);
       azt::reinitialize_audio_input(g_state);
+      azt::mic_ring_set_capture_enabled(g_mic_ring, g_state.audio_input_source != "none");
     }
     xSemaphoreGive(g_state_mu);
   }

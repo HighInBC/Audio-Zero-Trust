@@ -51,6 +51,9 @@ struct MicRing {
 
   // Stream-stall accounting should only include drops while stream is active.
   bool stream_active = false;
+
+  // True when audio capture backend (I2S/codec path) is ready for i2s_read.
+  volatile bool capture_enabled = false;
 };
 
 bool mic_ring_push_drop_newest(MicRing& rb, const uint8_t* data, size_t len);
@@ -63,6 +66,7 @@ void mic_reader_task_entry(void* arg);
 
 void mic_ring_apply_mqtt_config(MicRing& rb, const AppState& state);
 void mic_ring_set_stream_active(MicRing& rb, bool active);
+void mic_ring_set_capture_enabled(MicRing& rb, bool enabled);
 void mic_ring_reset_dropped_newest(MicRing& rb);
 bool mic_ring_take_reinit_request(MicRing& rb);
 void set_shared_mic_ring(MicRing* rb);

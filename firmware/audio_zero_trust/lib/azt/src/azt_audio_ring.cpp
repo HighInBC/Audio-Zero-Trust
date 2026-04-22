@@ -80,6 +80,11 @@ void mic_reader_task_entry(void* arg) {
   uint8_t mic_buf[kMicFrameBytes];
 
   while (!rb->stop) {
+    if (!rb->capture_enabled) {
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+
     const uint64_t t0 = static_cast<uint64_t>(esp_timer_get_time());
     size_t n = 0;
     esp_err_t rc = i2s_read(kI2SPort, mic_buf, sizeof(mic_buf), &n, pdMS_TO_TICKS(50));
@@ -177,6 +182,12 @@ void mic_ring_set_stream_active(MicRing& rb, bool active) {
   if (!active) {
     rb.stats.dropped_newest = 0;
   }
+  portEXIT_CRITICAL(&rb.mux);
+}
+
+void mic_ring_set_capture_enabled(MicRing& rb, bool enabled) {
+  portENTER_CRITICAL(&rb.mux);
+  rb.capture_enabled = enabled;
   portEXIT_CRITICAL(&rb.mux);
 }
 
