@@ -296,14 +296,25 @@ static void maybe_maintain_mdns(AppState& state) {
   }
 }
 
-static bool connect_wifi_with_state(AppState& state, const char* src, const char* ssid, const char* pass, uint32_t timeout_ms) {
-  WiFi.disconnect(true, true);
-  delay(150);
-  Serial.printf("AZT_WIFI_CONNECT src=%s ssid=%s pass_len=%u\n",
+static bool connect_wifi_with_state(AppState& state,
+                                    const char* src,
+                                    const char* ssid,
+                                    const char* pass,
+                                    uint32_t timeout_ms,
+                                    bool hard_reset_sta) {
+  Serial.printf("AZT_WIFI_CONNECT src=%s ssid=%s pass_len=%u mode=%s\n",
                 src,
                 ssid ? ssid : "",
-                static_cast<unsigned>(pass ? strlen(pass) : 0));
-  WiFi.begin(ssid, pass);
+                static_cast<unsigned>(pass ? strlen(pass) : 0),
+                hard_reset_sta ? "hard" : "soft");
+
+  if (hard_reset_sta) {
+    WiFi.disconnect(true, true);
+    delay(150);
+    WiFi.begin(ssid, pass);
+  } else {
+    WiFi.reconnect();
+  }
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeout_ms) delay(200);
   int final_status = static_cast<int>(WiFi.status());
@@ -376,7 +387,12 @@ void setup_wifi(AppState& state) {
   bool connected = false;
 
   if (should_attempt_setup_wifi_connect(has_creds)) {
-    connected = connect_wifi_with_state(state, "state", state.wifi_ssid.c_str(), state.wifi_pass.c_str(), 10000);
+    connected = connect_wifi_with_state(state,
+                                        "state",
+                                        state.wifi_ssid.c_str(),
+                                        state.wifi_pass.c_str(),
+                                        constants::runtime::kWifiHardReconnectTimeoutMs,
+                                        true);
   }
 
   maybe_maintain_mdns(state);
@@ -434,11 +450,20 @@ void maybe_maintain_wifi(AppState& state) {
   }
 
   if (plan.should_connect) {
+    const uint32_t next_fail_count = reconnect_failures + 1;
+    const bool do_hard_reconnect =
+        next_fail_count == 1 ||
+        (next_fail_count % constants::runtime::kWifiHardReconnectEveryFailures) == 0;
+    const uint32_t connect_timeout_ms = do_hard_reconnect
+        ? constants::runtime::kWifiHardReconnectTimeoutMs
+        : constants::runtime::kWifiSoftReconnectTimeoutMs;
+
     bool ok = connect_wifi_with_state(state,
                                       plan.connect_source,
                                       state.wifi_ssid.c_str(),
                                       state.wifi_pass.c_str(),
-                                      8000);
+                                      connect_timeout_ms,
+                                      do_hard_reconnect);
     connected_now = ok;
     if (ok) {
       if (wifi_down_since_ms > 0) {

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <WiFi.h>
 #include <WiFiServer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -145,6 +146,12 @@ void loop() {
   azt::handle_serial_control(g_state, g_state_mu, g_serial_state);
 
   if (!g_http_servers_enabled) {
+    delay(azt::constants::runtime::kIdleLoopDelayMs);
+    return;
+  }
+
+  // In STA mode, avoid accepting API clients while link is down/recovering.
+  if (g_state.wifi_mode != "ap" && WiFi.status() != WL_CONNECTED) {
     delay(azt::constants::runtime::kIdleLoopDelayMs);
     return;
   }

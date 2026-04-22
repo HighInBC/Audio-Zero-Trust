@@ -67,6 +67,9 @@ constexpr uint32_t kIdleLoopDelayMs = 2;
 // Wi-Fi recovery policy: if STA remains disconnected for long enough despite reconnect
 // attempts, force a reboot to recover stuck radio/network state.
 constexpr uint32_t kWifiMaintainIntervalMs = 5000;
+constexpr uint32_t kWifiSoftReconnectTimeoutMs = 5000;
+constexpr uint32_t kWifiHardReconnectTimeoutMs = 8000;
+constexpr uint32_t kWifiHardReconnectEveryFailures = 4;
 constexpr uint32_t kWifiRecoveryRebootAfterMs = 180000;  // 3 minutes
 constexpr uint32_t kWifiRecoveryMinReconnectFailures = 8;
 
