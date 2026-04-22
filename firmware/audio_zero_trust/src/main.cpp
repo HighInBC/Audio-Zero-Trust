@@ -27,6 +27,7 @@ TaskHandle_t g_mic_reader_task = nullptr;
 bool g_http_servers_enabled = false;
 String g_last_mqtt_sig;
 azt::MicRing g_mic_ring;
+uint32_t g_last_audio_reprobe_ms = 0;
 
 azt::SerialControlState g_serial_state;
 
@@ -130,6 +131,22 @@ void loop() {
       azt::maybe_maintain_wifi(g_state);
       azt::maybe_refresh_time_sync(g_state);
       azt::maybe_broadcast_discovery_announcement(g_state);
+
+      if (g_state.audio_input_source == "none") {
+        const uint32_t now_ms = millis();
+        if (g_last_audio_reprobe_ms == 0 || (now_ms - g_last_audio_reprobe_ms) >= azt::constants::runtime::kAudioReprobeIntervalMs) {
+          g_last_audio_reprobe_ms = now_ms;
+          const String prev_source = g_state.audio_input_source;
+          azt::setup_audio_input(g_state);
+          azt::mic_ring_apply_mqtt_config(g_mic_ring, g_state);
+          if (prev_source != g_state.audio_input_source && g_state.audio_input_source != "none") {
+            Serial.printf("AZT_AUDIO_RECOVERED source=%s probe_success_attempt=%u/%u\n",
+                          g_state.audio_input_source.c_str(),
+                          static_cast<unsigned>(g_state.audio_codec_probe_success_attempt),
+                          static_cast<unsigned>(g_state.audio_codec_probe_attempts));
+          }
+        }
+      }
     }
     azt::mic_ring_set_capture_enabled(g_mic_ring, g_state.audio_input_source != "none");
 
