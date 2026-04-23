@@ -949,7 +949,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
     }
 
     if (listener_key_changed) {
-      request_stream_shutdown();
+      request_stream_shutdown("config_listener_key_changed");
     }
 
     r.code = 200;
@@ -1001,7 +1001,7 @@ static HttpDispatchResult handle_config_post_json(AppState& state,
   }
 
   if (listener_key_changed) {
-    request_stream_shutdown();
+    request_stream_shutdown("config_listener_key_changed");
   }
 
   if (tls_set) {
@@ -1362,7 +1362,7 @@ static HttpDispatchResult handle_config_patch_json(AppState& state, const String
   }
 
   if (listener_key_changed) {
-    request_stream_shutdown();
+    request_stream_shutdown("config_listener_key_changed");
   }
 
   r.code = 200;
@@ -1539,6 +1539,8 @@ HttpDispatchResult dispatch_request(const String& method,
     emit_msg["event"] = "terminate";
     emit_msg["stream_auth_nonce"] = session_nonce;
     emit_msg["reason_code"] = static_cast<unsigned>(reason_code);
+    emit_msg["initiator"] = "api";
+    emit_msg["trigger"] = "stream_terminate_endpoint";
     emit_msg["signed_by_fingerprint_hex"] = signer_fp;
     emit_msg["signed_by_role"] = signer_role;
     emit_msg["user_message_sha256_hex"] = user_msg_hash_hex;

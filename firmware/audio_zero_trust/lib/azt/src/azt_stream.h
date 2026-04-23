@@ -83,7 +83,7 @@ TelemetrySnapshotV1 telemetry_snapshot_from_acc(const TelemetryAccumulator& acc)
 void telemetry_reset(TelemetryAccumulator& acc);
 
 void send_json(WiFiClient& client, int code, const String& body);
-void request_stream_shutdown();
+void request_stream_shutdown(const char* source = "unspecified");
 void clear_stream_shutdown_request();
 
 void set_active_stream_session_nonce(const String& nonce);

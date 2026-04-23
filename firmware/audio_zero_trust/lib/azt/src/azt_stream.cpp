@@ -31,6 +31,7 @@ static constexpr uint32_t kSigCheckpointMaxInterval = 160;
 static constexpr uint32_t kTelemetryIntervalBlocks = 50;
 static constexpr uint32_t kMaxContiguousDropMs = 10000;
 static volatile bool g_stream_shutdown_requested = false;
+static String g_stream_shutdown_source = "unspecified";
 
 // Active stream session + optional terminate request keyed by initiating nonce.
 static String g_active_stream_nonce = "";
@@ -50,8 +51,28 @@ static String make_close_reason_json(const char* cause) {
   return out;
 }
 
-void request_stream_shutdown() { g_stream_shutdown_requested = true; }
-void clear_stream_shutdown_request() { g_stream_shutdown_requested = false; }
+static String make_close_reason_json_with_meta(const char* cause,
+                                               const char* initiator,
+                                               const char* trigger) {
+  String out = "{\"cause\":\"";
+  out += String(cause ? cause : "unknown");
+  out += "\",\"initiator\":\"";
+  out += String(initiator ? initiator : "system");
+  out += "\",\"trigger\":\"";
+  out += String(trigger ? trigger : "unknown");
+  out += "\"}";
+  return out;
+}
+
+void request_stream_shutdown(const char* source) {
+  g_stream_shutdown_requested = true;
+  g_stream_shutdown_source = String(source ? source : "unspecified");
+  Serial.printf("AZT_STREAM_SHUTDOWN_REQUEST source=%s\n", g_stream_shutdown_source.c_str());
+}
+void clear_stream_shutdown_request() {
+  g_stream_shutdown_requested = false;
+  g_stream_shutdown_source = "unspecified";
+}
 
 void set_active_stream_session_nonce(const String& nonce) {
   g_active_stream_nonce = nonce;
@@ -538,7 +559,9 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       String req_text;
       if (consume_stream_termination_for_nonce(stream_auth_nonce, req_reason, req_text)) {
         close_reason_code = req_reason;
-        close_reason_text = req_text.length() > 0 ? req_text : String("requested_termination");
+        close_reason_text = req_text.length() > 0
+                                ? req_text
+                                : make_close_reason_json_with_meta("requested_termination", "api", "stream_terminate_endpoint");
         break;
       }
     }
@@ -684,7 +707,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
       if (close_reason_text.length() == 0 ||
           close_reason_text == "normal_end" ||
           close_reason_text == make_close_reason_json("normal_end")) {
-        close_reason_text = make_close_reason_json("stream_shutdown_requested");
+        close_reason_text = make_close_reason_json_with_meta("stream_shutdown_requested", "system", g_stream_shutdown_source.c_str());
       }
     }
   } else if (finite_stream && close_reason_code == kCloseReasonNormalEnd) {

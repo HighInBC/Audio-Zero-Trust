@@ -120,7 +120,7 @@ void handle_serial_control(AppState& state,
 
     if (reboot_after_response) {
       Serial.println("AZT_REBOOT reason=tls_config_applied");
-      request_stream_shutdown();
+      request_stream_shutdown("serial_tls_reboot");
       delay(300);
       esp_restart();
     }
