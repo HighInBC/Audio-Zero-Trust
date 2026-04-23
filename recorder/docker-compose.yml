@@ -11,6 +11,7 @@ services:
       - TZ=America/Vancouver
     volumes:
       - ./config:/config:ro
-      - ./data/recordings:/data/recordings
+      - /home/openclaw/azt-recordings:/data/recordings
+      - /home/openclaw/.config/azt-recorder/keys:/run/keys:ro
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
