@@ -497,7 +497,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   uint8_t degraded_windows = 0;
   bool trigger_audio_reinit = false;
   uint8_t close_reason_code = kCloseReasonNormalEnd;
-  String close_reason_text = "normal_end";
+  String close_reason_text = make_close_reason_json("normal_end");
   int drop_test_remaining = drop_test_frames;
   uint32_t sig_interval = kSigCheckpointMinInterval;
   uint32_t last_sig_ref_seq = 0;
@@ -678,8 +678,15 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   }
 
   if (g_stream_shutdown_requested && !trigger_audio_reinit) {
-    close_reason_code = kCloseReasonRequestedShutdown;
-    close_reason_text = make_close_reason_json("requested_shutdown");
+    // Preserve more specific causes set earlier in the loop.
+    if (close_reason_code == kCloseReasonNormalEnd) {
+      close_reason_code = kCloseReasonRequestedShutdown;
+      if (close_reason_text.length() == 0 ||
+          close_reason_text == "normal_end" ||
+          close_reason_text == make_close_reason_json("normal_end")) {
+        close_reason_text = make_close_reason_json("stream_shutdown_requested");
+      }
+    }
   } else if (finite_stream && close_reason_code == kCloseReasonNormalEnd) {
     close_reason_text = make_close_reason_json("planned_duration_elapsed");
   } else if (!client.connected() && close_reason_code == kCloseReasonNormalEnd) {
