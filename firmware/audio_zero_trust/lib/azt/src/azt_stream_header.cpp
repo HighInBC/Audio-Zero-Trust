@@ -15,7 +15,7 @@ bool build_header_prefix(StreamCtx& sc,
                          float recommended_decode_gain,
                          const String& recording_started_utc,
                          const String& stream_auth_nonce,
-                         uint32_t smtp_time_since_last_sync_seconds,
+                         uint32_t ntp_time_since_last_sync_seconds,
                          float audio_frame_duration_ms,
                          std::vector<uint8_t>& out_prefix) {
   out_prefix.clear();
@@ -222,7 +222,7 @@ bool build_header_prefix(StreamCtx& sc,
     plain_header += "null,";
   }
   plain_header += "\"stream_auth_nonce\":\"" + stream_auth_nonce + "\",";
-  plain_header += "\"smtp_time_since_last_sync_seconds\":" + String(smtp_time_since_last_sync_seconds) + ",";
+  plain_header += "\"ntp_time_since_last_sync_seconds\":" + String(ntp_time_since_last_sync_seconds) + ",";
   plain_header += "\"audio_frame_duration_ms\":" + String(audio_frame_duration_ms, 3) + ",";
   plain_header += "\"audio_input_source\":\"" + state.audio_input_source + "\",";
   if (state.audio_input_source == "echo_base") {

@@ -419,16 +419,16 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
   std::vector<uint8_t> prefix;
 
   String recording_started_utc;
-  uint32_t smtp_time_since_last_sync_s = 0;
+  uint32_t ntp_time_since_last_sync_s = 0;
   {
     time_t now = time(nullptr);
     if (format_utc_iso8601(now, recording_started_utc) && state.time_synced && state.time_last_sync_epoch > 0) {
       if (now >= static_cast<time_t>(state.time_last_sync_epoch)) {
-        smtp_time_since_last_sync_s = static_cast<uint32_t>(now - static_cast<time_t>(state.time_last_sync_epoch));
+        ntp_time_since_last_sync_s = static_cast<uint32_t>(now - static_cast<time_t>(state.time_last_sync_epoch));
       }
     } else {
       recording_started_utc = "";
-      smtp_time_since_last_sync_s = 0;
+      ntp_time_since_last_sync_s = 0;
     }
   }
   const uint32_t sample_rate_hz = state.audio_sample_rate_hz > 0 ? state.audio_sample_rate_hz : constants::audio::kDefaultSampleRateHz;
@@ -446,7 +446,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
                            kRecommendedDecodeGain,
                            recording_started_utc,
                            stream_auth_nonce,
-                           smtp_time_since_last_sync_s,
+                           ntp_time_since_last_sync_s,
                            audio_frame_duration_ms,
                            prefix)) {
     client.print("0\r\n\r\n");

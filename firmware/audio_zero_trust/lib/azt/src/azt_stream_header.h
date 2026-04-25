@@ -14,7 +14,7 @@ bool build_header_prefix(StreamCtx& sc,
                          float recommended_decode_gain,
                          const String& recording_started_utc,
                          const String& stream_auth_nonce,
-                         uint32_t smtp_time_since_last_sync_seconds,
+                         uint32_t ntp_time_since_last_sync_seconds,
                          float audio_frame_duration_ms,
                          std::vector<uint8_t>& out_prefix);
 
