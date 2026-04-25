@@ -49,6 +49,7 @@ defaults:
   # mqtt_password: ""
   # mqtt_audio_rms_topic: "azt/house/audio/rms"
   # mqtt_audio_rms_window_seconds: 10 # 1..3600
+  # auto_decode_target_key: client/tools/provisioned/admin-HighInBC/
   # ca_key_path: client/tools/pki/ca_private_key.pem
   # ca_cert_path: client/tools/pki/ca_cert.pem
 
