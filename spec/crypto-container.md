@@ -69,6 +69,7 @@ Required keys used by current validators/generator:
 - `device_certificate_serial` (string, optional but recommended when certified)
 - `device_certificate` (JSON object, optional; full signed certificate document as returned by `/api/v0/device/certificate`)
 - `stream_auth_nonce` (string; single-use stream challenge nonce bound to stream-start authorization)
+- `smtp_time_since_last_sync_seconds` (integer; elapsed seconds since the device last synchronized time with the configured SMTP time source, not a clock offset/drift value)
 - `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
 - `chain_alg` = `"sha256-link"`
 - `chain_domain` = `"AZT1-CHAIN-V1-NONCE"`
