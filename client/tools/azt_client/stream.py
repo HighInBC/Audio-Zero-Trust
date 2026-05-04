@@ -212,8 +212,10 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             break
         seq = struct.unpack(">I", data[off : off + 4])[0]
         off += 4
-        block_type = data[off]
+        block_type_wire = data[off]
         off += 1
+        is_encrypted = (block_type_wire & 0x80) != 0
+        block_type = (block_type_wire & 0x7F)
         body_len = struct.unpack(">I", data[off : off + 4])[0]
         off += 4
         tag_len = data[off]
@@ -233,11 +235,11 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         record_seqs.append(seq)
         record_types.append(block_type)
 
-        if require_block1_sig0 and seq == 1 and block_type != 0x01:
+        if require_block1_sig0 and seq == 1 and (block_type != 0x01 or is_encrypted):
             raise ValueError("ERR_BLOCK1_MUST_BE_SIG")
 
         if chain_alg == "sha256-link":
-            core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
+            core = struct.pack(">I", seq) + bytes([block_type_wire]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
             if chain_domain == "AZT1-CHAIN-V1-NONCE":
                 if seq == 1:
                     v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + core).digest()
@@ -264,7 +266,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
                     raise ValueError("ERR_CHAIN_STATE")
                 hm.update(v_prev)
             hm.update(struct.pack(">I", seq))
-            hm.update(bytes([block_type]))
+            hm.update(bytes([block_type_wire]))
             hm.update(struct.pack(">I", body_len))
             hm.update(bytes([tag_len]))
             hm.update(body)
@@ -276,7 +278,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         v_prev = v_cur
         seq_to_chain_v[seq] = v_cur
 
-        if block_type in (0x00, 0x03):
+        if is_encrypted:
             if tag_len != 16:
                 raise ValueError("ERR_TAG_LEN")
             if audio_key is not None and nonce_prefix is not None:
@@ -284,7 +286,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
                 block_body = AESGCM(audio_key).decrypt(nonce, body + tag, None)
             else:
                 block_body = b""
-        elif block_type in (0x01, 0x02, 0x7E, 0x7F):
+        elif block_type in (0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F):
             if tag_len != 0:
                 raise ValueError("ERR_TAG_LEN")
             block_body = body
@@ -387,8 +389,9 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
                 break
             seq = struct.unpack(">I", data[scan_off : scan_off + 4])[0]
             scan_off += 4
-            btype = data[scan_off]
+            btype_wire = data[scan_off]
             scan_off += 1
+            btype = (btype_wire & 0x7F)
             body_len = struct.unpack(">I", data[scan_off : scan_off + 4])[0]
             scan_off += 4
             tag_len = data[scan_off]
@@ -622,8 +625,10 @@ def decode_azt1_stream_to_wav(
             break
         seq = struct.unpack(">I", data[off : off + 4])[0]
         off += 4
-        block_type = data[off]
+        block_type_wire = data[off]
         off += 1
+        is_encrypted = (block_type_wire & 0x80) != 0
+        block_type = (block_type_wire & 0x7F)
         body_len = struct.unpack(">I", data[off : off + 4])[0]
         off += 4
         tag_len = data[off]
@@ -641,11 +646,11 @@ def decode_azt1_stream_to_wav(
 
         record_seqs.append(seq)
 
-        if require_block1_sig0 and seq == 1 and block_type != 0x01:
+        if require_block1_sig0 and seq == 1 and (block_type != 0x01 or is_encrypted):
             raise ValueError("ERR_BLOCK1_MUST_BE_SIG")
 
         if chain_alg == "sha256-link":
-            core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
+            core = struct.pack(">I", seq) + bytes([block_type_wire]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
             if chain_domain == "AZT1-CHAIN-V1-NONCE":
                 if seq == 1:
                     v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + core).digest()
@@ -672,7 +677,7 @@ def decode_azt1_stream_to_wav(
                     raise ValueError("ERR_CHAIN_STATE")
                 hm.update(v_prev)
             hm.update(struct.pack(">I", seq))
-            hm.update(bytes([block_type]))
+            hm.update(bytes([block_type_wire]))
             hm.update(struct.pack(">I", body_len))
             hm.update(bytes([tag_len]))
             hm.update(body)
@@ -684,12 +689,12 @@ def decode_azt1_stream_to_wav(
         v_prev = v_cur
         seq_to_chain_v[seq] = v_cur
 
-        if block_type in (0x00, 0x03):
+        if is_encrypted:
             if tag_len != 16:
                 raise ValueError("ERR_TAG_LEN")
             nonce = nonce_prefix + struct.pack(">I", seq) + b"\x00\x00\x00\x00"
             block_body = AESGCM(audio_key).decrypt(nonce, body + tag, None)
-        elif block_type in (0x01, 0x02, 0x7E, 0x7F):
+        elif block_type in (0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F):
             if tag_len != 0:
                 raise ValueError("ERR_TAG_LEN")
             block_body = body
@@ -808,8 +813,9 @@ def decode_azt1_stream_to_wav(
             break
         seq2 = struct.unpack(">I", data[scan_off : scan_off + 4])[0]
         scan_off += 4
-        btype2 = data[scan_off]
+        btype2_wire = data[scan_off]
         scan_off += 1
+        btype2 = (btype2_wire & 0x7F)
         body_len2 = struct.unpack(">I", data[scan_off : scan_off + 4])[0]
         scan_off += 4
         tag_len2 = data[scan_off]

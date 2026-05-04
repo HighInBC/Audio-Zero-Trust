@@ -105,7 +105,7 @@ def main() -> int:
             fail("ERR_HEADER_FIELD", "public_chain_domain mismatch")
         if reqs(plain, "chain_root_mode") != "genesis-signature-block":
             fail("ERR_HEADER_FIELD", "public_chain_root_mode mismatch")
-        if reqs(plain, "chunk_record_format") != "seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32":
+        if reqs(plain, "chunk_record_format") != "seq_u32be|block_flags_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32":
             fail("ERR_HEADER_FIELD", "public_chunk_record_format mismatch")
         if reqs(plain, "estimated_frames_formula") != "COUNT(block_type=0) + SUM(block_type=2.missed_frames_u16be)":
             fail("ERR_HEADER_FIELD", "estimated_frames_formula mismatch")
@@ -114,10 +114,10 @@ def main() -> int:
         if not reqb(plain, "pcm_blocks_are_single_frame"):
             fail("ERR_HEADER_FIELD", "public_pcm_blocks_are_single_frame must be true")
 
-        enc_types = plain.get("encrypted_block_types")
-        pt_types = plain.get("plaintext_block_types")
-        if enc_types != [0, 3] or pt_types != [1, 2, 126, 127]:
-            fail("ERR_HEADER_FIELD", "block type encryption classes mismatch")
+        if reqs(plain, "block_type_encoding") != "msb_encryption_flag_v1":
+            fail("ERR_HEADER_FIELD", "block_type_encoding mismatch")
+        if reqi(plain, "block_type_encrypted_mask") != 128 or reqi(plain, "block_type_id_mask") != 127:
+            fail("ERR_HEADER_FIELD", "block_type masks mismatch")
 
         # this-header signature line
         sig_nl = data.find(b"\n", off)
@@ -220,10 +220,12 @@ def main() -> int:
             header_cert_serial = plain.get("device_certificate_serial")
             if isinstance(header_cert_serial, str) and len(header_cert_serial) > 0 and cert_serial != header_cert_serial:
                 fail("ERR_HEADER_FIELD", "device_certificate_serial mismatch")
-        if reqs(dec, "chunk_record_format") != "seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32":
+        if reqs(dec, "chunk_record_format") != "seq_u32be|block_flags_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32":
             fail("ERR_ENC_HEADER_JSON", "chunk_record_format mismatch")
-        if dec.get("encrypted_block_types") != [0, 3] or dec.get("plaintext_block_types") != [1, 2, 126, 127]:
-            fail("ERR_ENC_HEADER_JSON", "encrypted/plaintext block type sets mismatch")
+        if reqs(dec, "block_type_encoding") != "msb_encryption_flag_v1":
+            fail("ERR_ENC_HEADER_JSON", "block_type_encoding mismatch")
+        if reqi(dec, "block_type_encrypted_mask") != 128 or reqi(dec, "block_type_id_mask") != 127:
+            fail("ERR_ENC_HEADER_JSON", "block_type masks mismatch")
 
         audio_key = b64d(reqs(dec, "audio_key_b64"), "audio_key_b64")
         nonce_prefix = b64d(reqs(dec, "audio_nonce_prefix_b64"), "audio_nonce_prefix_b64")
@@ -260,8 +262,10 @@ def main() -> int:
 
             seq = struct.unpack(">I", data[consumed:consumed+4])[0]
             consumed += 4
-            block_type = data[consumed]
+            block_type_wire = data[consumed]
             consumed += 1
+            is_encrypted = (block_type_wire & 0x80) != 0
+            block_type = (block_type_wire & 0x7F)
             body_len = struct.unpack(">I", data[consumed:consumed+4])[0]
             consumed += 4
             tag_len = data[consumed]
@@ -283,7 +287,7 @@ def main() -> int:
             consumed += 32
 
             # verify chain
-            core = struct.pack(">I", seq) + bytes([block_type]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
+            core = struct.pack(">I", seq) + bytes([block_type_wire]) + struct.pack(">I", body_len) + bytes([tag_len]) + body + tag
             if seq == 1:
                 v_calc = hashlib.sha256(b"AZT1-CHAIN-V1-NONCE" + nonce_hash + core).digest()
             else:
@@ -295,11 +299,11 @@ def main() -> int:
             v_prev = v_cur
             seq_to_chain_v[seq] = v_cur
 
-            if seq == 1 and block_type != 1:
-                fail("ERR_PACKETIZATION", "block1 must be signature block")
+            if seq == 1 and (block_type != 1 or is_encrypted):
+                fail("ERR_PACKETIZATION", "block1 must be plaintext signature block")
 
-            # encryption class expectations
-            if block_type in (0, 3):
+            # encryption flag expectations
+            if is_encrypted:
                 if tag_len != 16:
                     fail("ERR_PACKETIZATION", f"encrypted block_type={block_type} must have tag_len=16")
                 nonce = nonce_prefix + struct.pack(">I", seq) + b"\x00\x00\x00\x00"
@@ -312,7 +316,7 @@ def main() -> int:
                     pcm_bytes += len(pt)
                 else:
                     telemetry_blocks += 1
-            elif block_type in (1, 2, 126, 127):
+            elif block_type in (0, 1, 2, 3, 126, 127):
                 if tag_len != 0:
                     fail("ERR_PACKETIZATION", f"plaintext block_type={block_type} must have tag_len=0")
                 if block_type == 1:
