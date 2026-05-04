@@ -8,6 +8,9 @@
 
 namespace azt {
 
+constexpr uint8_t kBlockTypeEncryptedMask = 0x80;
+constexpr uint8_t kBlockTypeIdMask = 0x7F;
+
 constexpr uint8_t kBlockTypePcmAudio = 0x00;
 constexpr uint8_t kBlockTypeSignature = 0x01;
 constexpr uint8_t kBlockTypeDroppedFrames = 0x02;

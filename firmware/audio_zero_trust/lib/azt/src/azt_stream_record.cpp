@@ -19,7 +19,7 @@ bool send_chunked(WiFiClient& client, const uint8_t* data, size_t len) {
 }
 
 static bool encrypt_payload_and_chain(StreamCtx& sc,
-                                      uint8_t block_type,
+                                      uint8_t block_type_id,
                                       const uint8_t* payload,
                                       size_t payload_len,
                                       bool encrypt_payload,
@@ -53,10 +53,12 @@ static bool encrypt_payload_and_chain(StreamCtx& sc,
     tag_len = 0;
   }
 
+  const uint8_t wire_block_type = static_cast<uint8_t>(((encrypt_payload ? kBlockTypeEncryptedMask : 0x00) | (block_type_id & kBlockTypeIdMask)));
+
   std::vector<uint8_t> core;
   core.reserve(4 + 1 + 4 + 1 + body.size() + tag_len);
   append_u32_be(core, sc.seq);
-  core.push_back(block_type);
+  core.push_back(wire_block_type);
   append_u32_be(core, static_cast<uint32_t>(body.size()));
   core.push_back(tag_len);
   core.insert(core.end(), body.begin(), body.end());
