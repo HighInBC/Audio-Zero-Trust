@@ -1,4 +1,4 @@
-# AZT1 Crypto Container (current v1 profile)
+# AZT1 Crypto Container (current v1 profile, MSB-encryption block-type encoding)
 
 This document is normative for the currently passing AZT1 file-analysis/validation flow (`client/tools/validate_azt1.py` and `client/tools/azt_client/stream.py`). If implementation and this spec diverge, update this spec in the same change.
 
@@ -70,12 +70,13 @@ Required keys used by current validators/generator:
 - `device_certificate` (JSON object, optional; full signed certificate document as returned by `/api/v0/device/certificate`)
 - `stream_auth_nonce` (string; single-use stream challenge nonce bound to stream-start authorization)
 - `ntp_time_since_last_sync_seconds` (integer; elapsed seconds since the device last synchronized time with the configured NTP time source, not a clock offset/drift value)
-- `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
+- `chunk_record_format` = `"seq_u32be|block_flags_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
+- `block_type_encoding` = `"msb_encryption_flag_v1"`
+- `block_type_encrypted_mask` = `128`
+- `block_type_id_mask` = `127`
 - `chain_alg` = `"sha256-link"`
 - `chain_domain` = `"AZT1-CHAIN-V1-NONCE"`
 - `chain_root_mode` = `"genesis-signature-block"`
-- `encrypted_block_types` = `[0,3]`
-- `plaintext_block_types` = `[1,2,126,127]`
 - `signature_checkpoint_alg` = `"ed25519"`
 - `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)"`
 - `block1_must_be_signature_ref_seq0` = `true`
@@ -113,9 +114,10 @@ Current profile expects:
 - `channels` (int > 0)
 - `sample_width_bytes` = `2`
 - `packetization` = `"none"`
-- `payload_block_types` map including ids `0..3`
-- `encrypted_block_types` = `[0,3]`
-- `plaintext_block_types` = `[1,2,126,127]`
+- `payload_block_types` map including logical type ids `0..127`
+- `block_type_encoding` = `"msb_encryption_flag_v1"`
+- `block_type_encrypted_mask` = `128`
+- `block_type_id_mask` = `127`
 - `signature_checkpoint_alg` = `"ed25519"`
 - `signature_checkpoint_domain` = `"AZT1SIG1||ref_seq_u32be||chain_v32 (ref_seq>0) ; AZT1SIG0||chain_genesis_secret32 (ref_seq=0)"`
 - `device_sign_public_key_b64` (base64 Ed25519 pubkey, 32 bytes)
@@ -125,7 +127,7 @@ Current profile expects:
 - `chain_genesis_secret_b64` (base64, 32 bytes)
 - `block1_must_be_signature_ref_seq0` = `true`
 - `chain_root_mode` = `"genesis-signature-block"`
-- `chunk_record_format` = `"seq_u32be|block_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
+- `chunk_record_format` = `"seq_u32be|block_flags_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32"`
 - `signature_block_body_format` = `"ref_seq_u32be|sig_ed25519_64"`
 - `dropped_frames_block_body_format` = `"missed_frames_u16be"`
 - `telemetry_block_body_format` (string format descriptor)
@@ -141,7 +143,7 @@ Additional metadata is allowed.
 Each chunk record:
 
 - `seq_u32be`
-- `block_type_u8`
+- `block_flags_type_u8` (`is_encrypted = (byte & 0x80) != 0`; `type_id = byte & 0x7F`)
 - `body_len_u32be`
 - `tag_len_u8`
 - `body` (`body_len` bytes)
@@ -153,14 +155,25 @@ Chain rule (`sha256-link` with nonce domain binding):
 - `nonce_hash = SHA256(stream_auth_nonce_utf8)`
 - `seq == 1`: `V = SHA256("AZT1-CHAIN-V1-NONCE" || nonce_hash || record_bytes)`
 - `seq > 1`: `V = SHA256("AZT1-CHAIN-V1-NONCE" || nonce_hash || prev_V || record_bytes)`
-- `record_bytes = seq_u32be || block_type_u8 || body_len_u32be || tag_len_u8 || body || tag`
+- `record_bytes = seq_u32be || block_flags_type_u8 || body_len_u32be || tag_len_u8 || body || tag`
 
-`block_type` classes:
+`block_type` encoding and classes:
 
-- `0x00` PCM audio block (**encrypted**, `tag_len=16`)
-- `0x01` checkpoint signature block (**plaintext**, `tag_len=0`, body len 68 expected by strict validator)
-- `0x02` dropped-frames notice (**plaintext**, `tag_len=0`, body len 2 expected by strict validator)
-- `0x03` telemetry snapshot (**encrypted**, `tag_len=16`)
+- `wire_byte = (is_encrypted ? 0x80 : 0x00) | type_id`
+- `type_id = wire_byte & 0x7F`
+- `is_encrypted = (wire_byte & 0x80) != 0`
+
+Current logical type IDs:
+
+- `type_id=0` PCM audio block (normally emitted encrypted; `tag_len=16` when encrypted)
+- `type_id=1` checkpoint signature block (plaintext; `tag_len=0`, body len 68 expected by strict validator)
+- `type_id=2` dropped-frames notice (plaintext; `tag_len=0`, body len 2 expected by strict validator)
+- `type_id=3` telemetry snapshot (normally emitted encrypted; `tag_len=16` when encrypted)
+
+Tag rule is flag-driven:
+
+- if `is_encrypted == true`, `tag_len` MUST equal `16`
+- if `is_encrypted == false`, `tag_len` MUST equal `0`
 
 Encrypted block nonce:
 
@@ -173,7 +186,7 @@ Signature block verification message:
 
 Mandatory genesis anchor rule:
 
-- `seq == 1` MUST be `block_type == 0x01` (signature block)
+- `seq == 1` MUST be a signature block (`type_id == 1` and `is_encrypted == false`)
 - block 1 MUST set `ref_seq == 0`
 - this signs encrypted-only genesis secret and prevents blind re-signing by actors without inner-header decrypt capability.
 
@@ -191,9 +204,10 @@ Mandatory genesis anchor rule:
 8. Parse chunk records to EOF (allow trailing partial bytes).
 9. Verify chain link per record (`sha256-link`, domain `AZT1-CHAIN-V1-NONCE`, nonce-bound).
 10. Enforce genesis-anchor rule: first record must be signature block with `ref_seq=0`.
-11. For encrypted block types `(0,3)`, enforce `tag_len=16` and decrypt when audio key is available.
-12. For plaintext block types `(1,2)`, enforce `tag_len=0`.
-13. For type `0x01`, verify Ed25519 checkpoint signatures (`AZT1SIG0` for `ref_seq=0`, `AZT1SIG1` otherwise) when signing key is available.
+11. Derive `is_encrypted` and `type_id` from `block_flags_type_u8` (`is_encrypted=(b&0x80)!=0`, `type_id=b&0x7F`).
+12. Enforce tag-length invariant from flag: encrypted => `tag_len=16`; plaintext => `tag_len=0`.
+13. For encrypted records, decrypt when audio key is available.
+14. For signature logical type (`type_id=1`), verify Ed25519 checkpoint signatures (`AZT1SIG0` for `ref_seq=0`, `AZT1SIG1` otherwise) when signing key is available.
 
 ---
 
