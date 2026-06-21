@@ -60,3 +60,31 @@ def test_stream_decode_passes_flags(monkeypatch, tmp_path):
     assert captured["apply_gain"] is True
     assert captured["gain"] == 1.5
     assert captured["out_wav_path"] == Path(out_path)
+
+
+def test_stream_listen_delegates(monkeypatch):
+    captured = {}
+
+    def fake_listen(**kwargs):
+        captured.update(kwargs)
+        return True, {"pcm_bytes": 4}
+
+    monkeypatch.setattr(stream_service, "device_stream_listen", fake_listen)
+
+    ok, payload = stream_service.stream_listen(
+        host="h",
+        port=8080,
+        seconds=1.0,
+        timeout=2,
+        key_path="listener.pem",
+        auth_key_path="auth.pem",
+        apply_gain=True,
+        gain=2.0,
+        pcm_callback=lambda pcm, header: None,
+    )
+
+    assert ok is True
+    assert payload["pcm_bytes"] == 4
+    assert captured["key_path"] == "listener.pem"
+    assert captured["auth_key_path"] == "auth.pem"
+    assert captured["apply_gain"] is True

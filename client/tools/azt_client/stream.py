@@ -903,3 +903,243 @@ def decode_azt1_stream_to_wav(
         "messages": messages,
         **auto_grants,
     }
+
+
+class LiveAzt1PcmDecoder:
+    def __init__(self, *, listener_private_key_pem: bytes | None, apply_gain: bool = False, gain: float | None = None):
+        self._priv = load_private_key_auto(listener_private_key_pem, purpose="listener private key") if listener_private_key_pem else None
+        self._buf = bytearray()
+        self._state = "header"
+        self._plain: dict | None = None
+        self._dec: dict | None = None
+        self._audio_key: bytes | None = None
+        self._nonce_prefix: bytes | None = None
+        self._chain_key: bytes | None = None
+        self._chain_alg = "sha256-link"
+        self._chain_domain = "AZT1-CHAIN-V1"
+        self._nonce_hash = hashlib.sha256(b"").digest()
+        self._v_prev: bytes | None = None
+        self._seq_to_chain_v: dict[int, bytes] = {}
+        self._device_sign_pub = None
+        self._chain_genesis_secret: bytes | None = None
+        self._require_block1_sig0 = False
+        self._gain_to_apply = 1.0
+        self._apply_gain = apply_gain
+        self._requested_gain = gain
+        self._header_info: dict | None = None
+        self.bytes_in = 0
+        self.pcm_bytes = 0
+        self.pcm_blocks = 0
+        self.blocks = 0
+
+    @property
+    def header_info(self) -> dict | None:
+        return self._header_info
+
+    def feed(self, data: bytes) -> list[bytes]:
+        if data:
+            self._buf.extend(data)
+            self.bytes_in += len(data)
+        out: list[bytes] = []
+        while True:
+            if self._state == "header":
+                if not self._try_parse_header():
+                    break
+            if self._state == "blocks":
+                pcm = self._try_parse_block()
+                if pcm is None:
+                    break
+                if pcm:
+                    out.append(pcm)
+        return out
+
+    def _try_parse_header(self) -> bool:
+        if len(self._buf) < 5:
+            return False
+        if not bytes(self._buf[:5]) == b"AZT1\n":
+            raise ValueError("ERR_MAGIC")
+        first_nl = self._buf.find(b"\n", 5)
+        if first_nl < 0:
+            return False
+        sig_nl = self._buf.find(b"\n", first_nl + 1)
+        if sig_nl < 0:
+            return False
+        if len(self._buf) < sig_nl + 3:
+            return False
+
+        plain_line = bytes(self._buf[5:first_nl])
+        outer_sig_b64 = bytes(self._buf[first_nl + 1 : sig_nl]).decode("utf-8")
+        plain = json.loads(plain_line.decode("utf-8"))
+        if plain.get("version") not in (0, 1):
+            raise ValueError("ERR_VERSION")
+
+        cursor = sig_nl + 1
+        enc_header_len = struct.unpack(">H", bytes(self._buf[cursor : cursor + 2]))[0]
+        cursor += 2
+
+        if enc_header_len == 0xFFFF:
+            dec_nl = self._buf.find(b"\n", cursor)
+            if dec_nl < 0:
+                return False
+            header_pt = bytes(self._buf[cursor:dec_nl])
+            cursor = dec_nl + 1
+            dec = json.loads(header_pt.decode("utf-8"))
+            next_header_mode = "decoded"
+            plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
+            if isinstance(plain_hash_b64, str) and plain_hash_b64:
+                hp = hashes.Hash(hashes.SHA256())
+                hp.update(header_pt)
+                if hp.finalize() != _b64d(plain_hash_b64):
+                    raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH")
+        else:
+            if len(self._buf) < cursor + enc_header_len:
+                return False
+            if self._priv is None:
+                raise ValueError("ERR_DECODE_KEY_REQUIRED")
+            header_ct = bytes(self._buf[cursor : cursor + enc_header_len])
+            cursor += enc_header_len
+            next_fp_hex = plain.get("next_header_recipient_key_fingerprint_hex", plain.get("header_key_fingerprint_hex"))
+            pub_der = self._priv.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+            hh = hashes.Hash(hashes.SHA256())
+            hh.update(pub_der)
+            if next_fp_hex != hh.finalize().hex():
+                raise ValueError("ERR_KEY_FP_MISMATCH")
+            wrapped = _b64d(plain.get("next_header_wrapped_key_b64", plain.get("wrapped_header_key_b64")))
+            header_key = self._priv.decrypt(wrapped, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+            header_nonce = _b64d(plain.get("next_header_nonce_b64", plain.get("header_nonce_b64")))
+            header_tag = _b64d(plain.get("next_header_tag_b64", plain.get("header_tag_b64")))
+            header_pt = AESGCM(header_key).decrypt(header_nonce, header_ct + header_tag, None)
+            dec = json.loads(header_pt.decode("utf-8"))
+            next_header_mode = "encrypted"
+            plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
+            if isinstance(plain_hash_b64, str) and plain_hash_b64:
+                hp = hashes.Hash(hashes.SHA256())
+                hp.update(header_pt)
+                if hp.finalize() != _b64d(plain_hash_b64):
+                    raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_HASH")
+
+        self._plain = plain
+        self._dec = dec
+        self._audio_key = _b64d(dec["audio_key_b64"])
+        self._nonce_prefix = _b64d(dec["audio_nonce_prefix_b64"])
+        self._chain_key = _b64d(dec["chain_key_b64"]) if "chain_key_b64" in dec else None
+        self._chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if "chain_genesis_secret_b64" in dec else None
+        dec_or_plain = dec or plain
+        self._chain_alg = str(dec_or_plain.get("chain_alg", "sha256-link"))
+        self._chain_domain = str(dec_or_plain.get("chain_domain", "AZT1-CHAIN-V1"))
+        self._nonce_hash = hashlib.sha256(str(plain.get("stream_auth_nonce") or "").encode("utf-8")).digest()
+        self._require_block1_sig0 = bool(dec_or_plain.get("block1_must_be_signature_ref_seq0") is True)
+        if "device_sign_public_key_b64" in dec:
+            self._device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(_b64d(dec["device_sign_public_key_b64"]))
+        elif isinstance(plain.get("this_header_signing_key_b64"), str) and plain.get("this_header_signing_key_b64"):
+            self._device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(_b64d(plain["this_header_signing_key_b64"]))
+        if self._device_sign_pub is not None:
+            self._device_sign_pub.verify(_b64d(outer_sig_b64), plain_line)
+
+        sample_width_bytes = int(dec_or_plain.get("sample_width_bytes", 2))
+        channels = int(dec_or_plain.get("channels", 1))
+        if sample_width_bytes != 2:
+            raise ValueError("ERR_UNSUPPORTED_SAMPLE_WIDTH")
+        if channels != 1:
+            raise ValueError("ERR_UNSUPPORTED_CHANNELS")
+        recommended_gain = float(dec_or_plain.get("recommended_decode_gain", 1.0))
+        self._gain_to_apply = float(self._requested_gain) if self._requested_gain is not None else (recommended_gain if self._apply_gain else 1.0)
+        self._header_info = {
+            "inner_header_mode": next_header_mode,
+            "sample_rate_hz": int(dec_or_plain.get("sample_rate_hz", 16000)),
+            "channels": channels,
+            "sample_width_bytes": sample_width_bytes,
+            "recommended_decode_gain": recommended_gain,
+            "gain_applied": self._gain_to_apply,
+        }
+        del self._buf[:cursor]
+        self._state = "blocks"
+        return True
+
+    def _try_parse_block(self) -> bytes | None:
+        if len(self._buf) < 10:
+            return None
+        body_len = struct.unpack(">I", bytes(self._buf[5:9]))[0]
+        tag_len = self._buf[9]
+        total_len = 10 + body_len + tag_len + 32
+        if len(self._buf) < total_len:
+            return None
+        record = bytes(self._buf[:total_len])
+        del self._buf[:total_len]
+
+        seq = struct.unpack(">I", record[:4])[0]
+        block_type_wire = record[4]
+        block_type = block_type_wire & 0x7F
+        is_encrypted = (block_type_wire & 0x80) != 0
+        body = record[10 : 10 + body_len]
+        tag = record[10 + body_len : 10 + body_len + tag_len]
+        v_cur = record[-32:]
+
+        if self._require_block1_sig0 and seq == 1 and (block_type != 0x01 or is_encrypted):
+            raise ValueError("ERR_BLOCK1_MUST_BE_SIG")
+        core = record[:-32]
+        if self._chain_alg == "sha256-link":
+            if self._chain_domain == "AZT1-CHAIN-V1-NONCE":
+                material = b"AZT1-CHAIN-V1-NONCE" + self._nonce_hash + (b"" if seq == 1 else (self._v_prev or b"")) + core
+            else:
+                material = b"AZT1-CHAIN-V1" + (b"" if seq == 1 else (self._v_prev or b"")) + core
+            if seq > 1 and self._v_prev is None:
+                raise ValueError("ERR_CHAIN_STATE")
+            if hashlib.sha256(material).digest() != v_cur:
+                raise ValueError("ERR_CHAIN")
+        elif self._chain_alg == "hmac-sha256-link":
+            if self._chain_key is None:
+                raise ValueError("ERR_CHAIN_STATE")
+            hm = hmac.HMAC(self._chain_key, hashes.SHA256())
+            hm.update(b"AZT1-CHAIN-V2")
+            if seq > 1:
+                if self._v_prev is None:
+                    raise ValueError("ERR_CHAIN_STATE")
+                hm.update(self._v_prev)
+            hm.update(core)
+            if hm.finalize() != v_cur:
+                raise ValueError("ERR_CHAIN")
+        else:
+            raise ValueError("ERR_CHAIN_ALG")
+        self._v_prev = v_cur
+        self._seq_to_chain_v[seq] = v_cur
+
+        if is_encrypted:
+            if tag_len != 16 or self._audio_key is None or self._nonce_prefix is None:
+                raise ValueError("ERR_TAG_LEN")
+            nonce = self._nonce_prefix + struct.pack(">I", seq) + b"\x00\x00\x00\x00"
+            block_body = AESGCM(self._audio_key).decrypt(nonce, body + tag, None)
+        elif block_type in (0x00, 0x01, 0x02, 0x03, 0x7E, 0x7F):
+            if tag_len != 0:
+                raise ValueError("ERR_TAG_LEN")
+            block_body = body
+        else:
+            raise ValueError(f"ERR_BLOCK_TYPE:{block_type}")
+
+        self.blocks += 1
+        if block_type == 0x00:
+            self.pcm_blocks += 1
+            self.pcm_bytes += len(block_body)
+            return self._apply_pcm_gain(block_body)
+        if block_type == 0x01 and len(block_body) >= 68 and self._device_sign_pub is not None:
+            ref_seq = struct.unpack(">I", block_body[:4])[0]
+            sig = block_body[4:68]
+            if ref_seq == 0 and self._chain_genesis_secret is not None:
+                self._device_sign_pub.verify(sig, b"AZT1SIG0" + self._chain_genesis_secret)
+            elif ref_seq in self._seq_to_chain_v:
+                self._device_sign_pub.verify(sig, b"AZT1SIG1" + struct.pack(">I", ref_seq) + self._seq_to_chain_v[ref_seq])
+        return b""
+
+    def _apply_pcm_gain(self, pcm: bytes) -> bytes:
+        if self._gain_to_apply == 1.0:
+            return pcm
+        chunk = bytearray()
+        for i in range(0, len(pcm), 2):
+            s = int.from_bytes(pcm[i : i + 2], "little", signed=True)
+            sg = int(round(s * self._gain_to_apply))
+            if sg > 32767:
+                sg = 32767
+            elif sg < -32768:
+                sg = -32768
+            chunk.extend(int(sg).to_bytes(2, "little", signed=True))
+        return bytes(chunk)

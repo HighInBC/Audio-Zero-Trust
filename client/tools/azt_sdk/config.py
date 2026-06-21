@@ -91,6 +91,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
         "attestation-verify",
         "stream-redirect-check",
         "stream-read",
+        "stream-listen",
         "stream-terminate",
         "tls-cert-issue",
         "tls-status",
@@ -113,11 +114,20 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
     if command == "stream-redirect-check" and "stream_port" in conf_defaults:
         _set_if_unset(args, "stream_port", int(conf_defaults["stream_port"]))
 
-    if command in {"apply-config", "config-patch", "certificate-issue", "certificate-revoke", "key-match-check", "reboot-device", "tls-cert-issue", "tls-bootstrap", "stream-read", "stream-terminate"}:
+    if command in {"apply-config", "config-patch", "certificate-issue", "certificate-revoke", "key-match-check", "reboot-device", "tls-cert-issue", "tls-bootstrap", "stream-read", "stream-listen", "stream-terminate"}:
         # stream-read has two key roles:
         # - key_path: admin cert-verification key (trusted recording gate)
         # - auth_key_path: recorder-auth stream challenge signer (when required)
         if command == "stream-read":
+            if "recorder_key_path" in conf_defaults:
+                _set_if_unset(args, "auth_key_path", str(conf_defaults["recorder_key_path"]))
+            elif "recorder_auth_creds_dir" in conf_defaults and _is_unset(args, "auth_key_path"):
+                _set_if_unset(args, "auth_key_path", str(Path(str(conf_defaults["recorder_auth_creds_dir"])) / "private_key.pem"))
+        if command == "stream-listen":
+            if "listener_key_path" in conf_defaults:
+                _set_if_unset(args, "key_path", str(conf_defaults["listener_key_path"]))
+            elif "listener_creds_dir" in conf_defaults and _is_unset(args, "key_path"):
+                _set_if_unset(args, "key_path", str(Path(str(conf_defaults["listener_creds_dir"])) / "private_key.pem"))
             if "recorder_key_path" in conf_defaults:
                 _set_if_unset(args, "auth_key_path", str(conf_defaults["recorder_key_path"]))
             elif "recorder_auth_creds_dir" in conf_defaults and _is_unset(args, "auth_key_path"):
@@ -128,7 +138,7 @@ def apply_defaults_to_args(args: argparse.Namespace, conf_defaults: dict[str, An
                 _set_if_unset(args, "key_path", str(conf_defaults["recorder_key_path"]))
             elif "recorder_auth_creds_dir" in conf_defaults and _is_unset(args, "key_path"):
                 _set_if_unset(args, "key_path", str(Path(str(conf_defaults["recorder_auth_creds_dir"])) / "private_key.pem"))
-        if _is_unset(args, "key_path"):
+        if command != "stream-listen" and _is_unset(args, "key_path"):
             if "admin_key_path" in conf_defaults:
                 _set_if_unset(args, "key_path", str(conf_defaults["admin_key_path"]))
             elif "admin_creds_dir" in conf_defaults and _is_unset(args, "key_path"):

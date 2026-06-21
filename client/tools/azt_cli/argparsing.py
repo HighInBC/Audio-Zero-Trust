@@ -432,6 +432,23 @@ def build_parser(handlers: argparse.Namespace) -> argparse.ArgumentParser:
     sprobe.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
     sprobe.set_defaults(func=handlers.cmd_stream_probe, command_name="stream-read")
 
+    slisten = sub.add_parser(
+        "stream-listen",
+        help="Live-decrypt microphone stream and play it locally",
+    )
+    slisten.add_argument("--host", required=False, default="", help="Device host/IP")
+    slisten.add_argument("--port", type=int, default=8080, help="Device API port")
+    slisten.add_argument("--seconds", type=float, default=None, help="Optional listen duration seconds; omit to run indefinitely")
+    slisten.add_argument("--key", dest="key_path", default="", help="Listener private key PEM used to decrypt live audio")
+    slisten.add_argument("--auth-key", dest="auth_key_path", default="", help="Recorder-auth private key PEM used to sign stream challenge when required")
+    slisten.add_argument("--apply-gain", action="store_true", help="Apply recommended stream decode gain")
+    slisten.add_argument("--gain", type=float, default=None, help="Explicit PCM gain multiplier")
+    slisten.add_argument("--no-play", action="store_true", help="Do not play audio locally; use with --raw-out")
+    slisten.add_argument("--raw-out", default="", help="Optional output path for raw signed 16-bit little-endian PCM; use - for stdout")
+    slisten.add_argument("--timeout", type=int, default=10, help="HTTP timeout seconds")
+    slisten.add_argument("--json", dest="as_json", action="store_true", help="Emit machine-readable JSON envelope")
+    slisten.set_defaults(func=handlers.cmd_stream_listen, command_name="stream-listen")
+
     sterm = sub.add_parser("stream-terminate", help="Gracefully terminate active stream by stored or explicit stream nonce")
     sterm.add_argument("--host", required=False, default="", help="Device host/IP")
     sterm.add_argument("--port", type=int, default=8080, help="Device API port")

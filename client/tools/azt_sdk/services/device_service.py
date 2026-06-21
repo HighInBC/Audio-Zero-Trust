@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from tools.azt_client.crypto import load_private_key_auto
 
 from tools.azt_client.crypto import ed25519_fp_hex_from_private_key, load_private_key_auto
+from tools.azt_client.stream import LiveAzt1PcmDecoder
 import os
 
 from tools.azt_client.http import get_json, http_json, urlopen_with_tls, requests_verify_for_url
@@ -520,6 +521,128 @@ def stream_read(*, host: str, port: int, seconds: float | None, timeout: int, ou
 def stream_probe(*, host: str, port: int, seconds: float | None, timeout: int) -> tuple[bool, dict]:
     # Back-compat wrapper for older callers.
     return stream_read(host=host, port=port, seconds=seconds, timeout=timeout, out_path=None, probe=True)
+
+
+def stream_listen(
+    *,
+    host: str,
+    port: int,
+    seconds: float | None,
+    timeout: int,
+    key_path: str,
+    auth_key_path: str | None = None,
+    apply_gain: bool = False,
+    gain: float | None = None,
+    pcm_callback=None,
+) -> tuple[bool, dict]:
+    api_b = base_url(host=host, port=port, scheme=_api_scheme())
+    stream_b = base_url(host=host, port=8081, scheme="http")
+    import time
+
+    if not str(key_path or "").strip():
+        return False, {"error": "STREAM_LISTEN_ARGS", "detail": "listener key_path is required"}
+    try:
+        listener_key_pem = Path(str(key_path)).read_bytes()
+    except Exception as e:
+        return False, {"error": "STREAM_LISTEN_KEY", "detail": _error_detail(where="device_service.stream_listen.key", exc=e)}
+
+    params: dict[str, str] = {}
+    planned_duration_stop = bool((seconds is not None) and (seconds > 0))
+    if planned_duration_stop:
+        params["seconds"] = str(max(1, int(math.ceil(float(seconds)))))
+
+    nonce = ""
+    try:
+        challenge = get_json(f"{api_b}/api/v0/device/stream/challenge", timeout=timeout)
+    except Exception as e:
+        return False, {
+            "error": "STREAM_CHALLENGE_FAILED",
+            "detail": _error_detail(where="device_service.stream_listen.challenge", exc=e, url=f"{api_b}/api/v0/device/stream/challenge"),
+        }
+    nonce = str((challenge or {}).get("nonce") or "").strip()
+    if not nonce:
+        return False, {"error": "STREAM_CHALLENGE_FAILED", "detail": "missing nonce"}
+    params["nonce"] = nonce
+    if bool((challenge or {}).get("recorder_auth_required")):
+        signing_key_path = (str(auth_key_path).strip() if auth_key_path else "") or (str(key_path).strip() if key_path else "")
+        if not signing_key_path:
+            return False, {"error": "STREAM_AUTH_KEY_REQUIRED", "detail": "device requires recorder auth signature; provide --auth-key"}
+        try:
+            priv = load_private_key_auto(Path(signing_key_path), purpose=signing_key_path)
+            if not isinstance(priv, ed25519.Ed25519PrivateKey):
+                return False, {"error": "STREAM_AUTH_KEY", "detail": "recorder auth key must be Ed25519 private key"}
+            signer_fp = ed25519_fp_hex_from_private_key(Path(signing_key_path))
+            device_fp = str((challenge or {}).get("device_sign_fingerprint_hex") or "").strip().lower()
+            msg = f"stream:{nonce}:{device_fp}".encode("utf-8")
+            sig_b64 = base64.b64encode(priv.sign(msg)).decode("ascii")
+            params.update({"sig_alg": "ed25519", "sig": sig_b64, "signer_fp": signer_fp})
+        except Exception as e:
+            return False, {
+                "error": "STREAM_AUTH_KEY",
+                "detail": _error_detail(where="device_service.stream_listen.auth", exc=e, context={"auth_key_path": signing_key_path}),
+            }
+
+    url = f"{stream_b}/stream"
+    if params:
+        url = f"{url}?{urlencode(params)}"
+
+    decoder = LiveAzt1PcmDecoder(listener_private_key_pem=listener_key_pem, apply_gain=apply_gain, gain=gain)
+    total_pcm = 0
+    header_info = None
+    try:
+        r = requests.get(url, stream=True, timeout=timeout, verify=requests_verify_for_url(url))
+    except (requests.RequestException, TimeoutError, OSError) as e:
+        return False, {"error": "STREAM_LISTEN_REQUEST_FAILED", "detail": _error_detail(where="device_service.stream_listen", exc=e, url=url)}
+    except Exception as e:
+        return False, {"error": "STREAM_LISTEN_REQUEST_FAILED", "detail": _error_detail(where="device_service.stream_listen", exc=e, url=url)}
+
+    try:
+        start = time.time()
+        for chunk in r.iter_content(chunk_size=4096):
+            if not chunk:
+                continue
+            for pcm in decoder.feed(chunk):
+                if header_info is None and decoder.header_info is not None:
+                    header_info = dict(decoder.header_info)
+                total_pcm += len(pcm)
+                if pcm_callback is not None and pcm:
+                    pcm_callback(pcm, header_info or {})
+            elapsed = time.time() - start
+            if planned_duration_stop and elapsed >= (float(seconds) + 8.0):
+                break
+            if seconds is not None and not planned_duration_stop and elapsed >= seconds:
+                break
+    except (requests.RequestException, OSError, ValueError) as e:
+        return False, {
+            "error": "STREAM_LISTEN_FAILED",
+            "detail": _error_detail(where="device_service.stream_listen.iter", exc=e, url=url),
+            "bytes": decoder.bytes_in,
+            "pcm_bytes": total_pcm,
+        }
+    except Exception as e:
+        return False, {
+            "error": "STREAM_LISTEN_FAILED",
+            "detail": _error_detail(where="device_service.stream_listen.iter", exc=e, url=url),
+            "bytes": decoder.bytes_in,
+            "pcm_bytes": total_pcm,
+        }
+    finally:
+        r.close()
+
+    elapsed = time.time() - start
+    payload = {
+        "bytes": decoder.bytes_in,
+        "pcm_bytes": total_pcm,
+        "pcm_blocks": decoder.pcm_blocks,
+        "blocks": decoder.blocks,
+        "seconds": elapsed,
+        "requested_seconds": seconds,
+        "url": url,
+        "stream_auth_nonce": nonce,
+    }
+    if header_info is not None:
+        payload.update(header_info)
+    return total_pcm > 0, payload
 
 
 def stream_terminate(*, host: str, port: int, timeout: int, key_path: str, stream_auth_nonce: str, reason_code: int = 2, message_json: dict | None = None) -> tuple[bool, dict]:

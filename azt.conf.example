@@ -34,6 +34,7 @@ defaults:
   # admin_creds_dir: client/tools/provisioned/admin-admin
   # firmware_key_path: client/tools/provisioned/firmware-master/private_key.pem
   # firmware_creds_dir: client/tools/provisioned/firmware-master
+  # listener_key_path: client/tools/provisioned/decode-listener/private_key.pem
   # listener_creds_dir: client/tools/provisioned/decode-listener
   # wifi_ssid: "YourWiFi"
   # wifi_password: "YourPassword"
@@ -52,4 +53,3 @@ defaults:
   # auto_decode_target_key: client/tools/provisioned/admin-HighInBC/
   # ca_key_path: client/tools/pki/ca_private_key.pem
   # ca_cert_path: client/tools/pki/ca_cert.pem
-
