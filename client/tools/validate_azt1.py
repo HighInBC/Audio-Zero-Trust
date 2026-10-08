@@ -254,6 +254,7 @@ def main() -> int:
         trailing_partial_bytes = 0
         v_prev = None
         seq_to_chain_v: dict[int, bytes] = {}
+        expected_seq = 1
 
         while consumed < len(data):
             if consumed + 10 > len(data):
@@ -278,6 +279,10 @@ def main() -> int:
                 break
             if finalize_seen:
                 fail("ERR_PACKETIZATION", "finalize block must be last")
+            # A recording has one genesis; never allow a later record to reset it.
+            if seq != expected_seq:
+                fail("ERR_SEQUENCE", f"expected seq={expected_seq}, got seq={seq}")
+            expected_seq += 1
 
             body = data[consumed:consumed+body_len]
             consumed += body_len

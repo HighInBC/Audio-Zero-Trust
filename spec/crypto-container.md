@@ -150,6 +150,13 @@ Each chunk record:
 - `tag` (`tag_len` bytes)
 - `chain_v32` (32-byte SHA-256 link)
 
+Record sequence numbers MUST start at 1 and increase by exactly one for every
+complete record, regardless of type or encryption. Readers MUST reject zero,
+gaps, duplicates, decreases, and wraparound before chain verification or audio
+processing. Genesis is permitted only at the start of a recording; a later
+`seq == 1` MUST NOT reset the chain. Incomplete trailing records retain the
+crash-recovery behavior described below.
+
 Chain rule (`sha256-link` with nonce domain binding):
 
 - `nonce_hash = SHA256(stream_auth_nonce_utf8)`

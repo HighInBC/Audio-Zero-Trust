@@ -202,6 +202,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     frames = pcm_bytes = pcm_blocks = sig_blocks = sig_verified = 0
     dropped_notice_blocks = dropped_frames_total = telemetry_blocks = 0
     seq_to_chain_v: dict[int, bytes] = {}
+    expected_seq = 1
     max_verified_ref_seq = 0
     finalize_seen = False
 
@@ -224,6 +225,10 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             break
         if finalize_seen:
             raise ValueError("ERR_FINALIZE_NOT_LAST")
+        # A recording has one genesis; never allow a later record to reset it.
+        if seq != expected_seq:
+            raise ValueError("ERR_SEQUENCE")
+        expected_seq += 1
 
         body = data[off : off + body_len]
         off += body_len
@@ -615,6 +620,7 @@ def decode_azt1_stream_to_wav(
     close_message_text = ""
     close_message = None
     seq_to_chain_v: dict[int, bytes] = {}
+    expected_seq = 1
     record_seqs: list[int] = []
     max_verified_ref_seq = 0
     finalize_seen = False
@@ -637,6 +643,10 @@ def decode_azt1_stream_to_wav(
             break
         if finalize_seen:
             raise ValueError("ERR_FINALIZE_NOT_LAST")
+        # A recording has one genesis; never allow a later record to reset it.
+        if seq != expected_seq:
+            raise ValueError("ERR_SEQUENCE")
+        expected_seq += 1
         body = data[off : off + body_len]
         off += body_len
         tag = data[off : off + tag_len]
@@ -919,6 +929,7 @@ class LiveAzt1PcmDecoder:
         self._chain_domain = "AZT1-CHAIN-V1"
         self._nonce_hash = hashlib.sha256(b"").digest()
         self._v_prev: bytes | None = None
+        self._expected_seq = 1
         self._seq_to_chain_v: dict[int, bytes] = {}
         self._device_sign_pub = None
         self._chain_genesis_secret: bytes | None = None
@@ -1068,6 +1079,10 @@ class LiveAzt1PcmDecoder:
         del self._buf[:total_len]
 
         seq = struct.unpack(">I", record[:4])[0]
+        # Persist sequence continuity across feed calls, including genesis.
+        if seq != self._expected_seq:
+            raise ValueError("ERR_SEQUENCE")
+        self._expected_seq += 1
         block_type_wire = record[4]
         block_type = block_type_wire & 0x7F
         is_encrypted = (block_type_wire & 0x80) != 0
