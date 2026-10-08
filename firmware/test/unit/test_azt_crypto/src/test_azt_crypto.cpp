@@ -1,6 +1,7 @@
 #include "test_azt_registry.h"
 
 #include <mbedtls/base64.h>
+#include <sodium.h>
 
 #include <array>
 #include <vector>
@@ -20,6 +21,35 @@ bool b64_decode_to_vec(const String& in, std::vector<uint8_t>& out) {
   }
   out.resize(olen);
   return true;
+}
+
+bool test_finalize_domain_separation(Context&) {
+  if (sodium_init() < 0) return false;
+  uint8_t pk[32], sk[64], sig[64], checkpoint_sig[64];
+  if (crypto_sign_ed25519_keypair(pk, sk) != 0) return false;
+  uint8_t chain[32];
+  for (size_t i = 0; i < sizeof(chain); ++i) chain[i] = static_cast<uint8_t>(i);
+  if (!azt::sign_stream_finalize(0x01020304, chain, sk, sig)) return false;
+
+  // Independent wire message: exact ASCII domain, big-endian reference, chain.
+  std::vector<uint8_t> final_msg = {'A','Z','T','1','F','I','N','A','L','1'};
+  final_msg.insert(final_msg.end(), {1, 2, 3, 4});
+  final_msg.insert(final_msg.end(), chain, chain + 32);
+  if (crypto_sign_ed25519_verify_detached(sig, final_msg.data(), final_msg.size(), pk) != 0) return false;
+
+  std::vector<uint8_t> checkpoint = {'A','Z','T','1','S','I','G','1',1,2,3,4};
+  checkpoint.insert(checkpoint.end(), chain, chain + 32);
+  unsigned long long sig_len = 0;
+  if (crypto_sign_ed25519_detached(checkpoint_sig, &sig_len, checkpoint.data(), checkpoint.size(), sk) != 0) return false;
+  // Relabeling a checkpoint and recomputing its public chain cannot change its signed domain.
+  if (crypto_sign_ed25519_verify_detached(checkpoint_sig, final_msg.data(), final_msg.size(), pk) == 0) return false;
+  if (crypto_sign_ed25519_verify_detached(sig, checkpoint.data(), checkpoint.size(), pk) == 0) return false;
+  final_msg[10] ^= 1;
+  if (crypto_sign_ed25519_verify_detached(sig, final_msg.data(), final_msg.size(), pk) == 0) return false;
+  final_msg[10] ^= 1;
+  final_msg.back() ^= 1;
+  if (crypto_sign_ed25519_verify_detached(sig, final_msg.data(), final_msg.size(), pk) == 0) return false;
+  return !azt::sign_stream_finalize(0, chain, sk, sig);
 }
 
 bool test_hex_lower(Context&) {
@@ -142,6 +172,7 @@ bool test_pubkey_fingerprint_deterministic(Context& ctx) {
 }  // namespace
 
 void register_test_azt_crypto(Registry& out) {
+  out.push_back({"FINALIZE_DOMAIN_SEPARATION", test_finalize_domain_separation, "finalize signature domain or binding mismatch"});
   out.push_back({"HEX_LOWER", test_hex_lower, "hex conversion mismatch"});
   out.push_back({"HEX_LOWER_EMPTY", test_hex_lower_empty, "hex empty conversion mismatch"});
   out.push_back({"APPEND_BE", test_append_be, "big-endian append mismatch"});

@@ -13,7 +13,6 @@ struct TelemetrySnapshotV1;
 struct StreamCtx {
   uint8_t audio_key[32];
   uint8_t nonce_prefix[4];
-  uint8_t chain_key[32];
   uint8_t chain_genesis_secret[32];
   uint8_t chain_nonce_hash[32];
   uint8_t v_prev[32];

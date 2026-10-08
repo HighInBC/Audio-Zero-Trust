@@ -21,7 +21,6 @@ bool build_header_prefix(StreamCtx& sc,
   out_prefix.clear();
   esp_fill_random(sc.audio_key, sizeof(sc.audio_key));
   esp_fill_random(sc.nonce_prefix, sizeof(sc.nonce_prefix));
-  memset(sc.chain_key, 0, sizeof(sc.chain_key));
   esp_fill_random(sc.chain_genesis_secret, sizeof(sc.chain_genesis_secret));
   memset(sc.chain_nonce_hash, 0, sizeof(sc.chain_nonce_hash));
   {
@@ -68,6 +67,8 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"chain_root_mode\":\"genesis-signature-block\",";
   dec_header += "\"chunk_record_format\":\"seq_u32be|block_flags_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32\",";
   dec_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
+  dec_header += "\"finalize_signature_profile\":\"azt-finalize-v1\",";
+  dec_header += "\"finalize_signature_domain\":\"AZT1FINAL1||ref_seq_u32be||chain_v32\",";
   dec_header += "\"finalize_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   dec_header += "\"message_block_body_format\":\"ver_u8|reason_code_u8|text_len_u16be|utf8_text\",";
   dec_header += "\"message_reason_code_map\":{\"0\":\"normal_end\",\"1\":\"audio_degraded_reinit\",\"2\":\"requested_shutdown_or_termination\"},";
@@ -105,7 +106,7 @@ bool build_header_prefix(StreamCtx& sc,
   dec_header += "\"block_type 0x02 is dropped frame notice; block_body is missed_frames_u16be and means that many PCM frames were intentionally skipped due to network backpressure.\",";
   dec_header += "\"block_type 0x03 is telemetry snapshot; use telemetry_block_body_format to parse ring-buffer occupancy stats.\",";
   dec_header += "\"block_type 0x7E is message; use message_block_body_format for close reason metadata.\",";
-  dec_header += "\"block_type 0x7F is finalize signature; body format matches signature_block_body_format and MUST be the last record.\",";
+  dec_header += "\"block_type 0x7F is finalize signature; body format matches signature_block_body_format, domain is AZT1FINAL1, ref_seq must equal the positive immediately preceding sequence, and it MUST be the last record.\",";
   dec_header += "\"Untrusted listeners estimate frames as COUNT(block_type=0) + SUM_DROPPED(block_type=2), then multiply by audio_frame_duration_ms.\"";
   dec_header += "]";
   dec_header += "}";
@@ -142,7 +143,7 @@ bool build_header_prefix(StreamCtx& sc,
   String plain_header = "{";
   plain_header += "\"version\":0,";
   plain_header += "\"container_major\":0,";
-  plain_header += "\"container_minor\":0,";
+  plain_header += "\"container_minor\":2,";
   plain_header += "\"next_header_key_wrap\":\"rsa-oaep-sha256\",";
   plain_header += "\"next_header_cipher\":\"aes-256-gcm\",";
   plain_header += "\"next_header_wrapped_key_b64\":\"" + b64(wrapped_header_key.data(), wrapped_header_key.size()) + "\",";
@@ -199,6 +200,8 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"block_type_id_mask\":127,";
   plain_header += "\"block_type_map\":{\"0\":\"pcm_audio\",\"1\":\"ed25519_checkpoint_signature\",\"2\":\"dropped_frames_notice\",\"3\":\"telemetry_snapshot\",\"126\":\"message\",\"127\":\"finalize_signature\"},";
   plain_header += "\"signature_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
+  plain_header += "\"finalize_signature_profile\":\"azt-finalize-v1\",";
+  plain_header += "\"finalize_signature_domain\":\"AZT1FINAL1||ref_seq_u32be||chain_v32\",";
   plain_header += "\"finalize_block_body_format\":\"ref_seq_u32be|sig_ed25519_64\",";
   plain_header += "\"message_block_body_format\":\"ver_u8|reason_code_u8|text_len_u16be|utf8_text\",";
   plain_header += "\"message_reason_code_map\":{\"0\":\"normal_end\",\"1\":\"audio_degraded_reinit\",\"2\":\"requested_shutdown_or_termination\"},";
@@ -250,7 +253,7 @@ bool build_header_prefix(StreamCtx& sc,
   plain_header += "\"Remaining bytes are chunk records: seq_u32be|block_flags_type_u8|body_len_u32be|tag_len_u8|body|tag|chain_v32.\",";
   plain_header += "\"Silently discard trailing partial/incomplete chunk records at end-of-file.\",";
   plain_header += "\"If unsigned tail blocks exist after the last verified checkpoint, warn the user that end-of-audio content is unsigned and may be tampered.\",";
-  plain_header += "\"If block_type=127 (finalize) is present, require it to be the final record and verify its signature against AZT1SIG1||ref_seq_u32be||chain_v32(ref_seq).\"";
+  plain_header += "\"If block_type=127 (finalize) is present, require it to be the final record, require ref_seq > 0 and ref_seq == seq - 1, and verify its signature against AZT1FINAL1||ref_seq_u32be||chain_v32(ref_seq).\"";
   plain_header += "]";
   plain_header += "}";
 

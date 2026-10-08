@@ -5,6 +5,7 @@
 #include <sodium.h>
 
 #include "azt_crypto.h"
+#include "azt_stream_limits.h"
 
 namespace azt {
 
@@ -26,6 +27,11 @@ static bool encrypt_payload_and_chain(StreamCtx& sc,
                                       std::vector<uint8_t>& rec_out,
                                       uint8_t out_v_new[32]) {
   rec_out.clear();
+  // Reject before increment/encryption so a sequence can never wrap or reuse a nonce.
+  const uint32_t limit = block_type_id == kBlockTypeFinalize ? UINT32_MAX
+                         : block_type_id == kBlockTypeMessage ? UINT32_MAX - 1
+                         : kMaxStreamDataSequence;
+  if (sc.seq >= limit) return false;
   sc.seq += 1;
 
   std::vector<uint8_t> body;

@@ -13,6 +13,9 @@ void append_u16_be(std::vector<uint8_t>& out, uint16_t v);
 void append_u32_be(std::vector<uint8_t>& out, uint32_t v);
 
 bool sha256_bytes(const uint8_t* msg, size_t msg_len, uint8_t out32[32]);
+// Finalization intent is distinct from a checkpoint; ref_seq must be positive.
+bool sign_stream_finalize(uint32_t ref_seq, const uint8_t chain_v[32],
+                          const uint8_t sign_sk[64], uint8_t sig64[64]);
 bool compute_pubkey_spki_sha256_hex(const String& pub_pem, String& out_hex);
 bool rsa_oaep_sha256_encrypt_pub(const uint8_t* pub_pem,
                                  size_t pub_len,

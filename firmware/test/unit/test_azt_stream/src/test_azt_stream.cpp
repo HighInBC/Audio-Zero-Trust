@@ -10,6 +10,26 @@
 namespace azt_test {
 namespace {
 
+bool test_record_limit_preserves_finalization(Context&) {
+  azt::StreamCtx sc{};
+  sc.seq = UINT32_MAX - 3;
+  std::vector<uint8_t> rec;
+  if (!azt::encrypt_dropped_frames_block_and_chain(sc, 1, rec)) return false;
+  if (sc.seq != UINT32_MAX - 2) return false;
+  const uint8_t pcm[2] = {0, 0};
+  if (azt::encrypt_audio_chunk_and_chain(sc, pcm, sizeof(pcm), rec, nullptr)) return false;
+  if (!rec.empty() || sc.seq != UINT32_MAX - 2) return false;
+  if (azt::encrypt_dropped_frames_block_and_chain(sc, 1, rec)) return false;
+  const uint8_t message[] = {'e','n','d'};
+  if (!azt::encrypt_message_block_and_chain(sc, 2, message, sizeof(message), rec)) return false;
+  if (sc.seq != UINT32_MAX - 1) return false;
+  const uint8_t sig[64] = {0}; // Framing test; signature verification is tested separately.
+  if (!azt::encrypt_finalize_block_and_chain(sc, sc.seq, sig, rec)) return false;
+  if (sc.seq != UINT32_MAX || rec[4] != azt::kBlockTypeFinalize) return false;
+  if (azt::encrypt_finalize_block_and_chain(sc, sc.seq, sig, rec)) return false;
+  return sc.seq == UINT32_MAX && rec.empty();
+}
+
 bool test_parse_seconds(Context&) {
   return azt::parse_seconds_from_path("/stream") == 0 &&
          azt::parse_seconds_from_path("/stream?seconds=10") == 10 &&
@@ -459,6 +479,7 @@ bool test_stream_signer_submit_then_immediate_stop_is_safe(Context&) {
 }  // namespace
 
 void register_test_azt_stream(Registry& out) {
+  out.push_back({"RECORD_LIMIT_FINALIZATION", test_record_limit_preserves_finalization, "record limit must reserve closing records and prevent wrap"});
   out.push_back({"PARSE_SECONDS", test_parse_seconds, "parse_seconds behavior mismatch"});
   out.push_back({"PARSE_SIGNBENCH_FLAG", test_parse_signbench_flag, "sigbench parser mismatch"});
   out.push_back({"PARSE_DROP_TEST_FRAMES", test_parse_drop_test_frames, "drop_test_frames parser mismatch"});

@@ -16,6 +16,7 @@
 #include "azt_device_io.h"
 #include "azt_kv_store.h"
 #include "azt_stream_header.h"
+#include "azt_stream_limits.h"
 #include "azt_stream_record.h"
 #include "azt_stream_signer.h"
 
@@ -136,17 +137,7 @@ static bool emit_stream_close_and_finalize(WiFiClient& client,
 
   const uint32_t ref_seq = sc.seq;
   unsigned char sig[crypto_sign_ed25519_BYTES] = {0};
-  unsigned long long sig_len = 0;
-  uint8_t msg[8 + 4 + 32];
-  memcpy(msg, "AZT1SIG1", 8);
-  msg[8] = static_cast<uint8_t>((ref_seq >> 24) & 0xFF);
-  msg[9] = static_cast<uint8_t>((ref_seq >> 16) & 0xFF);
-  msg[10] = static_cast<uint8_t>((ref_seq >> 8) & 0xFF);
-  msg[11] = static_cast<uint8_t>(ref_seq & 0xFF);
-  memcpy(msg + 12, sc.v_prev, 32);
-
-  if (crypto_sign_ed25519_detached(sig, &sig_len, msg, sizeof(msg), sign_sk) != 0 ||
-      sig_len != crypto_sign_ed25519_BYTES) {
+  if (!sign_stream_finalize(ref_seq, sc.v_prev, sign_sk, sig)) {
     return false;
   }
 
@@ -528,6 +519,12 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
          (!finite_stream || static_cast<uint64_t>(esp_timer_get_time()) < deadline)) {
     const uint64_t t1 = static_cast<uint64_t>(esp_timer_get_time());
 
+    if (stream_limit_reached(t1 - stream_start_us, sc.seq)) {
+      close_reason_code = kCloseReasonRequestedShutdown;
+      close_reason_text = make_close_reason_json("stream_lifetime_limit");
+      break;
+    }
+
     if (started_with_certificate && !is_active_certificate_serial(started_certificate_serial)) {
       close_reason_code = kCloseReasonRequestedShutdown;
       close_reason_text = make_close_reason_json("certificate_revoked_or_rotated");
@@ -700,6 +697,11 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     process_us += (t2 - t1);
   }
 
+  if (sc.seq >= kMaxStreamDataSequence) {
+    close_reason_code = kCloseReasonRequestedShutdown;
+    close_reason_text = make_close_reason_json("stream_record_limit");
+  }
+
   if (g_stream_shutdown_requested && !trigger_audio_reinit) {
     // Preserve more specific causes set earlier in the loop.
     if (close_reason_code == kCloseReasonNormalEnd) {
@@ -717,7 +719,7 @@ static void handle_stream_impl(WiFiClient& client, int seconds, const AppState& 
     close_reason_text = make_close_reason_json("client_disconnected");
   }
 
-  while (client.connected() && pending_dropped_frames > 0) {
+  while (client.connected() && pending_dropped_frames > 0 && sc.seq < kMaxStreamDataSequence) {
     uint16_t emit = static_cast<uint16_t>(std::min<uint32_t>(pending_dropped_frames, 0xFFFF));
     if (!encrypt_dropped_frames_block_and_chain(sc, emit, rec)) break;
     if (!send_chunked(client, rec.data(), rec.size())) break;

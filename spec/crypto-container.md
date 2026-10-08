@@ -47,7 +47,7 @@ Required keys used by current validators/generator:
 
 - `version` = `0`
 - `container_major` = `0`
-- `container_minor` = non-negative integer (currently `0`)
+- `container_minor` = non-negative integer (`0` for historical firmware, `2` for authenticated-finalization firmware)
 - `next_header_key_wrap` = `"rsa-oaep-sha256"`
 - `next_header_cipher` = `"aes-256-gcm"`
 - `next_header_wrapped_key_b64` (base64)
@@ -237,3 +237,57 @@ Current `client/tools/validate_azt1.py` categories include:
 - `0xFFFF` next-header sentinel mode is supported and used for detached/decode workflows.
 - This document describes current passing behavior; keep synchronized with validator + firmware header builder.
 - Repository-wide compatibility governance is defined in `spec/compatibility-policy.md`.
+
+
+## Authenticated finalization extension: `azt-finalize-v1` (October 2026)
+
+The historical shared checkpoint/finalize signing domain is legacy. It does not
+authenticate termination intent: truncating at a checkpoint, changing its type to
+127 and recomputing its terminal public chain preserves the signature. Valid
+legacy prefix signatures remain evidence of that prefix, not of normal termination.
+
+New Android and firmware writers declare BOTH `finalize_signature_profile="azt-finalize-v1"`
+and `finalize_signature_domain="AZT1FINAL1||ref_seq_u32be||chain_v32"` in the
+signed outer and committed inner headers. Type 127 MUST verify over literal ASCII
+`AZT1FINAL1` followed by the four big-endian reference bytes and 32 referenced chain
+bytes. The reference must be positive and exactly the immediately previous record.
+Body framing, genesis and checkpoint domains are unchanged. Never retry a legacy
+domain on failure. Both declarations must agree; unknown or partial declarations
+are errors. Absence in both headers selects legacy, never authenticated finalization.
+Current Android and firmware writers report container 0.2, but the named signed
+profile controls the cryptographic semantics. Historical firmware output remains
+legacy. Older decoders need updating to accept new finalizers.
+
+### Firmware migration and compatibility
+
+Firmware now writes container 0.2 with `azt-finalize-v1` in both headers and signs
+finalizers with `AZT1FINAL1`. Checkpoint and genesis messages are unchanged.
+
+| Writer output | Reader requirement | Termination evidence |
+| --- | --- | --- |
+| Historical firmware 0.0 | Historical or current reader | Legacy marker, no authenticated ending intent |
+| Current firmware 0.2 | Reader supporting `azt-finalize-v1` | Verified finalizer authenticates ending intent |
+
+Update readers before deploying this firmware. Readers must retain historical
+read support without presenting legacy finalizers as authenticated endings. No
+API version changes are introduced by this named container-profile extension.
+
+Genesis uses a fresh 32-byte `esp_fill_random` secret per stream, committed by the
+signed outer header through the inner-header hashes. The initial zeroed `v_prev`
+is not included in record 1's hash input. The obsolete zero-filled `chain_key`
+field was unused and has been removed; this does not change wire bytes.
+
+### Firmware stream lifetime limit
+
+Firmware ends each stream after at most three 365-day years (94,608,000 seconds)
+of monotonic elapsed streaming time. A shorter requested duration still applies.
+At the limit it sends a type 126 closing message with cause
+`stream_lifetime_limit`, followed by the authenticated type 127 finalizer and
+closes the HTTP stream. Delivery requires a working connection; a failed delivery
+still leaves an unfinished recording, not a fabricated successful finalization.
+
+Independently, ordinary records stop at sequence `0xFFFFFFFD`. The remaining two
+sequence values are reserved for a closing message and finalizer; this earlier
+ending reports `stream_record_limit`. Record generation rejects counter overflow
+before encryption. A subsequent stream starts with fresh key material. This is a
+firmware writer policy and does not invalidate longer historical recordings.

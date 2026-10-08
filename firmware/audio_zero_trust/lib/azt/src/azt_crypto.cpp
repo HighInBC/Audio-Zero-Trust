@@ -147,6 +147,24 @@ bool verify_ed25519_signature_b64(const String& pub_b64,
                                              pub.data()) == 0;
 }
 
+bool sign_stream_finalize(uint32_t ref_seq, const uint8_t chain_v[32],
+                          const uint8_t sign_sk[64], uint8_t sig64[64]) {
+  if (ref_seq == 0) return false;
+  // Literal ASCII domain, without a terminating NUL.
+  static const char domain[] = "AZT1FINAL1";
+  constexpr size_t domain_len = sizeof(domain) - 1;
+  uint8_t msg[domain_len + 4 + 32];
+  memcpy(msg, domain, domain_len);
+  msg[domain_len] = static_cast<uint8_t>(ref_seq >> 24);
+  msg[domain_len + 1] = static_cast<uint8_t>(ref_seq >> 16);
+  msg[domain_len + 2] = static_cast<uint8_t>(ref_seq >> 8);
+  msg[domain_len + 3] = static_cast<uint8_t>(ref_seq);
+  memcpy(msg + domain_len + 4, chain_v, 32);
+  unsigned long long sig_len = 0;
+  return crypto_sign_ed25519_detached(sig64, &sig_len, msg, sizeof(msg), sign_sk) == 0 &&
+         sig_len == crypto_sign_ed25519_BYTES;
+}
+
 bool aes256_gcm_encrypt(const uint8_t* key32,
                         const uint8_t* nonce12,
                         const uint8_t* plaintext,
