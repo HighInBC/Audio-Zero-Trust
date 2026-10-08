@@ -9,9 +9,10 @@ from urllib.request import urlopen
 
 from cryptography.hazmat.primitives import hashes, hmac, serialization
 import hashlib
-from cryptography.hazmat.primitives.asymmetric import ed25519, padding
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tools.azt_client.crypto import load_private_key_auto
+from tools.azt_client.signatures import stream_signing_key, signature_body_size, finalize_domain, finalization_info, load_container_json
 
 
 def fetch_stream_sample(host: str, port: int, seconds: int, out_path: Path) -> dict:
@@ -67,7 +68,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     if nl < 0:
         raise ValueError("ERR_HEADER_JSON")
     plain_line = data[off:nl]
-    plain = json.loads(plain_line.decode("utf-8"))
+    plain = load_container_json(plain_line)
     off = nl + 1
 
     sig_nl = data.find(b"\n", off)
@@ -106,7 +107,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_FORMAT")
         header_pt = data[off:dec_nl]
         off = dec_nl + 1
-        dec = json.loads(header_pt.decode("utf-8"))
+        dec = load_container_json(header_pt)
 
         plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
         if not isinstance(plain_hash_b64, str) or not plain_hash_b64:
@@ -138,7 +139,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             header_nonce = _b64d(plain.get("next_header_nonce_b64", plain.get("header_nonce_b64")))
             header_tag = _b64d(plain.get("next_header_tag_b64", plain.get("header_tag_b64")))
             header_pt = AESGCM(header_key).decrypt(header_nonce, header_ct + header_tag, None)
-            dec = json.loads(header_pt.decode("utf-8"))
+            dec = load_container_json(header_pt)
 
             plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
             if not isinstance(plain_hash_b64, str) or not plain_hash_b64:
@@ -158,13 +159,9 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None
     require_block1_sig0 = bool((dec or plain).get("block1_must_be_signature_ref_seq0") is True)
 
-    device_sign_pub = None
-    if dec is not None and "device_sign_public_key_b64" in dec:
-        device_sign_pub_raw = _b64d(dec["device_sign_public_key_b64"])
-        device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
-    elif isinstance(plain.get("this_header_signing_key_b64"), str) and plain.get("this_header_signing_key_b64"):
-        device_sign_pub_raw = _b64d(plain.get("this_header_signing_key_b64"))
-        device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
+    device_sign_pub = stream_signing_key(plain, dec)
+    sig_body_size = signature_body_size(device_sign_pub)
+    final_domain = finalize_domain(plain, dec)
 
     header_sig_verified = False
     if device_sign_pub is not None:
@@ -180,7 +177,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         if not isinstance(cert_payload_b64, str) or not cert_payload_b64:
             raise ValueError("ERR_DEVICE_CERT_SCHEMA")
         cert_payload_raw = _b64d(cert_payload_b64)
-        cert_payload = json.loads(cert_payload_raw.decode("utf-8"))
+        cert_payload = load_container_json(cert_payload_raw)
         if cert_payload.get("device_sign_public_key_b64") != dec.get("device_sign_public_key_b64"):
             raise ValueError("ERR_DEVICE_CERT_BINDING")
         cert_fp = cert_payload.get("device_sign_fingerprint_hex")
@@ -205,10 +202,12 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
     expected_seq = 1
     max_verified_ref_seq = 0
     finalize_seen = False
+    finalize_signature_verified = False
 
     record_types: list[int] = []
     record_seqs: list[int] = []
     while off < len(data):
+        record_start = off
         if off + 10 > len(data):
             break
         seq = struct.unpack(">I", data[off : off + 4])[0]
@@ -222,6 +221,7 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         tag_len = data[off]
         off += 1
         if off + body_len + tag_len + 32 > len(data):
+            off = record_start
             break
         if finalize_seen:
             raise ValueError("ERR_FINALIZE_NOT_LAST")
@@ -302,29 +302,28 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             pcm_bytes += len(block_body)
             pcm_blocks += 1
         elif block_type == 0x01:
+            if len(block_body) != sig_body_size:
+                raise ValueError("ERR_SIGNATURE_LENGTH")
             sig_blocks += 1
             if require_block1_sig0 and seq == 1:
-                if len(block_body) < 68:
-                    raise ValueError("ERR_BLOCK1_SIG_FORMAT")
                 first_ref = struct.unpack(">I", block_body[:4])[0]
                 if first_ref != 0:
                     raise ValueError("ERR_BLOCK1_SIG_REF")
-            if len(block_body) >= 68:
-                ref_seq = struct.unpack(">I", block_body[:4])[0]
-                sig = block_body[4:68]
-                if device_sign_pub is not None:
-                    if ref_seq == 0:
-                        if chain_genesis_secret is None:
-                            raise ValueError("ERR_GENESIS_SECRET_MISSING")
+            ref_seq = struct.unpack(">I", block_body[:4])[0]
+            sig = block_body[4:sig_body_size]
+            if device_sign_pub is not None:
+                if ref_seq == 0:
+                    # Public validation can verify later checkpoints but not the encrypted genesis secret.
+                    if chain_genesis_secret is not None:
                         msg = b"AZT1SIG0" + chain_genesis_secret
                         device_sign_pub.verify(sig, msg)
                         sig_verified += 1
-                    elif ref_seq in seq_to_chain_v:
-                        msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
-                        device_sign_pub.verify(sig, msg)
-                        sig_verified += 1
-                        if ref_seq > max_verified_ref_seq:
-                            max_verified_ref_seq = ref_seq
+                elif ref_seq in seq_to_chain_v:
+                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                    device_sign_pub.verify(sig, msg)
+                    sig_verified += 1
+                    if ref_seq > max_verified_ref_seq:
+                        max_verified_ref_seq = ref_seq
         elif block_type == 0x02:
             dropped_notice_blocks += 1
             if len(block_body) >= 2:
@@ -335,15 +334,16 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
             pass
         elif block_type == 0x7F:
             finalize_seen = True
-            if len(block_body) < 68:
+            if len(block_body) != sig_body_size:
                 raise ValueError("ERR_FINALIZE_FORMAT")
             ref_seq = struct.unpack(">I", block_body[:4])[0]
-            sig = block_body[4:68]
-            if ref_seq == 0 or ref_seq not in seq_to_chain_v:
+            sig = block_body[4:sig_body_size]
+            if ref_seq != seq - 1 or ref_seq == 0 or ref_seq not in seq_to_chain_v:
                 raise ValueError("ERR_FINALIZE_REF")
             if device_sign_pub is not None:
-                msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                msg = final_domain + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
                 device_sign_pub.verify(sig, msg)
+                finalize_signature_verified = header_sig_verified
                 sig_verified += 1
                 if ref_seq > max_verified_ref_seq:
                     max_verified_ref_seq = ref_seq
@@ -437,6 +437,8 @@ def validate_azt1_stream_chain(data: bytes, admin_private_key_pem: bytes | None 
         "recommended_decode_gain": float(dec_or_plain.get("recommended_decode_gain", 0.0)),
         "raw_capture_declared": any(isinstance(n, str) and "raw I2S capture" in n for n in (dec_or_plain.get("decoder_notes") or [])),
         "unsigned_tail_bytes": unsigned_tail_bytes,
+        **finalization_info(final_domain, finalize_seen, finalize_signature_verified),
+        "last_verified_ref_seq": max_verified_ref_seq,
         "unsigned_tail_start_seq": unsigned_tail_start_seq,
         "unsigned_tail_blocks": unsigned_tail_blocks,
         "unsigned_tail_pcm_blocks": unsigned_tail_pcm_blocks,
@@ -472,7 +474,7 @@ def decode_azt1_stream_to_wav(
     if nl < 0:
         raise ValueError("ERR_HEADER_JSON")
     plain_line = data[off:nl]
-    plain = json.loads(plain_line.decode("utf-8"))
+    plain = load_container_json(plain_line)
     off = nl + 1
 
     sig_nl = data.find(b"\n", off)
@@ -511,7 +513,7 @@ def decode_azt1_stream_to_wav(
             raise ValueError("ERR_PLAINTEXT_NEXT_HEADER_FORMAT")
         header_pt = data[off:dec_nl]
         off = dec_nl + 1
-        dec = json.loads(header_pt.decode("utf-8"))
+        dec = load_container_json(header_pt)
 
         plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
         if not isinstance(plain_hash_b64, str) or not plain_hash_b64:
@@ -542,7 +544,7 @@ def decode_azt1_stream_to_wav(
             header_nonce = _b64d(plain.get("next_header_nonce_b64", plain.get("header_nonce_b64")))
             header_tag = _b64d(plain.get("next_header_tag_b64", plain.get("header_tag_b64")))
             header_pt = AESGCM(header_key).decrypt(header_nonce, header_ct + header_tag, None)
-            dec = json.loads(header_pt.decode("utf-8"))
+            dec = load_container_json(header_pt)
 
             plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
             if not isinstance(plain_hash_b64, str) or not plain_hash_b64:
@@ -561,13 +563,9 @@ def decode_azt1_stream_to_wav(
     chain_genesis_secret = _b64d(dec["chain_genesis_secret_b64"]) if (dec is not None and "chain_genesis_secret_b64" in dec) else None
     require_block1_sig0 = bool((dec or plain).get("block1_must_be_signature_ref_seq0") is True)
 
-    device_sign_pub = None
-    if dec is not None and "device_sign_public_key_b64" in dec:
-        device_sign_pub_raw = _b64d(dec["device_sign_public_key_b64"])
-        device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
-    elif isinstance(plain.get("this_header_signing_key_b64"), str) and plain.get("this_header_signing_key_b64"):
-        device_sign_pub_raw = _b64d(plain.get("this_header_signing_key_b64"))
-        device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
+    device_sign_pub = stream_signing_key(plain, dec)
+    sig_body_size = signature_body_size(device_sign_pub)
+    final_domain = finalize_domain(plain, dec)
 
     header_sig_verified = False
     if device_sign_pub is not None:
@@ -582,7 +580,7 @@ def decode_azt1_stream_to_wav(
         if not isinstance(cert_payload_b64, str) or not cert_payload_b64:
             raise ValueError("ERR_DEVICE_CERT_SCHEMA")
         cert_payload_raw = _b64d(cert_payload_b64)
-        cert_payload = json.loads(cert_payload_raw.decode("utf-8"))
+        cert_payload = load_container_json(cert_payload_raw)
         if cert_payload.get("device_sign_public_key_b64") != dec.get("device_sign_public_key_b64"):
             raise ValueError("ERR_DEVICE_CERT_BINDING")
         cert_fp = cert_payload.get("device_sign_fingerprint_hex")
@@ -624,9 +622,11 @@ def decode_azt1_stream_to_wav(
     record_seqs: list[int] = []
     max_verified_ref_seq = 0
     finalize_seen = False
+    finalize_signature_verified = False
     pcm_chunks: list[tuple[int, bytes]] = []
 
     while off < len(data):
+        record_start = off
         if off + 10 > len(data):
             break
         seq = struct.unpack(">I", data[off : off + 4])[0]
@@ -640,6 +640,7 @@ def decode_azt1_stream_to_wav(
         tag_len = data[off]
         off += 1
         if off + body_len + tag_len + 32 > len(data):
+            off = record_start
             break
         if finalize_seen:
             raise ValueError("ERR_FINALIZE_NOT_LAST")
@@ -728,29 +729,28 @@ def decode_azt1_stream_to_wav(
                     chunk.extend(int(sg).to_bytes(2, "little", signed=True))
                 pcm_chunks.append((seq, bytes(chunk)))
         elif block_type == 0x01:
+            if len(block_body) != sig_body_size:
+                raise ValueError("ERR_SIGNATURE_LENGTH")
             sig_blocks += 1
             if require_block1_sig0 and seq == 1:
-                if len(block_body) < 68:
-                    raise ValueError("ERR_BLOCK1_SIG_FORMAT")
                 first_ref = struct.unpack(">I", block_body[:4])[0]
                 if first_ref != 0:
                     raise ValueError("ERR_BLOCK1_SIG_REF")
-            if len(block_body) >= 68:
-                ref_seq = struct.unpack(">I", block_body[:4])[0]
-                sig = block_body[4:68]
-                if device_sign_pub is not None:
-                    if ref_seq == 0:
-                        if chain_genesis_secret is None:
-                            raise ValueError("ERR_GENESIS_SECRET_MISSING")
+            ref_seq = struct.unpack(">I", block_body[:4])[0]
+            sig = block_body[4:sig_body_size]
+            if device_sign_pub is not None:
+                if ref_seq == 0:
+                    # Public validation can verify later checkpoints but not the encrypted genesis secret.
+                    if chain_genesis_secret is not None:
                         msg = b"AZT1SIG0" + chain_genesis_secret
                         device_sign_pub.verify(sig, msg)
                         sig_verified += 1
-                    elif ref_seq in seq_to_chain_v:
-                        msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
-                        device_sign_pub.verify(sig, msg)
-                        sig_verified += 1
-                        if ref_seq > max_verified_ref_seq:
-                            max_verified_ref_seq = ref_seq
+                elif ref_seq in seq_to_chain_v:
+                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                    device_sign_pub.verify(sig, msg)
+                    sig_verified += 1
+                    if ref_seq > max_verified_ref_seq:
+                        max_verified_ref_seq = ref_seq
         elif block_type == 0x02:
             dropped_notice_blocks += 1
             if len(block_body) >= 2:
@@ -771,15 +771,16 @@ def decode_azt1_stream_to_wav(
                     close_message = None
         elif block_type == 0x7F:
             finalize_seen = True
-            if len(block_body) < 68:
+            if len(block_body) != sig_body_size:
                 raise ValueError("ERR_FINALIZE_FORMAT")
             ref_seq = struct.unpack(">I", block_body[:4])[0]
-            sig = block_body[4:68]
-            if ref_seq == 0 or ref_seq not in seq_to_chain_v:
+            sig = block_body[4:sig_body_size]
+            if ref_seq != seq - 1 or ref_seq == 0 or ref_seq not in seq_to_chain_v:
                 raise ValueError("ERR_FINALIZE_REF")
             if device_sign_pub is not None:
-                msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
+                msg = final_domain + struct.pack(">I", ref_seq) + seq_to_chain_v[ref_seq]
                 device_sign_pub.verify(sig, msg)
+                finalize_signature_verified = header_sig_verified
                 sig_verified += 1
                 if ref_seq > max_verified_ref_seq:
                     max_verified_ref_seq = ref_seq
@@ -898,6 +899,8 @@ def decode_azt1_stream_to_wav(
         "wav_bytes": len(pcm_out_bytes),
         "bytes_total": len(data),
         "bytes_consumed": off,
+        **finalization_info(final_domain, finalize_seen, finalize_signature_verified),
+        "last_verified_ref_seq": max_verified_ref_seq,
         "unsigned_tail_start_seq": unsigned_tail_start_seq,
         "unsigned_tail_blocks": unsigned_tail_blocks,
         "unsigned_tail_pcm_blocks": unsigned_tail_pcm_blocks,
@@ -932,6 +935,9 @@ class LiveAzt1PcmDecoder:
         self._expected_seq = 1
         self._seq_to_chain_v: dict[int, bytes] = {}
         self._device_sign_pub = None
+        self._finalize_seen = False
+        self._finalize_signature_verified = False
+        self._final_domain = b"AZT1SIG1"
         self._chain_genesis_secret: bytes | None = None
         self._require_block1_sig0 = False
         self._gain_to_apply = 1.0
@@ -942,6 +948,10 @@ class LiveAzt1PcmDecoder:
         self.pcm_bytes = 0
         self.pcm_blocks = 0
         self.blocks = 0
+
+    @property
+    def finalization_info(self) -> dict:
+        return finalization_info(self._final_domain, self._finalize_seen, self._finalize_signature_verified)
 
     @property
     def header_info(self) -> dict | None:
@@ -980,7 +990,7 @@ class LiveAzt1PcmDecoder:
 
         plain_line = bytes(self._buf[5:first_nl])
         outer_sig_b64 = bytes(self._buf[first_nl + 1 : sig_nl]).decode("utf-8")
-        plain = json.loads(plain_line.decode("utf-8"))
+        plain = load_container_json(plain_line)
         if plain.get("version") not in (0, 1):
             raise ValueError("ERR_VERSION")
 
@@ -994,7 +1004,7 @@ class LiveAzt1PcmDecoder:
                 return False
             header_pt = bytes(self._buf[cursor:dec_nl])
             cursor = dec_nl + 1
-            dec = json.loads(header_pt.decode("utf-8"))
+            dec = load_container_json(header_pt)
             next_header_mode = "decoded"
             plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
             if isinstance(plain_hash_b64, str) and plain_hash_b64:
@@ -1020,7 +1030,7 @@ class LiveAzt1PcmDecoder:
             header_nonce = _b64d(plain.get("next_header_nonce_b64", plain.get("header_nonce_b64")))
             header_tag = _b64d(plain.get("next_header_tag_b64", plain.get("header_tag_b64")))
             header_pt = AESGCM(header_key).decrypt(header_nonce, header_ct + header_tag, None)
-            dec = json.loads(header_pt.decode("utf-8"))
+            dec = load_container_json(header_pt)
             next_header_mode = "encrypted"
             plain_hash_b64 = plain.get("next_header_plaintext_sha256_b64")
             if isinstance(plain_hash_b64, str) and plain_hash_b64:
@@ -1040,10 +1050,9 @@ class LiveAzt1PcmDecoder:
         self._chain_domain = str(dec_or_plain.get("chain_domain", "AZT1-CHAIN-V1"))
         self._nonce_hash = hashlib.sha256(str(plain.get("stream_auth_nonce") or "").encode("utf-8")).digest()
         self._require_block1_sig0 = bool(dec_or_plain.get("block1_must_be_signature_ref_seq0") is True)
-        if "device_sign_public_key_b64" in dec:
-            self._device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(_b64d(dec["device_sign_public_key_b64"]))
-        elif isinstance(plain.get("this_header_signing_key_b64"), str) and plain.get("this_header_signing_key_b64"):
-            self._device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(_b64d(plain["this_header_signing_key_b64"]))
+        self._device_sign_pub = stream_signing_key(plain, dec)
+        self._sig_body_size = signature_body_size(self._device_sign_pub)
+        self._final_domain = finalize_domain(plain, dec)
         if self._device_sign_pub is not None:
             self._device_sign_pub.verify(_b64d(outer_sig_b64), plain_line)
 
@@ -1075,6 +1084,8 @@ class LiveAzt1PcmDecoder:
         total_len = 10 + body_len + tag_len + 32
         if len(self._buf) < total_len:
             return None
+        if self._finalize_seen:
+            raise ValueError("ERR_FINALIZE_NOT_LAST")
         record = bytes(self._buf[:total_len])
         del self._buf[:total_len]
 
@@ -1136,13 +1147,22 @@ class LiveAzt1PcmDecoder:
             self.pcm_blocks += 1
             self.pcm_bytes += len(block_body)
             return self._apply_pcm_gain(block_body)
-        if block_type == 0x01 and len(block_body) >= 68 and self._device_sign_pub is not None:
+        if block_type in (0x01, 0x7F):
+            if len(block_body) != self._sig_body_size:
+                raise ValueError("ERR_SIGNATURE_LENGTH")
             ref_seq = struct.unpack(">I", block_body[:4])[0]
-            sig = block_body[4:68]
-            if ref_seq == 0 and self._chain_genesis_secret is not None:
-                self._device_sign_pub.verify(sig, b"AZT1SIG0" + self._chain_genesis_secret)
-            elif ref_seq in self._seq_to_chain_v:
-                self._device_sign_pub.verify(sig, b"AZT1SIG1" + struct.pack(">I", ref_seq) + self._seq_to_chain_v[ref_seq])
+            if (seq == 1 and ref_seq != 0) or (block_type == 0x7F and (ref_seq == 0 or ref_seq != seq - 1)):
+                raise ValueError("ERR_SIGNATURE_REF")
+            if self._device_sign_pub is not None:
+                if ref_seq == 0 and self._chain_genesis_secret is not None:
+                    self._device_sign_pub.verify(block_body[4:], b"AZT1SIG0" + self._chain_genesis_secret)
+                elif 0 < ref_seq < seq and ref_seq in self._seq_to_chain_v:
+                    self._device_sign_pub.verify(block_body[4:], (self._final_domain if block_type == 0x7F else b"AZT1SIG1") + struct.pack(">I", ref_seq) + self._seq_to_chain_v[ref_seq])
+                else:
+                    raise ValueError("ERR_SIGNATURE_REF")
+            if block_type == 0x7F:
+                self._finalize_seen = True
+                self._finalize_signature_verified = self._device_sign_pub is not None
         return b""
 
     def _apply_pcm_gain(self, pcm: bytes) -> bytes:

@@ -14,9 +14,10 @@ from __future__ import annotations
 import argparse, base64, json, struct, sys, hashlib
 from pathlib import Path
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519, padding
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tools.azt_client.crypto import load_private_key_auto
+from tools.azt_client.signatures import stream_signing_key, signature_body_size, finalize_domain, finalization_info, load_container_json
 
 
 class SpecError(Exception):
@@ -77,7 +78,7 @@ def main() -> int:
         if nl < 0:
             fail("ERR_HEADER_JSON", "missing plaintext header newline")
         plain_line = data[off:nl]
-        plain = json.loads(plain_line.decode("utf-8"))
+        plain = load_container_json(plain_line)
         off = nl + 1
 
         # Plain-header expectations
@@ -146,7 +147,7 @@ def main() -> int:
                 fail("ERR_ENC_HEADER_LENGTH", "plaintext next header sentinel set but missing newline-terminated JSON")
             header_pt = data[off:dec_nl]
             off = dec_nl + 1
-            dec = json.loads(header_pt.decode("utf-8"))
+            dec = load_container_json(header_pt)
         else:
             if off + enc_header_len > len(data):
                 fail("ERR_ENC_HEADER_LENGTH", "truncated encrypted header")
@@ -179,7 +180,7 @@ def main() -> int:
             except Exception as e:
                 fail("ERR_ENC_HEADER_DECRYPT", f"header aes-gcm failed: {e}")
 
-            dec = json.loads(header_pt.decode("utf-8"))
+            dec = load_container_json(header_pt)
 
         hh_plain = hashes.Hash(hashes.SHA256())
         hh_plain.update(header_pt)
@@ -200,7 +201,7 @@ def main() -> int:
             cert_payload_b64 = reqs(cert_doc, "certificate_payload_b64")
             cert_payload_raw = b64d(cert_payload_b64, "device_certificate.certificate_payload_b64")
             try:
-                cert_payload = json.loads(cert_payload_raw.decode("utf-8"))
+                cert_payload = load_container_json(cert_payload_raw)
             except Exception as e:
                 fail("ERR_HEADER_FIELD", f"device_certificate payload json invalid: {e}")
             if not isinstance(cert_payload, dict):
@@ -233,10 +234,19 @@ def main() -> int:
         if len(audio_key) != 32 or len(nonce_prefix) != 4 or len(chain_genesis_secret) != 32:
             fail("ERR_ENC_HEADER_JSON", "invalid key/nonce/genesis fields")
 
-        device_sign_pub_raw = b64d(reqs(dec, "device_sign_public_key_b64"), "device_sign_public_key_b64")
-        device_sign_pub = ed25519.Ed25519PublicKey.from_public_bytes(device_sign_pub_raw)
+        try:
+            device_sign_pub = stream_signing_key(plain, dec)
+        except ValueError as e:
+            fail("ERR_SIGNATURE_PROFILE", str(e))
+        if device_sign_pub is None:
+            fail("ERR_HEADER_FIELD", "signing key missing")
+        sig_body_size = signature_body_size(device_sign_pub)
+        final_domain = finalize_domain(plain, dec)
         # verify outer header signature over raw plain header json bytes
-        device_sign_pub.verify(outer_sig, plain_line)
+        try:
+            device_sign_pub.verify(outer_sig, plain_line)
+        except Exception as e:
+            fail("ERR_SIGNATURE", f"outer header signature verification failed: {e}")
 
         stream_auth_nonce = str(plain.get("stream_auth_nonce") or "")
         nonce_hash = hashlib.sha256(stream_auth_nonce.encode("utf-8")).digest()
@@ -248,6 +258,7 @@ def main() -> int:
         sig_blocks = 0
         sig_verified = 0
         finalize_seen = False
+        finalize_signature_verified = False
         telemetry_blocks = 0
         pcm_bytes = 0
         consumed = off
@@ -326,8 +337,8 @@ def main() -> int:
                     fail("ERR_PACKETIZATION", f"plaintext block_type={block_type} must have tag_len=0")
                 if block_type == 1:
                     sig_blocks += 1
-                    if len(body) != 68:
-                        fail("ERR_PACKETIZATION", f"signature block len must be 68, got {len(body)}")
+                    if len(body) != sig_body_size:
+                        fail("ERR_PACKETIZATION", f"signature block len must be {sig_body_size}, got {len(body)}")
                     ref_seq = struct.unpack(">I", body[:4])[0]
                     sig = body[4:]
                     if seq == 1 and ref_seq != 0:
@@ -354,19 +365,20 @@ def main() -> int:
                         fail("ERR_PACKETIZATION", f"message block len must be >=4, got {len(body)}")
                 elif block_type == 127:
                     finalize_seen = True
-                    if len(body) != 68:
-                        fail("ERR_PACKETIZATION", f"finalize block len must be 68, got {len(body)}")
+                    if len(body) != sig_body_size:
+                        fail("ERR_PACKETIZATION", f"finalize block len must be {sig_body_size}, got {len(body)}")
                     ref_seq = struct.unpack(">I", body[:4])[0]
-                    if ref_seq == 0:
-                        fail("ERR_PACKETIZATION", "finalize ref_seq must be >0")
+                    if ref_seq == 0 or ref_seq != seq - 1:
+                        fail("ERR_PACKETIZATION", "finalize ref_seq must be positive and immediately previous")
                     ref_v = seq_to_chain_v.get(ref_seq)
                     if ref_v is None:
                         fail("ERR_PACKETIZATION", f"finalize ref_seq={ref_seq} not seen yet")
-                    msg = b"AZT1SIG1" + struct.pack(">I", ref_seq) + ref_v
+                    msg = final_domain + struct.pack(">I", ref_seq) + ref_v
                     try:
                         device_sign_pub.verify(body[4:], msg)
                     except Exception as e:
                         fail("ERR_SIGNATURE", f"finalize signature verify failed at seq={seq}: {e}")
+                    finalize_signature_verified = True
                     sig_verified += 1
             else:
                 fail("ERR_PACKETIZATION", f"unknown block_type={block_type}")
@@ -396,6 +408,7 @@ def main() -> int:
 
         out = {
             "ok": True,
+            **finalization_info(final_domain, finalize_seen, finalize_signature_verified),
             "infile": args.infile,
             "frames": frames,
             "pcm_blocks": pcm_blocks,
@@ -424,6 +437,11 @@ def main() -> int:
     except SpecError as e:
         out = {"ok": False, "error": e.category, "detail": e.detail}
         print(json.dumps(out, indent=2) if args.json else f"{e.category}: {e.detail}", file=sys.stdout if args.json else sys.stderr)
+        return 1
+
+    except ValueError as e:
+        out = {"ok": False, "error": "ERR_FORMAT", "detail": str(e)}
+        print(json.dumps(out, indent=2) if args.json else f"ERR_FORMAT: {e}", file=sys.stdout if args.json else sys.stderr)
         return 1
 
 
